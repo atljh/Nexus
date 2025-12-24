@@ -9,6 +9,7 @@ cryptg==0.4.0
 
 # Database
 sqlalchemy==2.0.36
+greenlet>=3.0.0
 alembic==1.14.0
 aiosqlite==0.20.0
 
@@ -26,7 +27,7 @@ python-dotenv==1.0.1
 loguru==0.7.3
 
 # Session import
-tdesktop-decrypter>=0.2.0
+telegram-desktop-decrypter @ git+https://github.com/ntqbit/tdesktop-decrypter.git
 
 # Build
-pyinstaller==6.11.1
+pyinstaller>=6.15.0

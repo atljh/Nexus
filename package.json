@@ -2,7 +2,7 @@
   "name": "nexus",
   "version": "1.0.0",
   "description": "Desktop app for Telegram automation",
-  "main": "dist-electron/main/index.js",
+  "main": "dist-electron/main/main.js",
   "author": "Nexus",
   "license": "UNLICENSED",
   "private": true,
@@ -71,5 +71,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron"]
   }
 }
