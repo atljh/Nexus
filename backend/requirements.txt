@@ -26,7 +26,7 @@ python-dotenv==1.0.1
 loguru==0.7.3
 
 # Session import
-opentele==1.17.3
+tdesktop-decrypter>=0.2.0
 
 # Build
 pyinstaller==6.11.1
