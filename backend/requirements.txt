@@ -1,0 +1,32 @@
+# API Framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.19
+
+# Telegram
+telethon==1.37.0
+cryptg==0.4.0
+
+# Database
+sqlalchemy==2.0.36
+alembic==1.14.0
+aiosqlite==0.20.0
+
+# Validation & Settings
+pydantic==2.10.3
+pydantic-settings==2.7.0
+
+# Proxy
+aiohttp==3.11.11
+aiohttp-socks==0.9.1
+python-socks[asyncio]==2.7.1
+
+# Utils
+python-dotenv==1.0.1
+loguru==0.7.3
+
+# Session import
+opentele==1.17.3
+
+# Build
+pyinstaller==6.11.1
