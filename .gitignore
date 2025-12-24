@@ -48,6 +48,10 @@ tmp/
 temp/
 .cache/
 
+# Markdown (except README)
+*.md
+!README.md
+
 # Test
 coverage/
 .nyc_output/
