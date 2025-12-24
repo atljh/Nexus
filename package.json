@@ -13,7 +13,9 @@
     "build:mac": "vue-tsc --noEmit && vite build && electron-builder --mac",
     "preview": "vite preview",
     "lint": "eslint . --ext .vue,.js,.ts,.tsx",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit",
+    "setup": "./scripts/setup.sh",
+    "start": "./scripts/dev.sh"
   },
   "dependencies": {
     "vue": "^3.5.13",
@@ -23,7 +25,8 @@
     "primevue": "^4.2.5",
     "@primevue/themes": "^4.2.5",
     "primeicons": "^7.0.0",
-    "axios": "^1.7.9"
+    "axios": "^1.7.9",
+    "form-data": "^4.0.1"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",
