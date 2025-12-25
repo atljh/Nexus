@@ -52,10 +52,3 @@ const api = {
 }
 
 contextBridge.exposeInMainWorld('api', api)
-
-// Type declarations for renderer
-declare global {
-  interface Window {
-    api: typeof api
-  }
-}

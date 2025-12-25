@@ -12,20 +12,25 @@ const stats = ref({
   comments: { today: 0, tasks: 0 }
 })
 
+interface Account { id: number; status: string }
+interface ProxyItem { id: number; status: string }
+interface AccountsResponse { data: Account[] }
+interface ProxiesResponse { data: ProxyItem[] }
+
 onMounted(async () => {
   try {
     const [accountsRes, proxiesRes] = await Promise.all([
-      window.api.get('/api/accounts'),
-      window.api.get('/api/proxy')
+      window.api.get('/api/accounts') as Promise<AccountsResponse>,
+      window.api.get('/api/proxy') as Promise<ProxiesResponse>
     ])
 
     const accounts = accountsRes.data || []
     const proxies = proxiesRes.data || []
 
     stats.value.accounts.total = accounts.length
-    stats.value.accounts.active = accounts.filter((a: any) => a.status === 'valid').length
+    stats.value.accounts.active = accounts.filter((a: Account) => a.status === 'valid').length
     stats.value.proxies.total = proxies.length
-    stats.value.proxies.working = proxies.filter((p: any) => p.status === 'valid').length
+    stats.value.proxies.working = proxies.filter((p: ProxyItem) => p.status === 'valid').length
   } catch (error) {
     console.error('Failed to load stats:', error)
   }

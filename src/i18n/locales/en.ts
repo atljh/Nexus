@@ -10,6 +10,8 @@ export default {
     export: 'Export',
     close: 'Close',
     confirm: 'Confirm',
+    create: 'Create',
+    confirmation: 'Confirmation',
     yes: 'Yes',
     no: 'No',
     loading: 'Loading...',
@@ -22,7 +24,8 @@ export default {
     status: 'Status',
     type: 'Type',
     never: 'Never',
-    optional: 'optional'
+    optional: 'optional',
+    color: 'Color'
   },
 
   nav: {
@@ -123,8 +126,44 @@ export default {
       checkFailed: 'Check Failed',
       checkingAll: 'Checking all accounts in background',
       deleted: 'Account deleted successfully',
-      deleteFailed: 'Failed to delete account'
+      deleteFailed: 'Failed to delete account',
+      bulkSuccess: 'Action completed for {count} accounts'
+    },
+
+    allStatuses: 'All statuses',
+    searchPlaceholder: 'Search by username, phone...',
+    filterByStatus: 'Filter by status',
+    selected: 'Selected: {count}',
+    bulkDeleteConfirm: 'Delete {count} accounts?',
+
+    bulk: {
+      actions: 'Actions',
+      check: 'Check',
+      setProxy: 'Set Proxy',
+      noProxy: 'No Proxy',
+      setGroup: 'Set Group',
+      noGroup: 'No Group',
+      delete: 'Delete'
     }
+  },
+
+  groups: {
+    title: 'Groups',
+    allAccounts: 'All Accounts',
+    create: 'Create Group',
+    name: 'Name',
+    namePlaceholder: 'Enter group name',
+    created: 'Group created',
+    deleted: 'Group deleted'
+  },
+
+  tags: {
+    title: 'Tags',
+    create: 'Create Tag',
+    name: 'Name',
+    namePlaceholder: 'Enter tag name',
+    created: 'Tag created',
+    deleted: 'Tag deleted'
   },
 
   proxy: {

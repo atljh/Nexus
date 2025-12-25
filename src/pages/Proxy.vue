@@ -58,10 +58,12 @@ onMounted(() => {
   loadProxies()
 })
 
+interface ProxiesResponse { data: Proxy[] }
+
 async function loadProxies() {
   loading.value = true
   try {
-    const response = await window.api.get('/api/proxy')
+    const response = await window.api.get('/api/proxy') as ProxiesResponse
     proxies.value = response.data || []
   } catch (error) {
     console.error('Failed to load proxies:', error)
@@ -84,9 +86,12 @@ function getStatusSeverity(status: string): "success" | "danger" | "warn" | "sec
   }
 }
 
+interface CheckResult { status: string; valid?: boolean }
+interface CheckAllResult { checked: number }
+
 async function checkProxy(proxy: Proxy) {
   try {
-    const response = await window.api.post(`/api/proxy/${proxy.id}/check`)
+    const response = await window.api.post(`/api/proxy/${proxy.id}/check`, {}) as CheckResult
 
     toast.add({
       severity: response.status === 'valid' ? 'success' : 'error',
@@ -116,7 +121,7 @@ async function checkAllProxies() {
   })
 
   try {
-    const response = await window.api.post('/api/proxy/check-all')
+    const response = await window.api.post('/api/proxy/check-all', {}) as CheckAllResult
 
     toast.add({
       severity: 'success',
@@ -138,6 +143,8 @@ async function checkAllProxies() {
   }
 }
 
+interface BulkCreateResult { created: number }
+
 async function addProxy() {
   // Handle bulk import
   if (bulkProxies.value.trim()) {
@@ -147,7 +154,7 @@ async function addProxy() {
       const response = await window.api.post('/api/proxy/bulk', {
         proxies: lines,
         type: newProxy.value.type
-      })
+      }) as BulkCreateResult
 
       toast.add({
         severity: 'success',

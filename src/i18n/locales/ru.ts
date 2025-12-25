@@ -10,6 +10,8 @@ export default {
     export: 'Экспорт',
     close: 'Закрыть',
     confirm: 'Подтвердить',
+    create: 'Создать',
+    confirmation: 'Подтверждение',
     yes: 'Да',
     no: 'Нет',
     loading: 'Загрузка...',
@@ -22,7 +24,8 @@ export default {
     status: 'Статус',
     type: 'Тип',
     never: 'Никогда',
-    optional: 'опционально'
+    optional: 'опционально',
+    color: 'Цвет'
   },
 
   nav: {
@@ -123,8 +126,44 @@ export default {
       checkFailed: 'Ошибка проверки',
       checkingAll: 'Проверка всех аккаунтов в фоне',
       deleted: 'Аккаунт успешно удален',
-      deleteFailed: 'Не удалось удалить аккаунт'
+      deleteFailed: 'Не удалось удалить аккаунт',
+      bulkSuccess: 'Действие выполнено для {count} аккаунтов'
+    },
+
+    allStatuses: 'Все статусы',
+    searchPlaceholder: 'Поиск по username, телефону...',
+    filterByStatus: 'Фильтр по статусу',
+    selected: 'Выбрано: {count}',
+    bulkDeleteConfirm: 'Удалить {count} аккаунтов?',
+
+    bulk: {
+      actions: 'Действия',
+      check: 'Проверить',
+      setProxy: 'Назначить прокси',
+      noProxy: 'Без прокси',
+      setGroup: 'Назначить группу',
+      noGroup: 'Без группы',
+      delete: 'Удалить'
     }
+  },
+
+  groups: {
+    title: 'Группы',
+    allAccounts: 'Все аккаунты',
+    create: 'Создать группу',
+    name: 'Название',
+    namePlaceholder: 'Введите название группы',
+    created: 'Группа создана',
+    deleted: 'Группа удалена'
+  },
+
+  tags: {
+    title: 'Теги',
+    create: 'Создать тег',
+    name: 'Название',
+    namePlaceholder: 'Введите название тега',
+    created: 'Тег создан',
+    deleted: 'Тег удален'
   },
 
   proxy: {

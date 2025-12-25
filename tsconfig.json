@@ -20,6 +20,6 @@
     },
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue", "electron/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue", "src/**/*.d.ts", "electron/**/*.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
