@@ -23,20 +23,26 @@ echo ""
 
 cd "$PROJECT_DIR"
 
-# Check Python
+# Check Python (prefer 3.12 for compatibility)
 echo -e "${YELLOW}[1/4]${NC} Checking Python..."
-if ! command -v python3 &> /dev/null; then
+if command -v python3.12 &> /dev/null; then
+    PYTHON_CMD="python3.12"
+elif command -v python3.11 &> /dev/null; then
+    PYTHON_CMD="python3.11"
+elif command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+else
     echo -e "${RED}Error: Python 3 is not installed${NC}"
     exit 1
 fi
-PYTHON_VERSION=$(python3 --version)
+PYTHON_VERSION=$($PYTHON_CMD --version)
 echo -e "       ${GREEN}✓${NC} $PYTHON_VERSION"
 
 # Setup Python venv
 echo -e "${YELLOW}[2/4]${NC} Setting up Python environment..."
 if [ ! -d "$BACKEND_DIR/.venv" ]; then
     echo "       Creating virtual environment..."
-    python3 -m venv "$BACKEND_DIR/.venv"
+    $PYTHON_CMD -m venv "$BACKEND_DIR/.venv"
 fi
 
 source "$BACKEND_DIR/.venv/bin/activate"
@@ -44,8 +50,8 @@ source "$BACKEND_DIR/.venv/bin/activate"
 # Install Python dependencies
 if [ ! -f "$BACKEND_DIR/.venv/.deps_installed" ] || [ "$BACKEND_DIR/requirements.txt" -nt "$BACKEND_DIR/.venv/.deps_installed" ]; then
     echo "       Installing Python dependencies..."
-    pip install -q --upgrade pip
-    pip install -q -r "$BACKEND_DIR/requirements.txt"
+    "$BACKEND_DIR/.venv/bin/python" -m pip install -q --upgrade pip
+    "$BACKEND_DIR/.venv/bin/python" -m pip install -q -r "$BACKEND_DIR/requirements.txt"
     touch "$BACKEND_DIR/.venv/.deps_installed"
     echo -e "       ${GREEN}✓${NC} Dependencies installed"
 else

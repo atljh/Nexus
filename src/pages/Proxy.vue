@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import Button from 'primevue/button'
 import DataTable from 'primevue/datatable'
@@ -12,6 +13,8 @@ import Tag from 'primevue/tag'
 import ProgressBar from 'primevue/progressbar'
 import { useToast } from 'primevue/usetoast'
 import Toast from 'primevue/toast'
+
+const { t } = useI18n()
 
 interface Proxy {
   id: number
@@ -64,8 +67,8 @@ async function loadProxies() {
     console.error('Failed to load proxies:', error)
     toast.add({
       severity: 'error',
-      summary: 'Error',
-      detail: 'Failed to load proxies',
+      summary: t('common.error'),
+      detail: t('proxy.messages.loadError'),
       life: 3000
     })
   } finally {
@@ -87,7 +90,7 @@ async function checkProxy(proxy: Proxy) {
 
     toast.add({
       severity: response.status === 'valid' ? 'success' : 'error',
-      summary: response.status === 'valid' ? 'Proxy Valid' : 'Proxy Invalid',
+      summary: response.status === 'valid' ? t('proxy.messages.proxyValid') : t('proxy.messages.proxyInvalid'),
       detail: `${proxy.host}:${proxy.port}`,
       life: 3000
     })
@@ -96,8 +99,8 @@ async function checkProxy(proxy: Proxy) {
   } catch (error: any) {
     toast.add({
       severity: 'error',
-      summary: 'Check Failed',
-      detail: error.message || 'Failed to check proxy',
+      summary: t('proxy.messages.checkFailed'),
+      detail: error.message || t('proxy.messages.checkFailed'),
       life: 3000
     })
   }
@@ -107,8 +110,8 @@ async function checkAllProxies() {
   checking.value = true
   toast.add({
     severity: 'info',
-    summary: 'Checking...',
-    detail: 'Checking all proxies',
+    summary: t('common.info'),
+    detail: t('proxy.messages.checking'),
     life: 2000
   })
 
@@ -117,8 +120,8 @@ async function checkAllProxies() {
 
     toast.add({
       severity: 'success',
-      summary: 'Complete',
-      detail: `Checked ${response.checked} proxies`,
+      summary: t('common.success'),
+      detail: t('proxy.messages.checkComplete', { count: response.checked }),
       life: 3000
     })
 
@@ -126,8 +129,8 @@ async function checkAllProxies() {
   } catch (error: any) {
     toast.add({
       severity: 'error',
-      summary: 'Error',
-      detail: error.message || 'Failed to check proxies',
+      summary: t('common.error'),
+      detail: error.message || t('proxy.messages.checkFailed'),
       life: 3000
     })
   } finally {
@@ -148,8 +151,8 @@ async function addProxy() {
 
       toast.add({
         severity: 'success',
-        summary: 'Success',
-        detail: `Added ${response.created} proxies`,
+        summary: t('common.success'),
+        detail: t('proxy.messages.addedCount', { count: response.created }),
         life: 3000
       })
 
@@ -159,8 +162,8 @@ async function addProxy() {
     } catch (error: any) {
       toast.add({
         severity: 'error',
-        summary: 'Error',
-        detail: error.message || 'Failed to add proxies',
+        summary: t('common.error'),
+        detail: error.message || t('proxy.messages.addFailed'),
         life: 3000
       })
     }
@@ -171,8 +174,8 @@ async function addProxy() {
   if (!newProxy.value.host || !newProxy.value.port) {
     toast.add({
       severity: 'warn',
-      summary: 'Warning',
-      detail: 'Please enter host and port',
+      summary: t('common.warning'),
+      detail: t('proxy.messages.enterHostPort'),
       life: 3000
     })
     return
@@ -189,8 +192,8 @@ async function addProxy() {
 
     toast.add({
       severity: 'success',
-      summary: 'Success',
-      detail: 'Proxy added',
+      summary: t('common.success'),
+      detail: t('proxy.messages.added'),
       life: 3000
     })
 
@@ -200,8 +203,8 @@ async function addProxy() {
   } catch (error: any) {
     toast.add({
       severity: 'error',
-      summary: 'Error',
-      detail: error.message || 'Failed to add proxy',
+      summary: t('common.error'),
+      detail: error.message || t('proxy.messages.addFailed'),
       life: 3000
     })
   }
@@ -226,8 +229,8 @@ async function saveEditProxy() {
 
     toast.add({
       severity: 'success',
-      summary: 'Success',
-      detail: 'Proxy updated',
+      summary: t('common.success'),
+      detail: t('proxy.messages.updated'),
       life: 3000
     })
 
@@ -237,15 +240,15 @@ async function saveEditProxy() {
   } catch (error: any) {
     toast.add({
       severity: 'error',
-      summary: 'Error',
-      detail: error.message || 'Failed to update proxy',
+      summary: t('common.error'),
+      detail: error.message || t('proxy.messages.updateFailed'),
       life: 3000
     })
   }
 }
 
 async function deleteProxy(proxy: Proxy) {
-  if (!confirm(`Delete proxy ${proxy.host}:${proxy.port}?`)) {
+  if (!confirm(t('proxy.deleteConfirm', { host: proxy.host, port: proxy.port }))) {
     return
   }
 
@@ -254,8 +257,8 @@ async function deleteProxy(proxy: Proxy) {
 
     toast.add({
       severity: 'success',
-      summary: 'Deleted',
-      detail: 'Proxy deleted',
+      summary: t('common.success'),
+      detail: t('proxy.messages.deleted'),
       life: 3000
     })
 
@@ -263,8 +266,8 @@ async function deleteProxy(proxy: Proxy) {
   } catch (error: any) {
     toast.add({
       severity: 'error',
-      summary: 'Error',
-      detail: error.message || 'Failed to delete proxy',
+      summary: t('common.error'),
+      detail: error.message || t('proxy.messages.deleteFailed'),
       life: 3000
     })
   }
@@ -282,7 +285,7 @@ function resetForm() {
 }
 
 function formatDate(dateStr: string | null): string {
-  if (!dateStr) return 'Never'
+  if (!dateStr) return t('common.never')
   return new Date(dateStr).toLocaleString()
 }
 </script>
@@ -291,16 +294,16 @@ function formatDate(dateStr: string | null): string {
   <MainLayout>
     <Toast />
     <div class="proxy-page">
-      <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-semibold">Proxy</h1>
-        <div class="flex gap-2">
+      <div class="page-header">
+        <h1 class="page-title">{{ t('proxy.title') }}</h1>
+        <div class="header-actions">
           <Button
-            label="Add Proxy"
+            :label="t('proxy.addProxy')"
             icon="pi pi-plus"
             @click="showAddDialog = true"
           />
           <Button
-            label="Check All"
+            :label="t('proxy.checkAll')"
             icon="pi pi-refresh"
             severity="secondary"
             :loading="checking"
@@ -313,7 +316,7 @@ function formatDate(dateStr: string | null): string {
       <ProgressBar v-if="checking" mode="indeterminate" style="height: 4px" class="mb-4" />
 
       <!-- Proxy table -->
-      <div class="card-dashed">
+      <div class="table-card">
         <DataTable
           v-model:selection="selectedProxies"
           :value="proxies"
@@ -321,62 +324,63 @@ function formatDate(dateStr: string | null): string {
           paginator
           :rows="20"
           dataKey="id"
-          class="p-datatable-dark"
+          class="custom-table"
         >
           <template #empty>
-            <div class="text-center py-8 text-gray-500">
-              <i class="pi pi-globe text-4xl mb-3 block"></i>
-              <p>No proxies yet</p>
+            <div class="empty-state">
+              <div class="empty-icon">
+                <i class="pi pi-globe"></i>
+              </div>
+              <p class="empty-text">{{ t('proxy.noProxies') }}</p>
               <Button
-                label="Add Proxy"
+                :label="t('proxy.addProxy')"
                 icon="pi pi-plus"
-                class="mt-3"
                 @click="showAddDialog = true"
               />
             </div>
           </template>
 
           <Column field="id" header="ID" sortable style="width: 80px" />
-          <Column header="Proxy" sortable>
+          <Column :header="t('proxy.title')" sortable>
             <template #body="{ data }">
-              <div class="flex items-center gap-2">
-                <div class="font-mono">{{ data.host }}:{{ data.port }}</div>
-                <Tag :value="data.type.toUpperCase()" severity="secondary" class="text-xs" />
+              <div class="proxy-cell">
+                <span class="proxy-address">{{ data.host }}:{{ data.port }}</span>
+                <Tag :value="data.type.toUpperCase()" severity="secondary" class="proxy-type" />
               </div>
             </template>
           </Column>
-          <Column header="Auth" style="width: 100px">
+          <Column :header="t('proxy.auth')" style="width: 100px">
             <template #body="{ data }">
               <Tag
-                :value="data.username ? 'Yes' : 'No'"
+                :value="data.username ? t('common.yes') : t('common.no')"
                 :severity="data.username ? 'success' : 'secondary'"
               />
             </template>
           </Column>
-          <Column field="status" header="Status" sortable style="width: 120px">
+          <Column field="status" :header="t('common.status')" sortable style="width: 120px">
             <template #body="{ data }">
               <Tag :value="data.status" :severity="getStatusSeverity(data.status)" />
             </template>
           </Column>
-          <Column header="Accounts" style="width: 100px">
+          <Column :header="t('proxy.accounts')" style="width: 100px">
             <template #body="{ data }">
-              <span class="text-gray-400">{{ data.accounts_count }}</span>
+              <span class="accounts-count">{{ data.accounts_count }}</span>
             </template>
           </Column>
-          <Column header="Last Check" style="width: 180px">
+          <Column :header="t('proxy.lastCheck')" style="width: 180px">
             <template #body="{ data }">
-              <span class="text-sm text-gray-500">{{ formatDate(data.last_checked_at) }}</span>
+              <span class="last-check">{{ formatDate(data.last_checked_at) }}</span>
             </template>
           </Column>
-          <Column header="Actions" style="width: 150px">
+          <Column :header="t('common.actions')" style="width: 150px">
             <template #body="{ data }">
-              <div class="flex gap-1">
+              <div class="actions-cell">
                 <Button
                   icon="pi pi-refresh"
                   severity="secondary"
                   text
                   rounded
-                  v-tooltip="'Check'"
+                  v-tooltip.top="t('common.check')"
                   @click="checkProxy(data)"
                 />
                 <Button
@@ -384,7 +388,7 @@ function formatDate(dateStr: string | null): string {
                   severity="secondary"
                   text
                   rounded
-                  v-tooltip="'Edit'"
+                  v-tooltip.top="t('common.edit')"
                   @click="openEditDialog(data)"
                 />
                 <Button
@@ -392,7 +396,7 @@ function formatDate(dateStr: string | null): string {
                   severity="danger"
                   text
                   rounded
-                  v-tooltip="'Delete'"
+                  v-tooltip.top="t('common.delete')"
                   @click="deleteProxy(data)"
                 />
               </div>
@@ -404,13 +408,14 @@ function formatDate(dateStr: string | null): string {
       <!-- Add Proxy Dialog -->
       <Dialog
         v-model:visible="showAddDialog"
-        header="Add Proxy"
+        :header="t('proxy.addDialog.title')"
         modal
-        :style="{ width: '500px' }"
+        :style="{ width: '520px' }"
+        class="custom-dialog"
       >
-        <div class="flex flex-col gap-4">
-          <div>
-            <label class="block text-sm text-gray-400 mb-1">Type</label>
+        <div class="dialog-content">
+          <div class="form-field">
+            <label class="form-label">{{ t('proxy.addDialog.type') }}</label>
             <Dropdown
               v-model="newProxy.type"
               :options="proxyTypes"
@@ -420,46 +425,44 @@ function formatDate(dateStr: string | null): string {
             />
           </div>
 
-          <div class="grid grid-cols-3 gap-3">
-            <div class="col-span-2">
-              <label class="block text-sm text-gray-400 mb-1">Host</label>
+          <div class="form-row">
+            <div class="form-field flex-2">
+              <label class="form-label">{{ t('proxy.addDialog.host') }}</label>
               <InputText v-model="newProxy.host" placeholder="127.0.0.1" class="w-full" />
             </div>
-            <div>
-              <label class="block text-sm text-gray-400 mb-1">Port</label>
+            <div class="form-field flex-1">
+              <label class="form-label">{{ t('proxy.addDialog.port') }}</label>
               <InputText v-model="newProxy.port" placeholder="1080" class="w-full" />
             </div>
           </div>
 
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-sm text-gray-400 mb-1">Username (optional)</label>
+          <div class="form-row">
+            <div class="form-field flex-1">
+              <label class="form-label">{{ t('proxy.addDialog.username') }} ({{ t('common.optional') }})</label>
               <InputText v-model="newProxy.username" class="w-full" />
             </div>
-            <div>
-              <label class="block text-sm text-gray-400 mb-1">Password (optional)</label>
+            <div class="form-field flex-1">
+              <label class="form-label">{{ t('proxy.addDialog.password') }} ({{ t('common.optional') }})</label>
               <InputText v-model="newProxy.password" type="password" class="w-full" />
             </div>
           </div>
 
-          <div class="border-t border-gray-700 pt-4 mt-2">
-            <label class="block text-sm text-gray-400 mb-1">
-              Bulk Import (one per line)
-            </label>
-            <p class="text-xs text-gray-500 mb-2">
-              Format: host:port or host:port:user:pass
-            </p>
+          <div class="divider"></div>
+
+          <div class="form-field">
+            <label class="form-label">{{ t('proxy.addDialog.bulkImport') }}</label>
+            <p class="hint-text">{{ t('proxy.addDialog.bulkFormat') }}</p>
             <Textarea
               v-model="bulkProxies"
               placeholder="192.168.1.1:1080&#10;192.168.1.2:1080:user:pass"
               rows="4"
-              class="w-full font-mono text-sm"
+              class="w-full font-mono"
             />
           </div>
 
-          <div class="flex justify-end gap-2 mt-4">
-            <Button label="Cancel" severity="secondary" @click="showAddDialog = false; resetForm()" />
-            <Button label="Add" icon="pi pi-plus" @click="addProxy" />
+          <div class="dialog-actions">
+            <Button :label="t('common.cancel')" severity="secondary" @click="showAddDialog = false; resetForm()" />
+            <Button :label="t('common.add')" icon="pi pi-plus" @click="addProxy" />
           </div>
         </div>
       </Dialog>
@@ -467,13 +470,14 @@ function formatDate(dateStr: string | null): string {
       <!-- Edit Proxy Dialog -->
       <Dialog
         v-model:visible="showEditDialog"
-        header="Edit Proxy"
+        :header="t('proxy.editDialog.title')"
         modal
-        :style="{ width: '500px' }"
+        :style="{ width: '520px' }"
+        class="custom-dialog"
       >
-        <div v-if="editProxy" class="flex flex-col gap-4">
-          <div>
-            <label class="block text-sm text-gray-400 mb-1">Type</label>
+        <div v-if="editProxy" class="dialog-content">
+          <div class="form-field">
+            <label class="form-label">{{ t('proxy.addDialog.type') }}</label>
             <Dropdown
               v-model="editProxy.type"
               :options="proxyTypes"
@@ -483,31 +487,31 @@ function formatDate(dateStr: string | null): string {
             />
           </div>
 
-          <div class="grid grid-cols-3 gap-3">
-            <div class="col-span-2">
-              <label class="block text-sm text-gray-400 mb-1">Host</label>
+          <div class="form-row">
+            <div class="form-field flex-2">
+              <label class="form-label">{{ t('proxy.addDialog.host') }}</label>
               <InputText v-model="editProxy.host" class="w-full" />
             </div>
-            <div>
-              <label class="block text-sm text-gray-400 mb-1">Port</label>
-              <InputText v-model="editProxy.port" class="w-full" />
+            <div class="form-field flex-1">
+              <label class="form-label">{{ t('proxy.addDialog.port') }}</label>
+              <InputText :modelValue="String(editProxy.port)" @update:modelValue="editProxy.port = Number($event)" class="w-full" />
             </div>
           </div>
 
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-sm text-gray-400 mb-1">Username</label>
+          <div class="form-row">
+            <div class="form-field flex-1">
+              <label class="form-label">{{ t('proxy.addDialog.username') }}</label>
               <InputText v-model="editProxy.username" class="w-full" />
             </div>
-            <div>
-              <label class="block text-sm text-gray-400 mb-1">Password</label>
+            <div class="form-field flex-1">
+              <label class="form-label">{{ t('proxy.addDialog.password') }}</label>
               <InputText v-model="editProxy.password" type="password" class="w-full" />
             </div>
           </div>
 
-          <div class="flex justify-end gap-2 mt-4">
-            <Button label="Cancel" severity="secondary" @click="showEditDialog = false" />
-            <Button label="Save" icon="pi pi-check" @click="saveEditProxy" />
+          <div class="dialog-actions">
+            <Button :label="t('common.cancel')" severity="secondary" @click="showEditDialog = false" />
+            <Button :label="t('common.save')" icon="pi pi-check" @click="saveEditProxy" />
           </div>
         </div>
       </Dialog>
@@ -516,33 +520,181 @@ function formatDate(dateStr: string | null): string {
 </template>
 
 <style scoped>
-:deep(.p-datatable) {
+.proxy-page {
+  max-width: 1400px;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.page-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: #f3f4f6;
+  letter-spacing: -0.5px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.table-card {
+  background: linear-gradient(145deg, #161616 0%, #111111 100%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 24px;
+}
+
+.empty-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(37, 99, 235, 0.1) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.empty-icon i {
+  font-size: 32px;
+  color: #3b82f6;
+}
+
+.empty-text {
+  color: #6b7280;
+  margin-bottom: 20px;
+  font-size: 15px;
+}
+
+.proxy-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.proxy-address {
+  font-family: monospace;
+  color: #e5e7eb;
+}
+
+.proxy-type {
+  font-size: 10px;
+}
+
+.accounts-count {
+  color: #9ca3af;
+}
+
+.last-check {
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.actions-cell {
+  display: flex;
+  gap: 4px;
+}
+
+.dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-label {
+  font-size: 13px;
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+.form-row {
+  display: flex;
+  gap: 12px;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+.flex-2 {
+  flex: 2;
+}
+
+.divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 8px 0;
+}
+
+.hint-text {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 8px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+:deep(.custom-table .p-datatable) {
   background: transparent;
 }
 
-:deep(.p-datatable-thead > tr > th) {
-  background: #1a1a1a;
-  border-color: #333;
-  color: #888;
+:deep(.custom-table .p-datatable-thead > tr > th) {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.06);
+  color: #6b7280;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-:deep(.p-datatable-tbody > tr) {
+:deep(.custom-table .p-datatable-tbody > tr) {
   background: transparent;
-  border-color: #222;
+  border-color: rgba(255, 255, 255, 0.04);
+  transition: all 0.2s;
 }
 
-:deep(.p-datatable-tbody > tr:hover) {
-  background: #1a1a1a;
+:deep(.custom-table .p-datatable-tbody > tr:hover) {
+  background: rgba(255, 255, 255, 0.03);
 }
 
-:deep(.p-datatable-tbody > tr > td) {
-  border-color: #222;
+:deep(.custom-table .p-datatable-tbody > tr > td) {
+  border-color: rgba(255, 255, 255, 0.04);
+  padding: 16px;
 }
 
-.card-dashed {
-  border: 2px dashed rgba(148, 163, 184, 0.3);
-  border-radius: 1rem;
-  padding: 1rem;
-  background: rgba(0, 0, 0, 0.2);
+:deep(.custom-dialog .p-dialog-header) {
+  background: #161616;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+:deep(.custom-dialog .p-dialog-content) {
+  background: #161616;
+  padding: 24px;
 }
 </style>

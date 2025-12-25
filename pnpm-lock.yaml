@@ -32,6 +32,9 @@ importers:
       vue:
         specifier: ^3.5.13
         version: 3.5.26(typescript@5.9.3)
+      vue-i18n:
+        specifier: ^11.2.7
+        version: 11.2.7(vue@3.5.26(typescript@5.9.3))
       vue-router:
         specifier: ^4.5.0
         version: 4.6.4(vue@3.5.26(typescript@5.9.3))
@@ -288,6 +291,18 @@ packages:
 
   '@gar/promisify@1.1.3':
     resolution: {integrity: sha512-k2Ty1JcVojjJFwrg/ThKi2ujJ7XNLYaFGNB/bWT9wGR+oSMJHMa5w+CUq6p/pVrKeNNgA7pCqEcjSnHVoqJQFw==}
+
+  '@intlify/core-base@11.2.7':
+    resolution: {integrity: sha512-+Ra9I/LAzXDnmv/IrTO03WMCiLya7pHRmGJvNl9fKwx/W4REJ0xaMk2PxCRqnxcBsX443amEMdebQ3R1geiuIw==}
+    engines: {node: '>= 16'}
+
+  '@intlify/message-compiler@11.2.7':
+    resolution: {integrity: sha512-TFamC+GzJAotAFwUNvbtRVBgvuSn2nCwKNresmPUHv3IIVMmXJt7QQJj/DORI1h8hs46ZF6L0Fs2xBohSOE4iQ==}
+    engines: {node: '>= 16'}
+
+  '@intlify/shared@11.2.7':
+    resolution: {integrity: sha512-uvlkvc/0uQ4FDlHQZccpUnmcOwNcaI3i+69ck2YJ+GqM35AoVbuS63b+YfirV4G0SZh64Ij2UMcFRMmB4nr95w==}
+    engines: {node: '>= 16'}
 
   '@isaacs/balanced-match@4.0.1':
     resolution: {integrity: sha512-yzMTt9lEb8Gv7zRioUilSglI0c0smZ9k5D65677DLWLtWJaXIS3CqcGyUFByYKlnUj6TkjLVs54fBl6+TiGQDQ==}
@@ -2187,6 +2202,12 @@ packages:
       '@vue/composition-api':
         optional: true
 
+  vue-i18n@11.2.7:
+    resolution: {integrity: sha512-LPv8bAY5OA0UvFEXl4vBQOBqJzRrlExy92tWgRuwW7tbykHf7CH71G2Y4TM2OwGcIS4+hyqKHS2EVBqaYwPY9Q==}
+    engines: {node: '>= 16'}
+    peerDependencies:
+      vue: ^3.0.0
+
   vue-router@4.6.4:
     resolution: {integrity: sha512-Hz9q5sa33Yhduglwz6g9skT8OBPii+4bFn88w6J+J4MfEo4KRRpmiNG/hHHkdbRFlLBOqxN8y8gf2Fb0MTUgVg==}
     peerDependencies:
@@ -2432,6 +2453,18 @@ snapshots:
     optional: true
 
   '@gar/promisify@1.1.3': {}
+
+  '@intlify/core-base@11.2.7':
+    dependencies:
+      '@intlify/message-compiler': 11.2.7
+      '@intlify/shared': 11.2.7
+
+  '@intlify/message-compiler@11.2.7':
+    dependencies:
+      '@intlify/shared': 11.2.7
+      source-map-js: 1.2.1
+
+  '@intlify/shared@11.2.7': {}
 
   '@isaacs/balanced-match@4.0.1': {}
 
@@ -4493,6 +4526,13 @@ snapshots:
 
   vue-demi@0.14.10(vue@3.5.26(typescript@5.9.3)):
     dependencies:
+      vue: 3.5.26(typescript@5.9.3)
+
+  vue-i18n@11.2.7(vue@3.5.26(typescript@5.9.3)):
+    dependencies:
+      '@intlify/core-base': 11.2.7
+      '@intlify/shared': 11.2.7
+      '@vue/devtools-api': 6.6.4
       vue: 3.5.26(typescript@5.9.3)
 
   vue-router@4.6.4(vue@3.5.26(typescript@5.9.3)):
