@@ -226,5 +226,141 @@ export default {
     themeSystem: 'System'
   },
 
-  comingSoon: 'Coming in Stage 3'
+  comingSoon: 'Coming in Stage 3',
+
+  autoLikes: {
+    createTask: 'Create Task',
+    channel: 'Channel',
+    channelPlaceholder: '@channel or https://t.me/channel',
+    mode: 'Mode',
+    modes: {
+      single: 'Single Post',
+      monitoring: 'Monitor New Posts'
+    },
+    postId: 'Post ID',
+    postIdPlaceholder: 'Post number (empty = latest)',
+    reaction: 'Reaction',
+    totalReactions: 'Total Reactions',
+    minDelay: 'Min Delay',
+    maxDelay: 'Max Delay',
+    filterByGroup: 'Filter by Group',
+    selectAccounts: 'Select Accounts',
+    selectAccountsPlaceholder: 'Choose accounts for task',
+    available: 'available',
+    startTask: 'Create & Start',
+    tasks: 'Tasks',
+    noTasks: 'No tasks yet',
+    progress: 'Progress',
+    taskDetails: 'Task Details',
+    failed: 'Failed',
+    lastError: 'Last Error',
+    startedAt: 'Started At',
+    completedAt: 'Completed At',
+    logs: 'Action Log',
+    noLogs: 'No logs yet',
+    time: 'Time',
+    target: 'Target',
+    result: 'Result',
+    message: 'Message',
+    status: {
+      pending: 'pending',
+      running: 'running',
+      paused: 'paused',
+      completed: 'completed',
+      failed: 'failed',
+      cancelled: 'cancelled'
+    },
+    errors: {
+      channelRequired: 'Please enter a channel',
+      accountsRequired: 'Select at least one account'
+    },
+    messages: {
+      taskCreated: 'Task created',
+      createFailed: 'Failed to create task',
+      taskStarted: 'Task started',
+      taskDeleted: 'Task deleted'
+    }
+  },
+
+  autoComments: {
+    createTask: 'Create Task',
+    settings: 'Settings',
+    templates: 'Templates',
+    accounts: 'Accounts',
+    channels: 'Channels',
+    channelsPlaceholder: 'Enter @channel and press Enter',
+    channelsHint: 'Add multiple channels with Enter or comma',
+    mode: 'Mode',
+    modes: {
+      single: 'Single Post',
+      monitoring: 'Monitor New Posts'
+    },
+    rotationMode: 'Account Rotation',
+    rotation: {
+      random: 'Random',
+      roundRobin: 'Round Robin'
+    },
+    commentsPerAccount: 'Comments Per Account',
+    totalComments: 'Total Comments',
+    minDelay: 'Min Delay',
+    maxDelay: 'Max Delay',
+    filterByGroup: 'Filter by Group',
+    selectAccounts: 'Select Accounts',
+    selectAccountsPlaceholder: 'Choose accounts for task',
+    available: 'available',
+    selectTemplates: 'Select Templates',
+    selectTemplatesPlaceholder: 'Choose comment templates',
+    customTemplates: 'Custom Templates',
+    customTemplatesPlaceholder: 'Enter comment text',
+    createTemplate: 'Create Template',
+    loadDefaults: 'Load Defaults',
+    templateName: 'Template Name',
+    templateNamePlaceholder: 'e.g. Positive Review',
+    templateContent: 'Comment Text',
+    templateContentPlaceholder: '{Great|Awesome|Nice}! {Very|Super} {useful|interesting}!',
+    spintaxHint: 'Use {option1|option2|option3} for random variations',
+    preview: 'Preview variations:',
+    startTask: 'Create & Start',
+    tasks: 'Tasks',
+    noTasks: 'No tasks yet',
+    progress: 'Progress',
+    taskDetails: 'Task Details',
+    failed: 'Failed',
+    lastError: 'Last Error',
+    targetChannels: 'Target Channels',
+    noChannels: 'No channels',
+    channel: 'Channel',
+    title: 'Title',
+    sent: 'Sent',
+    error: 'Error',
+    logs: 'Action Log',
+    noLogs: 'No logs yet',
+    time: 'Time',
+    target: 'Target',
+    result: 'Result',
+    comment: 'Comment',
+    status: {
+      pending: 'pending',
+      running: 'running',
+      paused: 'paused',
+      completed: 'completed',
+      failed: 'failed',
+      cancelled: 'cancelled'
+    },
+    errors: {
+      channelsRequired: 'Add at least one channel',
+      templatesRequired: 'Select or add at least one template',
+      accountsRequired: 'Select at least one account',
+      templateRequired: 'Fill in template name and content'
+    },
+    messages: {
+      taskCreated: 'Task created',
+      createFailed: 'Failed to create task',
+      taskStarted: 'Task started',
+      taskDeleted: 'Task deleted',
+      templateCreated: 'Template created',
+      templateDeleted: 'Template deleted',
+      defaultsLoaded: 'Default templates loaded'
+    }
+  }
 }

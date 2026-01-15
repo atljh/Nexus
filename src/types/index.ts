@@ -120,3 +120,158 @@ export interface CheckResult {
   }
   error?: string
 }
+
+// Task Types
+export interface Task {
+  id: number
+  task_type: TaskType
+  status: TaskStatus
+  config: TaskConfig
+  total_actions: number
+  completed_actions: number
+  failed_actions: number
+  min_delay: number
+  max_delay: number
+  max_concurrent: number
+  last_error: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+  accounts_count: number
+  progress: number
+}
+
+export type TaskType = 'likes' | 'comments'
+export type TaskStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
+
+// Base config shared by all task types
+export interface TaskConfig {
+  // For likes tasks
+  channel?: string
+  post_id?: number | null
+  reaction?: string
+  mode?: 'single' | 'monitoring'
+  // For comments tasks
+  channels?: string[]
+  templates?: string[]
+  rotation_mode?: 'random' | 'round_robin'
+  comments_per_account?: number
+}
+
+export interface TaskLog {
+  id: number
+  task_id: number
+  account_id: number | null
+  action_type: string
+  target: string | null
+  success: boolean
+  message: string | null
+  error: string | null
+  extra_data: Record<string, unknown> | null
+  created_at: string
+}
+
+export interface CreateLikesTaskParams {
+  config: {
+    channel: string
+    post_id?: number | null
+    reaction: string
+    mode: 'single' | 'monitoring'
+  }
+  account_ids: number[]
+  total_actions: number
+  min_delay: number
+  max_delay: number
+  max_concurrent: number
+}
+
+export interface TaskStats {
+  total: number
+  running: number
+  pending: number
+  completed: number
+  failed: number
+}
+
+// Reaction emoji options
+export const REACTION_EMOJIS = [
+  { value: '👍', label: '👍 Like' },
+  { value: '❤️', label: '❤️ Heart' },
+  { value: '🔥', label: '🔥 Fire' },
+  { value: '👏', label: '👏 Clap' },
+  { value: '🥰', label: '🥰 Love' },
+  { value: '😢', label: '😢 Sad' },
+  { value: '🎉', label: '🎉 Party' },
+  { value: '🤔', label: '🤔 Think' },
+  { value: '🤯', label: '🤯 Mind Blown' },
+  { value: '😱', label: '😱 Shocked' },
+] as const
+
+// Comment Template Types
+export interface CommentTemplate {
+  id: number
+  name: string
+  content: string
+  is_default: boolean
+  created_at: string
+}
+
+export interface CreateCommentTemplateParams {
+  name: string
+  content: string
+  is_default?: boolean
+}
+
+// Comments Task Types
+export interface CommentsTaskConfig {
+  channels: string[]
+  templates: string[]
+  rotation_mode: 'random' | 'round_robin'
+  comments_per_account: number
+  mode: 'single' | 'monitoring'
+}
+
+export interface CreateCommentsTaskParams {
+  config: CommentsTaskConfig
+  account_ids: number[]
+  total_actions: number
+  min_delay: number
+  max_delay: number
+}
+
+export interface TargetChannel {
+  id: number
+  task_id: number
+  channel_username: string
+  channel_id: number | null
+  channel_title: string | null
+  status: 'pending' | 'joined' | 'error' | 'cannot_comment'
+  can_comment: boolean
+  error_message: string | null
+  comments_sent: number
+  created_at: string
+}
+
+// Default comment templates
+export const DEFAULT_COMMENT_TEMPLATES = [
+  {
+    name: 'Positive Reaction',
+    content: '{Wow|Amazing|Great|Awesome|Nice}! {This is|That\'s} {really|so|very} {cool|interesting|helpful}! {👍|🔥|❤️|👏}'
+  },
+  {
+    name: 'Question',
+    content: '{Interesting|Cool|Nice}! {Can you|Could you|Would you} {tell|explain} more about {this|it}? {🤔|❓}'
+  },
+  {
+    name: 'Agreement',
+    content: '{Totally|Completely|Absolutely} {agree|true}! {I think so too|Same here|Exactly}. {💯|✅|👍}'
+  },
+  {
+    name: 'Thanks',
+    content: '{Thanks|Thank you|Thx} for {sharing|posting|this}! {Very|Really|So} {useful|helpful|informative}! {🙏|❤️|👍}'
+  },
+  {
+    name: 'Simple',
+    content: '{Nice|Cool|Great|Good|Awesome} {post|content|stuff}! {👍|🔥|❤️|💯}'
+  }
+] as const

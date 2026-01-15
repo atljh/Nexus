@@ -1,10 +1,10 @@
 import { createI18n } from 'vue-i18n'
 import en from './locales/en'
-import ru from './locales/ru'
+import uk from './locales/uk'
 
 export type MessageSchema = typeof en
 
-const savedLocale = (localStorage.getItem('locale') || 'ru') as 'en' | 'ru'
+const savedLocale = (localStorage.getItem('locale') || 'uk') as 'en' | 'uk'
 
 const i18n = createI18n({
   legacy: false,
@@ -12,20 +12,20 @@ const i18n = createI18n({
   fallbackLocale: 'en',
   messages: {
     en,
-    ru
+    uk
   }
 })
 
-export function setLocale(locale: 'en' | 'ru') {
+export function setLocale(locale: 'en' | 'uk') {
   // @ts-ignore - vue-i18n types issue
   i18n.global.locale.value = locale
   localStorage.setItem('locale', locale)
   document.documentElement.lang = locale
 }
 
-export function getLocale(): 'en' | 'ru' {
+export function getLocale(): 'en' | 'uk' {
   // @ts-ignore - vue-i18n types issue
-  return i18n.global.locale.value as 'en' | 'ru'
+  return i18n.global.locale.value as 'en' | 'uk'
 }
 
 export default i18n

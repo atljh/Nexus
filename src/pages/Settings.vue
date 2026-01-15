@@ -12,10 +12,10 @@ const currentLocale = ref(getLocale())
 
 const languages = [
   { label: 'English', value: 'en', flag: '🇬🇧' },
-  { label: 'Русский', value: 'ru', flag: '🇷🇺' }
+  { label: 'Українська', value: 'uk', flag: '🇺🇦' }
 ]
 
-function changeLanguage(locale: 'en' | 'ru') {
+function changeLanguage(locale: 'en' | 'uk') {
   currentLocale.value = locale
   setLocale(locale)
 }
