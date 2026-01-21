@@ -32,6 +32,11 @@ const router = createRouter({
       path: '/settings',
       name: 'settings',
       component: () => import('@/pages/Settings.vue')
+    },
+    {
+      path: '/task/:id',
+      name: 'taskResults',
+      component: () => import('@/pages/TaskResults.vue')
     }
   ]
 })

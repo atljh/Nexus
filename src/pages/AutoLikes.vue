@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import Panel from 'primevue/panel'
@@ -24,6 +25,7 @@ import { REACTION_EMOJIS } from '@/types'
 // Convert readonly array to mutable for Dropdown
 const reactionOptions = [...REACTION_EMOJIS]
 
+const router = useRouter()
 const { t } = useI18n()
 const toast = useToast()
 const taskStore = useTaskStore()
@@ -171,15 +173,87 @@ async function deleteTask(task: Task) {
 }
 
 function viewTaskDetails(task: Task) {
-  selectedTask.value = task
-  taskStore.setCurrentTask(task)
-  showTaskDetails.value = true
+  router.push(`/task/${task.id}`)
 }
 
 // Format date
 function formatDate(date: string | null): string {
   if (!date) return '-'
   return new Date(date).toLocaleString()
+}
+
+// Load test data for demo
+function loadTestData() {
+  const testTasks = [
+    {
+      id: 1,
+      task_type: 'likes',
+      status: 'completed',
+      config: { channel: '@durov', reaction: '👍', mode: 'single' },
+      total_actions: 100,
+      completed_actions: 100,
+      failed_actions: 2,
+      progress: 100,
+      created_at: new Date(Date.now() - 86400000).toISOString(),
+      started_at: new Date(Date.now() - 86400000).toISOString(),
+      completed_at: new Date(Date.now() - 82800000).toISOString(),
+      last_error: null
+    },
+    {
+      id: 2,
+      task_type: 'likes',
+      status: 'running',
+      config: { channel: '@telegram', reaction: '❤️', mode: 'monitoring' },
+      total_actions: 50,
+      completed_actions: 23,
+      failed_actions: 1,
+      progress: 46,
+      created_at: new Date(Date.now() - 3600000).toISOString(),
+      started_at: new Date(Date.now() - 3600000).toISOString(),
+      completed_at: null,
+      last_error: null
+    },
+    {
+      id: 3,
+      task_type: 'likes',
+      status: 'pending',
+      config: { channel: '@tech_news', reaction: '🔥', mode: 'single', post_id: 1234 },
+      total_actions: 25,
+      completed_actions: 0,
+      failed_actions: 0,
+      progress: 0,
+      created_at: new Date().toISOString(),
+      started_at: null,
+      completed_at: null,
+      last_error: null
+    },
+    {
+      id: 4,
+      task_type: 'likes',
+      status: 'failed',
+      config: { channel: '@private_channel', reaction: '👎', mode: 'single' },
+      total_actions: 30,
+      completed_actions: 5,
+      failed_actions: 10,
+      progress: 17,
+      created_at: new Date(Date.now() - 172800000).toISOString(),
+      started_at: new Date(Date.now() - 172800000).toISOString(),
+      completed_at: new Date(Date.now() - 172000000).toISOString(),
+      last_error: 'Channel not accessible'
+    }
+  ]
+
+  const testAccounts = [
+    { id: 1, phone: '+380991234567', username: 'test_user1', status: 'valid', group_id: null },
+    { id: 2, phone: '+380997654321', username: 'test_user2', status: 'valid', group_id: null },
+    { id: 3, phone: '+380501112233', username: 'test_user3', status: 'valid', group_id: null },
+    { id: 4, phone: '+380672223344', username: null, status: 'valid', group_id: null }
+  ]
+
+  // @ts-ignore - Setting test data directly
+  taskStore.tasks = testTasks
+  // @ts-ignore - Setting test data directly
+  accountStore.accounts = testAccounts
 }
 
 // Initialize
@@ -189,6 +263,11 @@ onMounted(async () => {
     accountStore.fetchAccounts(),
     groupStore.fetchGroups()
   ])
+
+  // Load test data if no tasks exist
+  if (taskStore.tasks.length === 0) {
+    loadTestData()
+  }
 
   // Start polling if there are running tasks
   if (taskStore.hasRunningTasks) {
@@ -543,11 +622,11 @@ onUnmounted(() => {
 
 .page-grid {
   display: grid;
-  grid-template-columns: 380px 1fr;
+  grid-template-columns: 480px 1fr;
   gap: 24px;
 }
 
-@media (max-width: 1200px) {
+@media (max-width: 1280px) {
   .page-grid {
     grid-template-columns: 1fr;
   }
@@ -680,6 +759,7 @@ onUnmounted(() => {
   background: linear-gradient(145deg, #161616 0%, #111111 100%);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 16px;
+  overflow: hidden;
 }
 
 :deep(.p-panel-header) {
@@ -691,6 +771,7 @@ onUnmounted(() => {
 :deep(.p-panel-content) {
   background: transparent;
   padding: 20px;
+  overflow: hidden;
 }
 
 :deep(.p-datatable) {
@@ -703,5 +784,18 @@ onUnmounted(() => {
 
 :deep(.p-datatable .p-datatable-tbody > tr:hover) {
   background: rgba(255, 255, 255, 0.02);
+}
+
+/* Fix input overflow */
+:deep(.p-inputtext),
+:deep(.p-dropdown),
+:deep(.p-multiselect),
+:deep(.p-inputnumber) {
+  width: 100%;
+  max-width: 100%;
+}
+
+:deep(.p-inputnumber-input) {
+  width: 100%;
 }
 </style>
