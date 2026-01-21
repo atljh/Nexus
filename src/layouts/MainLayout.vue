@@ -2,9 +2,11 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useThemeStore } from '@/stores/useThemeStore'
 
 const { t } = useI18n()
 const route = useRoute()
+const themeStore = useThemeStore()
 
 const menuItems = computed(() => [
   { label: t('nav.dashboard'), icon: 'pi-home', to: '/' },
@@ -18,6 +20,14 @@ const menuItems = computed(() => [
 const isActive = (path: string) => {
   if (path === '/') return route.path === '/'
   return route.path.startsWith(path)
+}
+
+const themeIcon = computed(() => {
+  return themeStore.resolvedTheme === 'dark' ? 'pi-sun' : 'pi-moon'
+})
+
+function toggleTheme() {
+  themeStore.toggleTheme()
 }
 </script>
 
@@ -48,9 +58,14 @@ const isActive = (path: string) => {
       </nav>
 
       <div class="sidebar-footer">
-        <div class="backend-status">
-          <span class="status-dot connected"></span>
-          <span class="status-text">{{ t('sidebar.backendConnected') }}</span>
+        <div class="footer-row">
+          <div class="backend-status">
+            <span class="status-dot connected"></span>
+            <span class="status-text">{{ t('sidebar.backendConnected') }}</span>
+          </div>
+          <button class="theme-toggle" @click="toggleTheme" :title="themeStore.resolvedTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'">
+            <i :class="['pi', themeIcon]"></i>
+          </button>
         </div>
       </div>
     </aside>
@@ -157,10 +172,39 @@ const isActive = (path: string) => {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .backend-status {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.theme-toggle {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  color: #6b7280;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.theme-toggle:hover {
+  background: rgba(168, 85, 247, 0.15);
+  color: #a855f7;
+}
+
+.theme-toggle i {
+  font-size: 14px;
 }
 
 .status-dot {
@@ -193,5 +237,6 @@ const isActive = (path: string) => {
   padding: 28px 32px;
   background: #0a0a0a;
   min-height: 100vh;
+  transition: background-color 0.2s ease;
 }
 </style>

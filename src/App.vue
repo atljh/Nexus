@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import Toast from 'primevue/toast'
+import { useThemeStore } from '@/stores/useThemeStore'
+
+const themeStore = useThemeStore()
 
 const appVersion = ref('')
 const backendStatus = ref<'connecting' | 'connected' | 'error'>('connecting')
+
+const themeClass = computed(() => themeStore.resolvedTheme)
 
 onMounted(async () => {
   // Get app version
@@ -30,7 +35,7 @@ async function checkBackend() {
 </script>
 
 <template>
-  <div class="app-container dark">
+  <div class="app-container" :class="themeClass">
     <Toast />
 
     <!-- Loading screen while connecting to backend -->
@@ -63,8 +68,19 @@ async function checkBackend() {
 <style>
 .app-container {
   min-height: 100vh;
+  background: var(--color-bg-base, #0f0f0f);
+  color: var(--color-text-primary, #e5e5e5);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.app-container.dark {
   background: #0f0f0f;
   color: #e5e5e5;
+}
+
+.app-container.light {
+  background: #f8fafc;
+  color: #0f172a;
 }
 
 .loading-screen {
@@ -78,11 +94,23 @@ async function checkBackend() {
   text-align: center;
 }
 
+.light .loading-content .text-gray-400 {
+  color: #64748b;
+}
+
+.light .loading-content .text-gray-500 {
+  color: #94a3b8;
+}
+
 .version-badge {
   position: fixed;
   bottom: 8px;
   right: 12px;
   font-size: 11px;
   color: #666;
+}
+
+.light .version-badge {
+  color: #94a3b8;
 }
 </style>
