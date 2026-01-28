@@ -62,6 +62,22 @@ const fileInput = ref<HTMLInputElement | null>(null)
 // Batch check options
 const batchCheckSpamblock = ref(false)
 const batchCheckMaxConcurrent = ref(3)
+// Inline proxy creation
+const showInlineProxyForm = ref(false)
+const inlineProxyLoading = ref(false)
+const newProxy = ref({
+  type: 'socks5' as 'socks5' | 'socks4' | 'http' | 'https',
+  host: '',
+  port: '',
+  username: '',
+  password: ''
+})
+const proxyTypes = [
+  { label: 'SOCKS5', value: 'socks5' },
+  { label: 'SOCKS4', value: 'socks4' },
+  { label: 'HTTP', value: 'http' },
+  { label: 'HTTPS', value: 'https' }
+]
 
 // Computed
 const selectedIds = computed({
@@ -633,6 +649,74 @@ function onRowSelect(event: any) {
 function onRowUnselect(event: any) {
   accountStore.toggleSelection(event.data.id)
 }
+
+async function createInlineProxy() {
+  if (!newProxy.value.host || !newProxy.value.port) {
+    toast.add({
+      severity: 'warn',
+      summary: t('common.warning'),
+      detail: t('proxy.messages.enterHostPort'),
+      life: 3000
+    })
+    return
+  }
+
+  inlineProxyLoading.value = true
+  try {
+    const created = await proxyStore.createProxy({
+      type: newProxy.value.type,
+      host: newProxy.value.host.trim(),
+      port: parseInt(newProxy.value.port),
+      username: newProxy.value.username.trim() || undefined,
+      password: newProxy.value.password || undefined
+    })
+
+    // Check the proxy
+    await proxyStore.checkProxy(created.id)
+
+    // Auto-select if working
+    const proxy = proxyStore.getById(created.id)
+    if (proxy?.status === 'working') {
+      selectedProxy.value = created.id
+      toast.add({
+        severity: 'success',
+        summary: t('common.success'),
+        detail: t('proxy.messages.added'),
+        life: 3000
+      })
+    } else {
+      toast.add({
+        severity: 'warn',
+        summary: t('common.warning'),
+        detail: t('proxy.messages.proxyInvalid'),
+        life: 3000
+      })
+    }
+
+    // Reset form and close
+    resetInlineProxyForm()
+    showInlineProxyForm.value = false
+  } catch (error: any) {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: error.message || t('proxy.messages.addFailed'),
+      life: 5000
+    })
+  } finally {
+    inlineProxyLoading.value = false
+  }
+}
+
+function resetInlineProxyForm() {
+  newProxy.value = {
+    type: 'socks5',
+    host: '',
+    port: '',
+    username: '',
+    password: ''
+  }
+}
 </script>
 
 <template>
@@ -934,8 +1018,80 @@ function onRowUnselect(event: any) {
       >
         <!-- Proxy Selection (Required) -->
         <div class="form-field">
-          <label class="form-label required-label">{{ t('accounts.importDialog.useProxy') }} *</label>
+          <div class="proxy-header">
+            <label class="form-label required-label">{{ t('accounts.importDialog.useProxy') }} *</label>
+            <Button
+              :label="showInlineProxyForm ? t('common.cancel') : t('accounts.importDialog.addNewProxy')"
+              :icon="showInlineProxyForm ? 'pi pi-times' : 'pi pi-plus'"
+              severity="secondary"
+              text
+              size="small"
+              @click="showInlineProxyForm = !showInlineProxyForm; if (!showInlineProxyForm) resetInlineProxyForm()"
+            />
+          </div>
+
+          <!-- Inline Proxy Form -->
+          <div v-if="showInlineProxyForm" class="inline-proxy-form">
+            <div class="proxy-form-row">
+              <div class="proxy-form-field type-field">
+                <label class="form-label-small">{{ t('proxy.addDialog.type') }}</label>
+                <Dropdown
+                  v-model="newProxy.type"
+                  :options="proxyTypes"
+                  optionLabel="label"
+                  optionValue="value"
+                  class="w-full"
+                />
+              </div>
+              <div class="proxy-form-field host-field">
+                <label class="form-label-small">{{ t('proxy.addDialog.host') }}</label>
+                <InputText
+                  v-model="newProxy.host"
+                  placeholder="127.0.0.1"
+                  class="w-full"
+                />
+              </div>
+              <div class="proxy-form-field port-field">
+                <label class="form-label-small">{{ t('proxy.addDialog.port') }}</label>
+                <InputText
+                  v-model="newProxy.port"
+                  placeholder="1080"
+                  class="w-full"
+                />
+              </div>
+            </div>
+            <div class="proxy-form-row">
+              <div class="proxy-form-field">
+                <label class="form-label-small">{{ t('proxy.addDialog.username') }} ({{ t('common.optional') }})</label>
+                <InputText
+                  v-model="newProxy.username"
+                  :placeholder="t('proxy.addDialog.username')"
+                  class="w-full"
+                />
+              </div>
+              <div class="proxy-form-field">
+                <label class="form-label-small">{{ t('proxy.addDialog.password') }} ({{ t('common.optional') }})</label>
+                <InputText
+                  v-model="newProxy.password"
+                  type="password"
+                  :placeholder="t('proxy.addDialog.password')"
+                  class="w-full"
+                />
+              </div>
+            </div>
+            <Button
+              :label="t('accounts.importDialog.addAndCheck')"
+              icon="pi pi-check"
+              :loading="inlineProxyLoading"
+              @click="createInlineProxy"
+              class="w-full mt-2"
+              size="small"
+            />
+          </div>
+
+          <!-- Proxy Dropdown -->
           <Dropdown
+            v-if="!showInlineProxyForm"
             v-model="selectedProxy"
             :options="proxyStore.workingProxies"
             optionLabel="host"
@@ -957,7 +1113,7 @@ function onRowUnselect(event: any) {
               </div>
             </template>
           </Dropdown>
-          <small v-if="proxyStore.workingProxies.length === 0" class="no-proxy-warning">
+          <small v-if="!showInlineProxyForm && proxyStore.workingProxies.length === 0" class="no-proxy-warning">
             {{ t('accounts.importDialog.noWorkingProxies') }}
           </small>
         </div>
@@ -1838,5 +1994,59 @@ function onRowUnselect(event: any) {
   padding: 2px 8px;
   border-radius: 4px;
   text-transform: uppercase;
+}
+
+/* Inline Proxy Form */
+.proxy-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.proxy-header .form-label {
+  margin-bottom: 0;
+}
+
+.inline-proxy-form {
+  background: rgba(168, 85, 247, 0.05);
+  border: 1px solid rgba(168, 85, 247, 0.15);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.proxy-form-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.proxy-form-row:last-of-type {
+  margin-bottom: 0;
+}
+
+.proxy-form-field {
+  flex: 1;
+}
+
+.proxy-form-field.type-field {
+  flex: 0.8;
+}
+
+.proxy-form-field.host-field {
+  flex: 1.5;
+}
+
+.proxy-form-field.port-field {
+  flex: 0.7;
+}
+
+.form-label-small {
+  display: block;
+  font-size: 11px;
+  color: #9ca3af;
+  margin-bottom: 4px;
+  font-weight: 500;
 }
 </style>

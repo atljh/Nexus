@@ -78,7 +78,9 @@ export default {
       selectProxy: 'Оберіть проксі',
       noProxyDirect: 'Без проксі (пряме підключення)',
       proxyRequired: 'Проксі обов\'язковий для імпорту',
-      noWorkingProxies: 'Немає робочих проксі. Спочатку додайте і перевірте проксі.'
+      noWorkingProxies: 'Немає робочих проксі. Спочатку додайте і перевірте проксі.',
+      addNewProxy: 'Додати проксі',
+      addAndCheck: 'Додати і перевірити'
     },
 
     tdata: {

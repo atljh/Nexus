@@ -78,7 +78,9 @@ export default {
       selectProxy: 'Select proxy',
       noProxyDirect: 'No proxy (direct connection)',
       proxyRequired: 'Proxy is required for import',
-      noWorkingProxies: 'No working proxies. Add and check proxies first.'
+      noWorkingProxies: 'No working proxies. Add and check proxies first.',
+      addNewProxy: 'Add Proxy',
+      addAndCheck: 'Add & Check'
     },
 
     tdata: {
