@@ -7,6 +7,13 @@ export interface Account {
   first_name: string | null
   last_name: string | null
   status: AccountStatus
+  spamblock: boolean | null
+  geo: string | null
+  register_time: string | null
+  has_2fa: boolean
+  password_hint: string | null
+  two_fa_set_at: string | null
+  metadata: Record<string, unknown> | null
   proxy: Proxy | null
   proxy_id: number | null
   group: AccountGroup | null
@@ -23,8 +30,12 @@ export type AccountStatus =
   | 'valid'
   | 'invalid'
   | 'banned'
+  | 'muted'
   | 'spamblock'
   | 'session_expired'
+  | 'deactivated'
+  | 'needs_reauth'
+  | 'connection_failed'
 
 // Proxy Types
 export interface Proxy {
@@ -35,13 +46,16 @@ export interface Proxy {
   username: string | null
   password?: string | null
   status: ProxyStatus
+  ping_ms: number | null
+  geo: string | null
+  external_ip: string | null
   accounts_count: number
   last_checked_at: string | null
   created_at: string
 }
 
 export type ProxyType = 'socks5' | 'socks4' | 'http' | 'https'
-export type ProxyStatus = 'unchecked' | 'valid' | 'invalid'
+export type ProxyStatus = 'unchecked' | 'working' | 'slow' | 'very_slow' | 'not_working' | 'timeout'
 
 export interface ProxyCreate {
   type: ProxyType
@@ -119,6 +133,66 @@ export interface CheckResult {
     phone: string | null
   }
   error?: string
+}
+
+// Batch Check Types
+export interface CheckBatchOptions {
+  checkSpamblock: boolean
+  maxConcurrent: number
+}
+
+export interface CheckBatchResult {
+  checked: number
+  results: {
+    id: number
+    status: AccountStatus
+    telegram_id: number | null
+    username: string | null
+    spamblock: boolean | null
+    error: string | null
+  }[]
+}
+
+export interface ProxyCheckBatchResult {
+  checked: number
+  results: {
+    id: number
+    status: ProxyStatus
+    ping_ms: number | null
+    external_ip: string | null
+    geo: string | null
+  }[]
+}
+
+// Proxy Assignment Types
+export interface ProxyAssignment {
+  account_id: number
+  proxy_id: number | null
+}
+
+export interface AssignProxiesRequest {
+  assignments?: ProxyAssignment[]
+  account_ids?: number[]
+  proxy_ids?: number[]
+  mode?: 'sequential' | 'random'
+}
+
+// Session+JSON Import Types
+export interface SessionJsonImportResult {
+  success: boolean
+  imported: number
+  errors: number
+  accounts: {
+    file: string
+    telegram_id: number | null
+    username: string | null
+    phone: string | null
+    geo: string | null
+  }[]
+  error_details: {
+    file: string
+    error: string
+  }[]
 }
 
 // Task Types
@@ -275,3 +349,82 @@ export const DEFAULT_COMMENT_TEMPLATES = [
     content: '{Nice|Cool|Great|Good|Awesome} {post|content|stuff}! {👍|🔥|❤️|💯}'
   }
 ] as const
+
+// ============================================================
+// 2FA Types
+// ============================================================
+
+export interface TwoFAStatus {
+  has_2fa: boolean
+  password_hint: string | null
+  error: string | null
+}
+
+export interface TwoFASetRequest {
+  password: string
+  hint?: string
+}
+
+export interface TwoFAChangeRequest {
+  current_password: string
+  new_password: string
+  new_hint?: string
+}
+
+export interface TwoFARemoveRequest {
+  current_password: string
+}
+
+export interface TwoFAResult {
+  success: boolean
+  message?: string
+  error?: string
+}
+
+// ============================================================
+// Account Authorization Types
+// ============================================================
+
+export type AuthStep = 'phone' | 'code' | 'password' | 'success'
+
+export interface ProxyConfig {
+  type: 'socks5' | 'socks4' | 'http' | 'https'
+  host: string
+  port: number
+  username?: string
+  password?: string
+}
+
+export interface AuthStartRequest {
+  phone: string
+  proxy?: ProxyConfig
+}
+
+export interface AuthStartResponse {
+  session_id: string
+  phone: string
+  status: 'code_sent'
+  message: string
+}
+
+export interface AuthVerifyRequest {
+  session_id: string
+  code: string
+  password?: string
+}
+
+export interface AuthVerifyResponse {
+  status: 'success' | 'password_required'
+  account_id?: number
+  telegram_id?: number
+  username?: string | null
+  phone?: string | null
+  message?: string
+}
+
+export interface AuthSessionInfo {
+  phone: string
+  needs_password: boolean
+  expires_at: string
+  created_at: string
+}

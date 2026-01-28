@@ -5,18 +5,20 @@ import MainLayout from '@/layouts/MainLayout.vue'
 import { useAccountStore, useProxyStore, useGroupStore, useTagStore } from '@/stores'
 import type { Account, AccountStatus, BulkAction } from '@/types'
 
+// Dialog components
+import TwoFADialog from '@/components/accounts/TwoFADialog.vue'
+import AddAccountDialog from '@/components/accounts/AddAccountDialog.vue'
+
 import Button from 'primevue/button'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Dropdown from 'primevue/dropdown'
-import FileUpload from 'primevue/fileupload'
-import TabView from 'primevue/tabview'
-import TabPanel from 'primevue/tabpanel'
 import Tag from 'primevue/tag'
 import ProgressBar from 'primevue/progressbar'
-// Checkbox imported but will be used in future enhancements
+import Checkbox from 'primevue/checkbox'
+import Slider from 'primevue/slider'
 import Menu from 'primevue/menu'
 import InputGroup from 'primevue/inputgroup'
 import InputGroupAddon from 'primevue/inputgroupaddon'
@@ -39,7 +41,12 @@ const tagStore = useTagStore()
 const showImportDialog = ref(false)
 const showGroupDialog = ref(false)
 const showTagDialog = ref(false)
+const showBatchCheckDialog = ref(false)
+const showAddAccountDialog = ref(false)
+const showTwoFADialog = ref(false)
+const twoFAAccount = ref<Account | null>(null)
 const importing = ref(false)
+const batchChecking = ref(false)
 const selectedProxy = ref<number | null>(null)
 const sessionStringInput = ref('')
 const searchQuery = ref('')
@@ -48,6 +55,13 @@ const newGroupName = ref('')
 const newGroupColor = ref('#a855f7')
 const newTagName = ref('')
 const newTagColor = ref('#a855f7')
+// Drag & drop state
+const isDragging = ref(false)
+const pendingFiles = ref<File[]>([])
+const fileInput = ref<HTMLInputElement | null>(null)
+// Batch check options
+const batchCheckSpamblock = ref(false)
+const batchCheckMaxConcurrent = ref(3)
 
 // Computed
 const selectedIds = computed({
@@ -64,7 +78,11 @@ const statusOptions = computed(() => [
   { label: t('accounts.status.valid'), value: 'valid' },
   { label: t('accounts.status.invalid'), value: 'invalid' },
   { label: t('accounts.status.banned'), value: 'banned' },
+  { label: t('accounts.status.muted'), value: 'muted' },
   { label: t('accounts.status.spamblock'), value: 'spamblock' },
+  { label: t('accounts.status.session_expired'), value: 'session_expired' },
+  { label: t('accounts.status.deactivated'), value: 'deactivated' },
+  { label: t('accounts.status.needs_reauth'), value: 'needs_reauth' },
   { label: t('accounts.status.unchecked'), value: 'unchecked' }
 ])
 
@@ -72,7 +90,7 @@ const bulkMenuItems = computed(() => [
   {
     label: t('accounts.bulk.check'),
     icon: 'pi pi-refresh',
-    command: () => handleBulkAction('check')
+    command: () => showBatchCheckDialog.value = true
   },
   {
     label: t('accounts.bulk.setProxy'),
@@ -121,54 +139,116 @@ onMounted(async () => {
 })
 
 // Methods
-async function importTdata(event: any) {
-  const file = event.files[0]
-  if (!file) return
-
-  importing.value = true
-  try {
-    const result = await accountStore.importTdata(file, selectedProxy.value || undefined)
-    toast.add({
-      severity: 'success',
-      summary: t('common.success'),
-      detail: result.message ?? t('accounts.messages.importSuccess'),
-      life: 3000
-    })
-    showImportDialog.value = false
-  } catch (error: any) {
-    toast.add({
-      severity: 'error',
-      summary: t('accounts.messages.importFailed'),
-      detail: error.message,
-      life: 5000
-    })
-  } finally {
-    importing.value = false
+function openFileSelector() {
+  if (!importing.value && fileInput.value) {
+    fileInput.value.click()
   }
 }
 
-async function importJson(event: any) {
-  const file = event.files[0]
-  if (!file) return
+function handleFileSelect(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (input.files) {
+    addFiles(Array.from(input.files))
+    input.value = ''
+  }
+}
+
+function handleFileDrop(event: DragEvent) {
+  isDragging.value = false
+  if (importing.value || !event.dataTransfer?.files) return
+  addFiles(Array.from(event.dataTransfer.files))
+}
+
+function addFiles(files: File[]) {
+  const validExtensions = ['.zip', '.json', '.session']
+  const validFiles = files.filter(f =>
+    validExtensions.some(ext => f.name.toLowerCase().endsWith(ext))
+  )
+  pendingFiles.value = [...pendingFiles.value, ...validFiles]
+}
+
+function clearPendingFiles() {
+  pendingFiles.value = []
+}
+
+function getFileIcon(filename: string): string {
+  if (filename.endsWith('.zip')) return 'pi pi-file-import'
+  if (filename.endsWith('.json')) return 'pi pi-file'
+  if (filename.endsWith('.session')) return 'pi pi-key'
+  return 'pi pi-file'
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+async function importPendingFiles() {
+  if (pendingFiles.value.length === 0) return
 
   importing.value = true
+  let totalImported = 0
+  let totalErrors = 0
+
   try {
-    const result = await accountStore.importJson(file, selectedProxy.value || undefined)
-    toast.add({
-      severity: 'success',
-      summary: t('common.success'),
-      detail: t('accounts.messages.importedCount', { count: result.imported }),
-      life: 3000
-    })
-    if (result.errors && result.errors.length > 0) {
+    const sessionFiles = pendingFiles.value.filter(f => f.name.endsWith('.session'))
+    const jsonFiles = pendingFiles.value.filter(f => f.name.endsWith('.json') && !f.name.endsWith('.session'))
+    const zipFiles = pendingFiles.value.filter(f => f.name.endsWith('.zip'))
+
+    // Import session + json pairs
+    if (sessionFiles.length > 0 && jsonFiles.length > 0) {
+      const result = await accountStore.importSessionJsonPairs(
+        sessionFiles,
+        jsonFiles,
+        selectedProxy.value || undefined
+      )
+      totalImported += result.imported
+      totalErrors += result.errors
+    } else {
+      // Import individual json files
+      for (const file of jsonFiles) {
+        try {
+          const result = await accountStore.importJson(file, selectedProxy.value || undefined)
+          totalImported += result.imported || 1
+        } catch {
+          totalErrors++
+        }
+      }
+    }
+
+    // Import TData zips
+    for (const file of zipFiles) {
+      try {
+        await accountStore.importTdata(file, selectedProxy.value || undefined)
+        totalImported++
+      } catch {
+        totalErrors++
+      }
+    }
+
+    if (totalImported > 0) {
+      toast.add({
+        severity: 'success',
+        summary: t('common.success'),
+        detail: t('accounts.messages.importedCount', { count: totalImported }),
+        life: 3000
+      })
+    }
+
+    if (totalErrors > 0) {
       toast.add({
         severity: 'warn',
         summary: t('common.warning'),
-        detail: t('accounts.messages.importPartialFail', { count: result.errors.length }),
+        detail: t('accounts.messages.importPartialFail', { count: totalErrors }),
         life: 5000
       })
     }
-    showImportDialog.value = false
+
+    clearPendingFiles()
+    if (totalImported > 0) {
+      showImportDialog.value = false
+    }
   } catch (error: any) {
     toast.add({
       severity: 'error',
@@ -318,6 +398,51 @@ async function checkAllAccounts() {
   }
 }
 
+async function checkBatchSelected() {
+  if (selectedIds.value.length === 0) {
+    toast.add({
+      severity: 'warn',
+      summary: t('common.warning'),
+      detail: t('accounts.messages.selectAccountsFirst'),
+      life: 3000
+    })
+    return
+  }
+
+  batchChecking.value = true
+  showBatchCheckDialog.value = false
+
+  try {
+    const result = await accountStore.checkBatchAccounts(
+      selectedIds.value,
+      {
+        checkSpamblock: batchCheckSpamblock.value,
+        maxConcurrent: batchCheckMaxConcurrent.value
+      }
+    )
+
+    const validCount = result.results.filter(r => r.status === 'valid').length
+    const invalidCount = result.results.filter(r => r.status !== 'valid').length
+
+    toast.add({
+      severity: 'success',
+      summary: t('common.success'),
+      detail: t('accounts.messages.batchCheckComplete', { valid: validCount, invalid: invalidCount }),
+      life: 5000
+    })
+  } catch (error: any) {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: error.message,
+      life: 5000
+    })
+  } finally {
+    batchChecking.value = false
+  }
+}
+
+
 function selectGroup(groupId: number | null) {
   groupStore.selectGroup(groupId)
   accountStore.setFilter('group_id', groupId || undefined)
@@ -422,8 +547,12 @@ function getStatusSeverity(status: string): "success" | "info" | "warn" | "dange
     case 'valid': return 'success'
     case 'invalid': return 'danger'
     case 'banned': return 'danger'
+    case 'deactivated': return 'danger'
+    case 'muted': return 'warn'
     case 'spamblock': return 'warn'
     case 'session_expired': return 'warn'
+    case 'needs_reauth': return 'warn'
+    case 'connection_failed': return 'warn'
     case 'checking': return 'info'
     default: return 'secondary'
   }
@@ -435,6 +564,21 @@ function getDisplayName(account: Account): string {
   if (account.telegram_id) return `ID: ${account.telegram_id}`
   if (account.phone) return account.phone
   return 'Unknown'
+}
+
+function openTwoFADialog(account: Account) {
+  twoFAAccount.value = account
+  showTwoFADialog.value = true
+}
+
+function handleAccountAdded() {
+  showAddAccountDialog.value = false
+  toast.add({
+    severity: 'success',
+    summary: t('common.success'),
+    detail: t('accounts.auth.success.description'),
+    life: 3000
+  })
 }
 
 function onRowSelect(event: any) {
@@ -551,6 +695,11 @@ function onRowUnselect(event: any) {
           <div class="page-header">
             <h1 class="page-title">{{ t('accounts.title') }}</h1>
             <div class="header-actions">
+              <Button
+                :label="t('accounts.addAccount')"
+                icon="pi pi-plus"
+                @click="showAddAccountDialog = true"
+              />
               <Button
                 :label="t('accounts.import')"
                 icon="pi pi-upload"
@@ -694,7 +843,7 @@ function onRowUnselect(event: any) {
                 </template>
               </Column>
 
-              <Column :header="t('common.actions')" style="width: 120px">
+              <Column :header="t('common.actions')" style="width: 160px">
                 <template #body="{ data }">
                   <div class="actions-cell">
                     <Button
@@ -704,6 +853,14 @@ function onRowUnselect(event: any) {
                       rounded
                       v-tooltip.top="t('common.check')"
                       @click="checkAccount(data)"
+                    />
+                    <Button
+                      :icon="data.has_2fa ? 'pi pi-lock' : 'pi pi-lock-open'"
+                      :severity="data.has_2fa ? 'success' : 'secondary'"
+                      text
+                      rounded
+                      v-tooltip.top="t('accounts.twoFA.title')"
+                      @click="openTwoFADialog(data)"
                     />
                     <Button
                       icon="pi pi-trash"
@@ -726,10 +883,11 @@ function onRowUnselect(event: any) {
         v-model:visible="showImportDialog"
         :header="t('accounts.importDialog.title')"
         modal
-        :style="{ width: '620px' }"
+        :style="{ width: '560px' }"
         :closable="!importing"
         class="custom-dialog"
       >
+        <!-- Proxy Selection -->
         <div class="form-field">
           <label class="form-label">{{ t('accounts.importDialog.useProxy') }} ({{ t('common.optional') }})</label>
           <Dropdown
@@ -755,70 +913,78 @@ function onRowUnselect(event: any) {
 
         <ProgressBar v-if="importing" mode="indeterminate" style="height: 4px" class="my-4" />
 
-        <TabView>
-          <TabPanel :header="t('accounts.tdata.title')" value="0">
-            <div class="tab-content">
-              <p class="description">{{ t('accounts.tdata.description') }}</p>
-              <ol class="steps-list">
-                <li>{{ t('accounts.tdata.step1') }}</li>
-                <li>{{ t('accounts.tdata.step2') }}</li>
-                <li>{{ t('accounts.tdata.step3') }}</li>
-                <li>{{ t('accounts.tdata.step4') }}</li>
-              </ol>
-              <FileUpload
-                mode="basic"
-                accept=".zip"
-                :maxFileSize="100000000"
-                :chooseLabel="t('accounts.tdata.selectFile')"
-                :auto="true"
-                :disabled="importing"
-                @uploader="importTdata"
-                customUpload
-              />
+        <!-- Drag & Drop Zone -->
+        <div
+          class="drop-zone"
+          :class="{ 'drop-zone-active': isDragging, 'drop-zone-disabled': importing }"
+          @dragenter.prevent="isDragging = true"
+          @dragover.prevent="isDragging = true"
+          @dragleave.prevent="isDragging = false"
+          @drop.prevent="handleFileDrop"
+          @click="openFileSelector"
+        >
+          <div class="drop-zone-content">
+            <i class="pi pi-cloud-upload drop-zone-icon"></i>
+            <p class="drop-zone-title">{{ t('accounts.dropZone.dropTitle') }}</p>
+            <p class="drop-zone-hint">{{ t('accounts.dropZone.dropHint') }}</p>
+            <div class="drop-zone-formats">
+              <span class="format-badge">.session + .json</span>
+              <span class="format-badge">.zip (TData)</span>
+              <span class="format-badge">.json</span>
             </div>
-          </TabPanel>
+          </div>
+          <input
+            ref="fileInput"
+            type="file"
+            multiple
+            accept=".zip,.json,.session"
+            class="hidden-input"
+            @change="handleFileSelect"
+          />
+        </div>
 
-          <TabPanel :header="t('accounts.jsonSession.title')" value="1">
-            <div class="tab-content">
-              <p class="description">{{ t('accounts.jsonSession.description') }}</p>
-              <p class="format-hint">
-                {{ t('accounts.jsonSession.format') }} <code>{"session_string": "..."}</code>
-              </p>
-              <FileUpload
-                mode="basic"
-                accept=".json"
-                :maxFileSize="10000000"
-                :chooseLabel="t('accounts.jsonSession.selectFile')"
-                :auto="true"
-                :disabled="importing"
-                @uploader="importJson"
-                customUpload
-              />
+        <!-- Selected Files Preview -->
+        <div v-if="pendingFiles.length > 0" class="pending-files">
+          <div class="pending-files-header">
+            <span>{{ t('accounts.dropZone.selectedFiles') }} ({{ pendingFiles.length }})</span>
+            <Button
+              icon="pi pi-times"
+              severity="secondary"
+              text
+              rounded
+              size="small"
+              @click="clearPendingFiles"
+            />
+          </div>
+          <div class="pending-files-list">
+            <div v-for="(file, index) in pendingFiles" :key="index" class="pending-file">
+              <i :class="getFileIcon(file.name)"></i>
+              <span class="file-name">{{ file.name }}</span>
+              <span class="file-size">{{ formatFileSize(file.size) }}</span>
             </div>
-          </TabPanel>
+          </div>
+          <Button
+            :label="t('accounts.dropZone.importButton')"
+            icon="pi pi-upload"
+            :loading="importing"
+            @click="importPendingFiles"
+            class="w-full mt-3"
+          />
+        </div>
 
-          <TabPanel :header="t('accounts.sessionString.title')" value="2">
-            <div class="tab-content">
-              <p class="description">{{ t('accounts.sessionString.description') }}</p>
-              <div class="form-field">
-                <label class="form-label">{{ t('accounts.sessionString.label') }}</label>
-                <InputText
-                  v-model="sessionStringInput"
-                  :placeholder="t('accounts.sessionString.placeholder')"
-                  class="w-full font-mono"
-                  :disabled="importing"
-                />
-              </div>
-              <Button
-                :label="t('accounts.sessionString.importButton')"
-                icon="pi pi-check"
-                :loading="importing"
-                @click="importSessionString"
-                class="mt-4"
-              />
-            </div>
-          </TabPanel>
-        </TabView>
+        <!-- Session String Input -->
+        <div class="session-string-section">
+          <div class="divider-text">{{ t('accounts.dropZone.orPasteSession') }}</div>
+          <div class="form-field mb-0">
+            <InputText
+              v-model="sessionStringInput"
+              :placeholder="t('accounts.sessionString.placeholder')"
+              class="w-full font-mono"
+              :disabled="importing"
+              @keyup.enter="importSessionString"
+            />
+          </div>
+        </div>
       </Dialog>
 
       <!-- Create Group Dialog -->
@@ -892,6 +1058,54 @@ function onRowUnselect(event: any) {
           <Button :label="t('common.create')" icon="pi pi-check" @click="createTag" />
         </template>
       </Dialog>
+
+      <!-- Batch Check Dialog -->
+      <Dialog
+        v-model:visible="showBatchCheckDialog"
+        :header="t('accounts.batchCheck.title')"
+        modal
+        :style="{ width: '400px' }"
+        class="custom-dialog"
+      >
+        <div class="form-field">
+          <p class="description">{{ t('accounts.batchCheck.description') }}</p>
+          <p class="hint-text">{{ t('accounts.selected', { count: selectedIds.length }) }}</p>
+        </div>
+        <div class="form-field">
+          <div class="checkbox-field">
+            <Checkbox v-model="batchCheckSpamblock" inputId="checkSpamblock" binary />
+            <label for="checkSpamblock" class="ml-2">{{ t('accounts.batchCheck.checkSpamblock') }}</label>
+          </div>
+          <p class="hint-text">{{ t('accounts.batchCheck.spamblockWarning') }}</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label">{{ t('accounts.batchCheck.maxConcurrent') }}: {{ batchCheckMaxConcurrent }}</label>
+          <Slider v-model="batchCheckMaxConcurrent" :min="1" :max="10" class="w-full" />
+        </div>
+
+        <template #footer>
+          <Button :label="t('common.cancel')" severity="secondary" @click="showBatchCheckDialog = false" />
+          <Button
+            :label="t('accounts.batchCheck.startCheck')"
+            icon="pi pi-check"
+            :loading="batchChecking"
+            @click="checkBatchSelected"
+          />
+        </template>
+      </Dialog>
+
+      <!-- Add Account Dialog -->
+      <AddAccountDialog
+        v-model:visible="showAddAccountDialog"
+        @added="handleAccountAdded"
+      />
+
+      <!-- 2FA Management Dialog -->
+      <TwoFADialog
+        v-model:visible="showTwoFADialog"
+        :account="twoFAAccount"
+        @updated="accountStore.fetchAccounts"
+      />
     </div>
   </MainLayout>
 </template>
@@ -1355,5 +1569,178 @@ function onRowUnselect(event: any) {
 :deep(.p-checkbox .p-checkbox-box.p-highlight) {
   background: #a855f7;
   border-color: #a855f7;
+}
+
+/* Drop Zone */
+.drop-zone {
+  border: 2px dashed rgba(168, 85, 247, 0.3);
+  border-radius: 16px;
+  padding: 32px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: rgba(168, 85, 247, 0.03);
+  margin-bottom: 16px;
+}
+
+.drop-zone:hover {
+  border-color: rgba(168, 85, 247, 0.5);
+  background: rgba(168, 85, 247, 0.06);
+}
+
+.drop-zone-active {
+  border-color: #a855f7;
+  background: rgba(168, 85, 247, 0.1);
+}
+
+.drop-zone-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.drop-zone-content {
+  pointer-events: none;
+}
+
+.drop-zone-icon {
+  font-size: 40px;
+  color: #a855f7;
+  margin-bottom: 12px;
+}
+
+.drop-zone-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #e5e7eb;
+  margin-bottom: 4px;
+}
+
+.drop-zone-hint {
+  font-size: 13px;
+  color: #6b7280;
+  margin-bottom: 12px;
+}
+
+.drop-zone-formats {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.format-badge {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #9ca3af;
+  font-family: monospace;
+}
+
+.hidden-input {
+  display: none;
+}
+
+/* Pending Files */
+.pending-files {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.pending-files-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.pending-files-list {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.pending-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  margin-bottom: 4px;
+}
+
+.pending-file i {
+  color: #a855f7;
+  font-size: 14px;
+}
+
+.pending-file .file-name {
+  flex: 1;
+  font-size: 13px;
+  color: #e5e7eb;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-file .file-size {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+/* Session String Section */
+.session-string-section {
+  margin-top: 8px;
+}
+
+.divider-text {
+  text-align: center;
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 12px;
+  position: relative;
+}
+
+.divider-text::before,
+.divider-text::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 35%;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.divider-text::before {
+  left: 0;
+}
+
+.divider-text::after {
+  right: 0;
+}
+
+/* Batch Check Dialog */
+.checkbox-field {
+  display: flex;
+  align-items: center;
+}
+
+.hint-text {
+  font-size: 12px;
+  color: #f59e0b;
+  margin-top: 4px;
+}
+
+:deep(.p-slider .p-slider-handle) {
+  background: #a855f7;
+  border-color: #a855f7;
+}
+
+:deep(.p-slider .p-slider-range) {
+  background: #a855f7;
 }
 </style>

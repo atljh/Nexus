@@ -5,7 +5,21 @@ import type {
   AccountFilters,
   AccountStatus,
   BulkAction,
-  CheckResult
+  CheckResult,
+  CheckBatchResult,
+  CheckBatchOptions,
+  AssignProxiesRequest,
+  SessionJsonImportResult,
+  TwoFAStatus,
+  TwoFASetRequest,
+  TwoFAChangeRequest,
+  TwoFARemoveRequest,
+  TwoFAResult,
+  AuthStartRequest,
+  AuthStartResponse,
+  AuthVerifyResponse,
+  AuthStep,
+  AuthSessionInfo
 } from '@/types'
 
 interface AccountsResponse {
@@ -20,12 +34,25 @@ interface ImportResponse {
   account?: Account
 }
 
+// Helper to convert File to serializable format for IPC
+async function fileToUpload(name: string, file: File): Promise<UploadFile> {
+  const buffer = await file.arrayBuffer()
+  return { name, data: buffer, filename: file.name }
+}
+
 export const useAccountStore = defineStore('accounts', () => {
   // State
   const accounts = ref<Account[]>([])
   const loading = ref(false)
   const filters = ref<AccountFilters>({})
   const selectedIds = ref<number[]>([])
+
+  // Auth flow state
+  const authSessionId = ref<string | null>(null)
+  const authPhone = ref('')
+  const authStep = ref<AuthStep>('phone')
+  const authLoading = ref(false)
+  const authError = ref<string | null>(null)
 
   // Getters
   const filteredAccounts = computed(() => {
@@ -67,8 +94,12 @@ export const useAccountStore = defineStore('accounts', () => {
       valid: 0,
       invalid: 0,
       banned: 0,
+      muted: 0,
       spamblock: 0,
-      session_expired: 0
+      session_expired: 0,
+      deactivated: 0,
+      needs_reauth: 0,
+      connection_failed: 0
     }
 
     accounts.value.forEach(a => {
@@ -164,25 +195,25 @@ export const useAccountStore = defineStore('accounts', () => {
   }
 
   async function importTdata(file: File, proxyId?: number): Promise<ImportResponse> {
-    const formData = new FormData()
-    formData.append('file', file)
+    const files = [await fileToUpload('file', file)]
+    const fields: Record<string, string> = {}
     if (proxyId) {
-      formData.append('proxy_id', proxyId.toString())
+      fields.proxy_id = proxyId.toString()
     }
 
-    const result = await window.api.upload('/api/accounts/import/tdata', formData) as ImportResponse
+    const result = await window.api.upload('/api/accounts/import/tdata', files, fields) as ImportResponse
     await fetchAccounts()
     return result
   }
 
   async function importJson(file: File, proxyId?: number): Promise<ImportResponse> {
-    const formData = new FormData()
-    formData.append('file', file)
+    const files = [await fileToUpload('file', file)]
+    const fields: Record<string, string> = {}
     if (proxyId) {
-      formData.append('proxy_id', proxyId.toString())
+      fields.proxy_id = proxyId.toString()
     }
 
-    const result = await window.api.upload('/api/accounts/import/json', formData) as ImportResponse
+    const result = await window.api.upload('/api/accounts/import/json', files, fields) as ImportResponse
     await fetchAccounts()
     return result
   }
@@ -221,12 +252,250 @@ export const useAccountStore = defineStore('accounts', () => {
     selectedIds.value = []
   }
 
+  async function checkBatchAccounts(
+    accountIds: number[],
+    options: CheckBatchOptions = { checkSpamblock: false, maxConcurrent: 3 }
+  ): Promise<CheckBatchResult> {
+    // Mark accounts as checking
+    accountIds.forEach(id => {
+      const account = accounts.value.find(a => a.id === id)
+      if (account) {
+        account.status = 'checking'
+      }
+    })
+
+    const result = await window.api.post('/api/accounts/check-batch', {
+      account_ids: accountIds,
+      check_spamblock: options.checkSpamblock,
+      max_concurrent: options.maxConcurrent
+    }) as CheckBatchResult
+
+    // Update accounts with results
+    result.results.forEach(r => {
+      const account = accounts.value.find(a => a.id === r.id)
+      if (account) {
+        account.status = r.status
+        if (r.telegram_id) account.telegram_id = r.telegram_id
+        if (r.username) account.username = r.username
+        if (r.spamblock !== null) account.spamblock = r.spamblock
+      }
+    })
+
+    return result
+  }
+
+  async function assignProxies(request: AssignProxiesRequest): Promise<{ success: boolean; updated: number }> {
+    const result = await window.api.post('/api/accounts/assign-proxies', request) as { success: boolean; updated: number }
+    await fetchAccounts()
+    return result
+  }
+
+  async function importSessionJsonPairs(
+    sessionFiles: File[],
+    jsonFiles: File[],
+    proxyId?: number
+  ): Promise<SessionJsonImportResult> {
+    const files: UploadFile[] = []
+
+    for (const file of sessionFiles) {
+      files.push(await fileToUpload('session_files', file))
+    }
+
+    for (const file of jsonFiles) {
+      files.push(await fileToUpload('json_files', file))
+    }
+
+    const fields: Record<string, string> = {}
+    if (proxyId) {
+      fields.proxy_id = proxyId.toString()
+    }
+
+    const result = await window.api.upload('/api/accounts/import/session-json', files, fields) as SessionJsonImportResult
+    await fetchAccounts()
+    return result
+  }
+
+  // ============================================================
+  // 2FA Methods
+  // ============================================================
+
+  async function check2FAStatus(accountId: number): Promise<TwoFAStatus> {
+    const result = await window.api.get(`/api/accounts/${accountId}/2fa/status`) as TwoFAStatus
+
+    // Update local account
+    const account = accounts.value.find(a => a.id === accountId)
+    if (account) {
+      account.has_2fa = result.has_2fa
+      account.password_hint = result.password_hint
+    }
+
+    return result
+  }
+
+  async function set2FA(accountId: number, data: TwoFASetRequest): Promise<TwoFAResult> {
+    const result = await window.api.post(`/api/accounts/${accountId}/2fa/set`, data) as TwoFAResult
+
+    if (result.success) {
+      const account = accounts.value.find(a => a.id === accountId)
+      if (account) {
+        account.has_2fa = true
+        account.password_hint = data.hint || null
+        account.two_fa_set_at = new Date().toISOString()
+      }
+    }
+
+    return result
+  }
+
+  async function change2FA(accountId: number, data: TwoFAChangeRequest): Promise<TwoFAResult> {
+    const result = await window.api.post(`/api/accounts/${accountId}/2fa/change`, data) as TwoFAResult
+
+    if (result.success) {
+      const account = accounts.value.find(a => a.id === accountId)
+      if (account) {
+        account.password_hint = data.new_hint || null
+        account.two_fa_set_at = new Date().toISOString()
+      }
+    }
+
+    return result
+  }
+
+  async function remove2FA(accountId: number, data: TwoFARemoveRequest): Promise<TwoFAResult> {
+    const result = await window.api.post(`/api/accounts/${accountId}/2fa/remove`, data) as TwoFAResult
+
+    if (result.success) {
+      const account = accounts.value.find(a => a.id === accountId)
+      if (account) {
+        account.has_2fa = false
+        account.password_hint = null
+        account.two_fa_set_at = null
+      }
+    }
+
+    return result
+  }
+
+  // ============================================================
+  // Account Authorization Methods
+  // ============================================================
+
+  async function startAuth(data: AuthStartRequest): Promise<AuthStartResponse> {
+    authLoading.value = true
+    authError.value = null
+
+    try {
+      const result = await window.api.post('/api/accounts/auth/start', data) as AuthStartResponse
+      authSessionId.value = result.session_id
+      authPhone.value = data.phone
+      authStep.value = 'code'
+      return result
+    } catch (e: any) {
+      authError.value = e.message || e.detail || 'Failed to start authentication'
+      throw e
+    } finally {
+      authLoading.value = false
+    }
+  }
+
+  async function verifyAuthCode(code: string, password?: string): Promise<AuthVerifyResponse> {
+    if (!authSessionId.value) {
+      throw new Error('No active session')
+    }
+
+    authLoading.value = true
+    authError.value = null
+
+    try {
+      const result = await window.api.post('/api/accounts/auth/verify', {
+        session_id: authSessionId.value,
+        code,
+        password,
+      }) as AuthVerifyResponse
+
+      if (result.status === 'password_required') {
+        authStep.value = 'password'
+        authError.value = '2FA password required'
+        return result
+      }
+
+      if (result.status === 'success') {
+        authStep.value = 'success'
+        await fetchAccounts() // Refresh account list
+      }
+
+      return result
+    } catch (e: any) {
+      authError.value = e.message || e.detail || 'Verification failed'
+      throw e
+    } finally {
+      authLoading.value = false
+    }
+  }
+
+  async function resendAuthCode(): Promise<AuthStartResponse> {
+    if (!authSessionId.value) {
+      throw new Error('No active session')
+    }
+
+    authLoading.value = true
+    authError.value = null
+
+    try {
+      const result = await window.api.post('/api/accounts/auth/resend', {
+        session_id: authSessionId.value,
+      }) as AuthStartResponse
+      return result
+    } catch (e: any) {
+      authError.value = e.message || e.detail || 'Failed to resend code'
+      throw e
+    } finally {
+      authLoading.value = false
+    }
+  }
+
+  async function cancelAuth(): Promise<void> {
+    if (authSessionId.value) {
+      try {
+        await window.api.post('/api/accounts/auth/cancel', {
+          session_id: authSessionId.value,
+        })
+      } catch {
+        // Ignore errors on cancel
+      }
+    }
+    resetAuth()
+  }
+
+  function resetAuth() {
+    authSessionId.value = null
+    authPhone.value = ''
+    authStep.value = 'phone'
+    authError.value = null
+  }
+
+  async function getAuthSessionInfo(): Promise<AuthSessionInfo | null> {
+    if (!authSessionId.value) return null
+
+    try {
+      return await window.api.get(`/api/accounts/auth/session/${authSessionId.value}`) as AuthSessionInfo
+    } catch {
+      return null
+    }
+  }
+
   return {
     // State
     accounts,
     loading,
     filters,
     selectedIds,
+    // Auth state
+    authSessionId,
+    authPhone,
+    authStep,
+    authLoading,
+    authError,
     // Getters
     filteredAccounts,
     selectedAccounts,
@@ -234,16 +503,31 @@ export const useAccountStore = defineStore('accounts', () => {
     // Actions
     fetchAccounts,
     checkAccount,
+    checkBatchAccounts,
     deleteAccount,
     updateAccount,
     bulkAction,
+    assignProxies,
     importTdata,
     importJson,
     importSessionString,
+    importSessionJsonPairs,
     setFilter,
     clearFilters,
     toggleSelection,
     selectAll,
-    clearSelection
+    clearSelection,
+    // 2FA
+    check2FAStatus,
+    set2FA,
+    change2FA,
+    remove2FA,
+    // Auth
+    startAuth,
+    verifyAuthCode,
+    resendAuthCode,
+    cancelAuth,
+    resetAuth,
+    getAuthSessionInfo
   }
 })

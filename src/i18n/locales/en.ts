@@ -25,7 +25,9 @@ export default {
     type: 'Type',
     never: 'Never',
     optional: 'optional',
-    color: 'Color'
+    color: 'Color',
+    back: 'Back',
+    done: 'Done'
   },
 
   nav: {
@@ -102,14 +104,48 @@ export default {
       importButton: 'Import Session'
     },
 
+    sessionJson: {
+      title: 'Session + JSON',
+      description: 'Import .session files with matching .json metadata files',
+      sessionFiles: 'Session Files',
+      jsonFiles: 'JSON Files',
+      selectSessionFiles: 'Select .session files',
+      selectJsonFiles: 'Select .json files',
+      filesSelected: '{count} files selected',
+      importButton: 'Import Pairs'
+    },
+
+    dropZone: {
+      dropTitle: 'Drop files here or click to select',
+      dropHint: 'Supports multiple files at once',
+      selectedFiles: 'Selected files',
+      importButton: 'Import',
+      orPasteSession: 'or paste session string'
+    },
+
+    batchCheck: {
+      title: 'Batch Check Accounts',
+      description: 'Check multiple accounts in parallel',
+      checkSpamblock: 'Check spamblock status',
+      spamblockWarning: 'Spamblock check requires sending messages to @SpamBot',
+      maxConcurrent: 'Max concurrent checks',
+      startCheck: 'Start Check',
+      progress: 'Checking: {current}/{total}',
+      complete: 'Check complete: {valid} valid, {invalid} invalid'
+    },
+
     status: {
       valid: 'valid',
       invalid: 'invalid',
       banned: 'banned',
       spamblock: 'spamblock',
-      session_expired: 'session_expired',
+      session_expired: 'session expired',
       checking: 'checking',
-      unchecked: 'unchecked'
+      unchecked: 'unchecked',
+      muted: 'muted',
+      deactivated: 'deactivated',
+      needs_reauth: 'needs reauth',
+      connection_failed: 'connection failed'
     },
 
     messages: {
@@ -127,7 +163,13 @@ export default {
       checkingAll: 'Checking all accounts in background',
       deleted: 'Account deleted successfully',
       deleteFailed: 'Failed to delete account',
-      bulkSuccess: 'Action completed for {count} accounts'
+      bulkSuccess: 'Action completed for {count} accounts',
+      selectAccountsFirst: 'Please select accounts first',
+      selectSessionFiles: 'Please select session files',
+      selectJsonFiles: 'Please select JSON files',
+      batchCheckComplete: 'Batch check complete: {valid} valid, {invalid} invalid',
+      sessionJsonImported: 'Imported {count} accounts from session+json pairs',
+      sessionJsonErrors: '{count} files failed to import'
     },
 
     allStatuses: 'All statuses',
@@ -144,7 +186,95 @@ export default {
       setGroup: 'Set Group',
       noGroup: 'No Group',
       delete: 'Delete'
-    }
+    },
+
+    twoFA: {
+      title: '2FA Management',
+      status: '2FA Status',
+      checking: 'Checking 2FA status...',
+      enabled: '2FA Enabled',
+      disabled: '2FA Disabled',
+      hint: 'Password Hint',
+      set: 'Set 2FA',
+      change: 'Change 2FA',
+      remove: 'Remove 2FA',
+      password: 'Password',
+      enterPassword: 'Enter password',
+      confirmPassword: 'Confirm Password',
+      confirmPasswordPlaceholder: 'Confirm password',
+      currentPassword: 'Current Password',
+      enterCurrentPassword: 'Enter current password',
+      newPassword: 'New Password',
+      enterNewPassword: 'Enter new password',
+      confirmNewPassword: 'Confirm New Password',
+      confirmNewPasswordPlaceholder: 'Confirm new password',
+      newHint: 'New Hint',
+      passwordHint: 'Password Hint (optional)',
+      hintPlaceholder: 'e.g. My cat name',
+      removeWarning: 'Removing 2FA will make your account less secure',
+      setSuccess: '2FA enabled successfully',
+      changeSuccess: '2FA password changed successfully',
+      removeSuccess: '2FA removed successfully',
+      errors: {
+        alreadyEnabled: '2FA is already enabled',
+        notEnabled: '2FA is not enabled',
+        invalidPassword: 'Invalid password',
+        passwordMismatch: 'Passwords do not match'
+      }
+    },
+
+    auth: {
+      title: 'Add New Account',
+      steps: {
+        phone: 'Phone',
+        code: 'Code',
+        password: '2FA',
+        success: 'Done'
+      },
+      phone: {
+        title: 'Enter Phone Number',
+        description: 'Enter the phone number associated with your Telegram account',
+        label: 'Phone Number',
+        placeholder: '+1234567890',
+        hint: 'Include country code (e.g., +1 for US, +7 for RU)'
+      },
+      code: {
+        title: 'Enter SMS Code',
+        description: 'Enter the verification code sent to your phone',
+        label: 'Code',
+        placeholder: '12345'
+      },
+      password: {
+        title: 'Enter 2FA Password',
+        description: 'This account has two-factor authentication enabled',
+        label: '2FA Password',
+        placeholder: 'Your 2FA password'
+      },
+      proxy: {
+        title: 'Proxy (Recommended)',
+        placeholder: 'Select proxy',
+        noProxy: 'No proxy (direct connection)'
+      },
+      success: {
+        title: 'Account Added',
+        description: 'Your account has been successfully authorized'
+      },
+      sendCode: 'Send Code',
+      verify: 'Verify',
+      resendCode: 'Resend Code',
+      resendIn: 'Resend in',
+      codeSent: 'Verification code sent',
+      codeResent: 'Code resent successfully',
+      errors: {
+        invalidPhone: 'Invalid phone number',
+        invalidCode: 'Invalid verification code',
+        invalidPassword: 'Invalid 2FA password',
+        phoneFlood: 'Too many attempts. Try again later',
+        phoneBanned: 'This phone number is banned'
+      }
+    },
+
+    addAccount: 'Add Account'
   },
 
   groups: {

@@ -25,7 +25,9 @@ export default {
     type: 'Тип',
     never: 'Ніколи',
     optional: 'опціонально',
-    color: 'Колір'
+    color: 'Колір',
+    back: 'Назад',
+    done: 'Готово'
   },
 
   nav: {
@@ -102,6 +104,36 @@ export default {
       importButton: 'Імпортувати сесію'
     },
 
+    sessionJson: {
+      title: 'Session + JSON',
+      description: 'Імпорт .session файлів з відповідними .json файлами метаданих',
+      sessionFiles: 'Session файли',
+      jsonFiles: 'JSON файли',
+      selectSessionFiles: 'Обрати .session файли',
+      selectJsonFiles: 'Обрати .json файли',
+      filesSelected: '{count} файлів обрано',
+      importButton: 'Імпортувати пари'
+    },
+
+    dropZone: {
+      dropTitle: 'Перетягніть файли сюди або натисніть',
+      dropHint: 'Підтримує кілька файлів одночасно',
+      selectedFiles: 'Обрані файли',
+      importButton: 'Імпортувати',
+      orPasteSession: 'або вставте рядок сесії'
+    },
+
+    batchCheck: {
+      title: 'Масова перевірка акаунтів',
+      description: 'Перевірка декількох акаунтів паралельно',
+      checkSpamblock: 'Перевірити статус спам-блоку',
+      spamblockWarning: 'Перевірка спам-блоку вимагає надсилання повідомлень до @SpamBot',
+      maxConcurrent: 'Макс. паралельних перевірок',
+      startCheck: 'Почати перевірку',
+      progress: 'Перевірка: {current}/{total}',
+      complete: 'Перевірку завершено: {valid} активних, {invalid} недійсних'
+    },
+
     status: {
       valid: 'активний',
       invalid: 'недійсний',
@@ -109,7 +141,11 @@ export default {
       spamblock: 'спам-блок',
       session_expired: 'сесія закінчилась',
       checking: 'перевірка',
-      unchecked: 'не перевірено'
+      unchecked: 'не перевірено',
+      muted: 'заглушений',
+      deactivated: 'деактивований',
+      needs_reauth: 'потребує авторизації',
+      connection_failed: 'помилка з\'єднання'
     },
 
     messages: {
@@ -127,7 +163,13 @@ export default {
       checkingAll: 'Перевірка всіх акаунтів у фоні',
       deleted: 'Акаунт успішно видалено',
       deleteFailed: 'Не вдалося видалити акаунт',
-      bulkSuccess: 'Дію виконано для {count} акаунтів'
+      bulkSuccess: 'Дію виконано для {count} акаунтів',
+      selectAccountsFirst: 'Спочатку оберіть акаунти',
+      selectSessionFiles: 'Оберіть session файли',
+      selectJsonFiles: 'Оберіть JSON файли',
+      batchCheckComplete: 'Перевірку завершено: {valid} активних, {invalid} невдалих',
+      sessionJsonImported: 'Імпортовано {count} акаунтів з пар session+json',
+      sessionJsonErrors: '{count} файлів не вдалося імпортувати'
     },
 
     allStatuses: 'Всі статуси',
@@ -144,7 +186,95 @@ export default {
       setGroup: 'Призначити групу',
       noGroup: 'Без групи',
       delete: 'Видалити'
-    }
+    },
+
+    twoFA: {
+      title: 'Управління 2FA',
+      status: 'Статус 2FA',
+      checking: 'Перевірка статусу 2FA...',
+      enabled: '2FA увімкнено',
+      disabled: '2FA вимкнено',
+      hint: 'Підказка паролю',
+      set: 'Встановити 2FA',
+      change: 'Змінити 2FA',
+      remove: 'Видалити 2FA',
+      password: 'Пароль',
+      enterPassword: 'Введіть пароль',
+      confirmPassword: 'Підтвердіть пароль',
+      confirmPasswordPlaceholder: 'Підтвердіть пароль',
+      currentPassword: 'Поточний пароль',
+      enterCurrentPassword: 'Введіть поточний пароль',
+      newPassword: 'Новий пароль',
+      enterNewPassword: 'Введіть новий пароль',
+      confirmNewPassword: 'Підтвердіть новий пароль',
+      confirmNewPasswordPlaceholder: 'Підтвердіть новий пароль',
+      newHint: 'Нова підказка',
+      passwordHint: 'Підказка паролю (опціонально)',
+      hintPlaceholder: 'Напр. Ім\'я кота',
+      removeWarning: 'Видалення 2FA зробить ваш акаунт менш захищеним',
+      setSuccess: '2FA успішно увімкнено',
+      changeSuccess: 'Пароль 2FA успішно змінено',
+      removeSuccess: '2FA успішно видалено',
+      errors: {
+        alreadyEnabled: '2FA вже увімкнено',
+        notEnabled: '2FA не увімкнено',
+        invalidPassword: 'Невірний пароль',
+        passwordMismatch: 'Паролі не співпадають'
+      }
+    },
+
+    auth: {
+      title: 'Додати новий акаунт',
+      steps: {
+        phone: 'Телефон',
+        code: 'Код',
+        password: '2FA',
+        success: 'Готово'
+      },
+      phone: {
+        title: 'Введіть номер телефону',
+        description: 'Введіть номер телефону, пов\'язаний з вашим Telegram акаунтом',
+        label: 'Номер телефону',
+        placeholder: '+380123456789',
+        hint: 'Включаючи код країни (напр. +380 для UA, +7 для RU)'
+      },
+      code: {
+        title: 'Введіть SMS код',
+        description: 'Введіть код підтвердження, надісланий на ваш телефон',
+        label: 'Код',
+        placeholder: '12345'
+      },
+      password: {
+        title: 'Введіть пароль 2FA',
+        description: 'Цей акаунт має увімкнену двофакторну автентифікацію',
+        label: 'Пароль 2FA',
+        placeholder: 'Ваш пароль 2FA'
+      },
+      proxy: {
+        title: 'Проксі (рекомендовано)',
+        placeholder: 'Оберіть проксі',
+        noProxy: 'Без проксі (пряме з\'єднання)'
+      },
+      success: {
+        title: 'Акаунт додано',
+        description: 'Ваш акаунт успішно авторизовано'
+      },
+      sendCode: 'Надіслати код',
+      verify: 'Підтвердити',
+      resendCode: 'Надіслати знову',
+      resendIn: 'Повторити через',
+      codeSent: 'Код підтвердження надіслано',
+      codeResent: 'Код успішно надіслано повторно',
+      errors: {
+        invalidPhone: 'Невірний номер телефону',
+        invalidCode: 'Невірний код підтвердження',
+        invalidPassword: 'Невірний пароль 2FA',
+        phoneFlood: 'Забагато спроб. Спробуйте пізніше',
+        phoneBanned: 'Цей номер телефону заблоковано'
+      }
+    },
+
+    addAccount: 'Додати акаунт'
   },
 
   groups: {
