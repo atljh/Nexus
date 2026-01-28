@@ -74,9 +74,11 @@ export default {
 
     importDialog: {
       title: 'Import Accounts',
-      useProxy: 'Use Proxy',
+      useProxy: 'Proxy',
       selectProxy: 'Select proxy',
-      noProxyDirect: 'No proxy (direct connection)'
+      noProxyDirect: 'No proxy (direct connection)',
+      proxyRequired: 'Proxy is required for import',
+      noWorkingProxies: 'No working proxies. Add and check proxies first.'
     },
 
     tdata: {

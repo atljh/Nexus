@@ -297,6 +297,16 @@ async function importPendingFiles() {
 }
 
 async function importSessionString() {
+  if (!selectedProxy.value) {
+    toast.add({
+      severity: 'warn',
+      summary: t('common.warning'),
+      detail: t('accounts.importDialog.proxyRequired'),
+      life: 3000
+    })
+    return
+  }
+
   if (!sessionStringInput.value.trim()) {
     toast.add({
       severity: 'warn',
@@ -922,28 +932,34 @@ function onRowUnselect(event: any) {
         :closable="!importing"
         class="custom-dialog"
       >
-        <!-- Proxy Selection -->
+        <!-- Proxy Selection (Required) -->
         <div class="form-field">
-          <label class="form-label">{{ t('accounts.importDialog.useProxy') }} ({{ t('common.optional') }})</label>
+          <label class="form-label required-label">{{ t('accounts.importDialog.useProxy') }} *</label>
           <Dropdown
             v-model="selectedProxy"
-            :options="proxyStore.proxies"
+            :options="proxyStore.workingProxies"
             optionLabel="host"
             optionValue="id"
             :placeholder="t('accounts.importDialog.selectProxy')"
             class="w-full"
-            showClear
+            :class="{ 'p-invalid': !selectedProxy && pendingFiles.length > 0 }"
           >
             <template #value="{ value }">
               <span v-if="value">
                 {{ proxyStore.getById(value)?.host }}:{{ proxyStore.getById(value)?.port }}
               </span>
-              <span v-else class="placeholder-text">{{ t('accounts.importDialog.noProxyDirect') }}</span>
+              <span v-else class="placeholder-text">{{ t('accounts.importDialog.selectProxy') }}</span>
             </template>
             <template #option="{ option }">
-              {{ option.host }}:{{ option.port }} ({{ option.type }})
+              <div class="proxy-option">
+                <span>{{ option.host }}:{{ option.port }}</span>
+                <span class="proxy-type">{{ option.type }}</span>
+              </div>
             </template>
           </Dropdown>
+          <small v-if="proxyStore.workingProxies.length === 0" class="no-proxy-warning">
+            {{ t('accounts.importDialog.noWorkingProxies') }}
+          </small>
         </div>
 
         <ProgressBar v-if="importing" mode="indeterminate" style="height: 4px" class="my-4" />
@@ -1002,9 +1018,13 @@ function onRowUnselect(event: any) {
             :label="t('accounts.dropZone.importButton')"
             icon="pi pi-upload"
             :loading="importing"
+            :disabled="!selectedProxy"
             @click="importPendingFiles"
             class="w-full mt-3"
           />
+          <small v-if="!selectedProxy" class="proxy-required-hint">
+            {{ t('accounts.importDialog.proxyRequired') }}
+          </small>
         </div>
 
         <!-- Session String Input -->
@@ -1015,9 +1035,12 @@ function onRowUnselect(event: any) {
               v-model="sessionStringInput"
               :placeholder="t('accounts.sessionString.placeholder')"
               class="w-full font-mono"
-              :disabled="importing"
+              :disabled="importing || !selectedProxy"
               @keyup.enter="importSessionString"
             />
+            <small v-if="!selectedProxy" class="proxy-required-hint mt-2">
+              {{ t('accounts.importDialog.proxyRequired') }}
+            </small>
           </div>
         </div>
       </Dialog>
@@ -1777,5 +1800,43 @@ function onRowUnselect(event: any) {
 
 :deep(.p-slider .p-slider-range) {
   background: #a855f7;
+}
+
+/* Required label */
+.required-label::after {
+  content: '';
+  color: #ef4444;
+}
+
+/* Proxy required hint */
+.proxy-required-hint {
+  display: block;
+  color: #f59e0b;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.no-proxy-warning {
+  display: block;
+  color: #ef4444;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+/* Proxy option in dropdown */
+.proxy-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.proxy-type {
+  font-size: 11px;
+  color: #6b7280;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
 }
 </style>

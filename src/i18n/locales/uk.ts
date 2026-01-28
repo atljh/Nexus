@@ -74,9 +74,11 @@ export default {
 
     importDialog: {
       title: 'Імпорт акаунтів',
-      useProxy: 'Використовувати проксі',
+      useProxy: 'Проксі',
       selectProxy: 'Оберіть проксі',
-      noProxyDirect: 'Без проксі (пряме підключення)'
+      noProxyDirect: 'Без проксі (пряме підключення)',
+      proxyRequired: 'Проксі обов\'язковий для імпорту',
+      noWorkingProxies: 'Немає робочих проксі. Спочатку додайте і перевірте проксі.'
     },
 
     tdata: {
