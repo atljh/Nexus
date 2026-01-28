@@ -5,11 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 from datetime import datetime
-import aiohttp
-from aiohttp_socks import ProxyConnector
 
 from database.database import get_session
 from database.models import Proxy
+from api.proxy_checker import proxy_checker, ProxyStatus
 
 router = APIRouter()
 
@@ -25,6 +24,11 @@ class ProxyCreate(BaseModel):
 class ProxyBulkCreate(BaseModel):
     proxies: List[str]  # Format: host:port or host:port:user:pass
     type: str = "socks5"
+
+
+class ProxyCheckBatch(BaseModel):
+    proxy_ids: List[int]
+    lookup_geo: bool = True
 
 
 @router.get("")
@@ -171,55 +175,134 @@ async def check_proxy(
     if not proxy:
         raise HTTPException(status_code=404, detail="Proxy not found")
 
-    try:
-        # Build proxy URL
-        auth = f"{proxy.username}:{proxy.password}@" if proxy.username else ""
-        proxy_url = f"{proxy.type}://{auth}{proxy.host}:{proxy.port}"
+    # Build proxy URL
+    proxy_url = proxy.get_connection_string()
 
-        connector = ProxyConnector.from_url(proxy_url)
+    # Check using ProxyChecker
+    check_result = await proxy_checker.check_single(
+        proxy_id=proxy.id,
+        proxy_url=proxy_url,
+        lookup_geo=True
+    )
 
-        async with aiohttp.ClientSession(connector=connector) as client:
-            async with client.get("https://api.ipify.org?format=json", timeout=10) as resp:
-                if resp.status == 200:
-                    proxy.status = "valid"
-                else:
-                    proxy.status = "invalid"
-
-    except Exception as e:
-        proxy.status = "invalid"
-
+    # Update proxy with results
+    proxy.status = check_result.status.value
+    proxy.ping_ms = check_result.ping_ms
+    proxy.external_ip = check_result.external_ip
+    proxy.geo = check_result.geo
     proxy.last_checked_at = datetime.utcnow()
+
     await session.commit()
 
-    return {"status": proxy.status}
+    return {
+        "status": proxy.status,
+        "ping_ms": proxy.ping_ms,
+        "external_ip": proxy.external_ip,
+        "geo": proxy.geo
+    }
+
+
+@router.post("/check-batch")
+async def check_batch_proxies(
+    data: ProxyCheckBatch,
+    session: AsyncSession = Depends(get_session)
+):
+    """Check multiple proxies in parallel"""
+    query = select(Proxy).where(Proxy.id.in_(data.proxy_ids))
+    result = await session.execute(query)
+    proxies = result.scalars().all()
+
+    if not proxies:
+        return {"checked": 0, "results": []}
+
+    # Prepare proxy data for checker
+    proxy_data = [
+        {"id": p.id, "url": p.get_connection_string()}
+        for p in proxies
+    ]
+
+    # Check all in parallel
+    check_results = await proxy_checker.check_batch(
+        proxies=proxy_data,
+        lookup_geo=data.lookup_geo
+    )
+
+    # Update proxies in DB
+    results_map = {r.proxy_id: r for r in check_results}
+    response_results = []
+
+    for proxy in proxies:
+        check_result = results_map.get(proxy.id)
+        if check_result:
+            proxy.status = check_result.status.value
+            proxy.ping_ms = check_result.ping_ms
+            proxy.external_ip = check_result.external_ip
+            proxy.geo = check_result.geo
+            proxy.last_checked_at = datetime.utcnow()
+
+            response_results.append({
+                "id": proxy.id,
+                "status": proxy.status,
+                "ping_ms": proxy.ping_ms,
+                "external_ip": proxy.external_ip,
+                "geo": proxy.geo
+            })
+
+    await session.commit()
+
+    return {
+        "checked": len(response_results),
+        "results": response_results
+    }
 
 
 @router.post("/check-all")
 async def check_all_proxies(
     session: AsyncSession = Depends(get_session)
 ):
-    """Check all proxies"""
+    """Check all proxies in parallel"""
     query = select(Proxy)
     result = await session.execute(query)
     proxies = result.scalars().all()
 
-    # TODO: Run checks in parallel
-    checked = 0
+    if not proxies:
+        return {"checked": 0, "results": []}
+
+    # Prepare proxy data for checker
+    proxy_data = [
+        {"id": p.id, "url": p.get_connection_string()}
+        for p in proxies
+    ]
+
+    # Check all in parallel
+    check_results = await proxy_checker.check_batch(
+        proxies=proxy_data,
+        lookup_geo=True
+    )
+
+    # Update proxies in DB
+    results_map = {r.proxy_id: r for r in check_results}
+    response_results = []
+
     for proxy in proxies:
-        try:
-            auth = f"{proxy.username}:{proxy.password}@" if proxy.username else ""
-            proxy_url = f"{proxy.type}://{auth}{proxy.host}:{proxy.port}"
-            connector = ProxyConnector.from_url(proxy_url)
+        check_result = results_map.get(proxy.id)
+        if check_result:
+            proxy.status = check_result.status.value
+            proxy.ping_ms = check_result.ping_ms
+            proxy.external_ip = check_result.external_ip
+            proxy.geo = check_result.geo
+            proxy.last_checked_at = datetime.utcnow()
 
-            async with aiohttp.ClientSession(connector=connector) as client:
-                async with client.get("https://api.ipify.org", timeout=10) as resp:
-                    proxy.status = "valid" if resp.status == 200 else "invalid"
-        except:
-            proxy.status = "invalid"
-
-        proxy.last_checked_at = datetime.utcnow()
-        checked += 1
+            response_results.append({
+                "id": proxy.id,
+                "status": proxy.status,
+                "ping_ms": proxy.ping_ms,
+                "geo": proxy.geo
+            })
 
     await session.commit()
 
-    return {"checked": checked}
+    return {
+        "checked": len(response_results),
+        "results": response_results
+    }
