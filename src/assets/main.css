@@ -1616,16 +1616,33 @@ body.light {
 }
 
 /* Light theme Buttons */
-.light .p-button.p-button-secondary {
-  background: #f1f5f9;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  color: #475569;
+.light .p-button.p-button-secondary,
+html.light .p-button.p-button-secondary {
+  background: #f1f5f9 !important;
+  border: 1px solid rgba(0, 0, 0, 0.12) !important;
+  color: #475569 !important;
+  box-shadow: none !important;
 }
 
-.light .p-button.p-button-secondary:hover {
-  background: #e2e8f0;
-  border-color: rgba(0, 0, 0, 0.12);
-  color: #0f172a;
+.light .p-button.p-button-secondary:hover,
+html.light .p-button.p-button-secondary:hover {
+  background: #e2e8f0 !important;
+  border-color: rgba(0, 0, 0, 0.18) !important;
+  color: #0f172a !important;
+}
+
+.light .p-button.p-button-secondary .p-button-label,
+.light .p-button.p-button-secondary .p-button-icon,
+html.light .p-button.p-button-secondary .p-button-label,
+html.light .p-button.p-button-secondary .p-button-icon {
+  color: #475569 !important;
+}
+
+.light .p-button.p-button-secondary:hover .p-button-label,
+.light .p-button.p-button-secondary:hover .p-button-icon,
+html.light .p-button.p-button-secondary:hover .p-button-label,
+html.light .p-button.p-button-secondary:hover .p-button-icon {
+  color: #0f172a !important;
 }
 
 .light .p-button.p-button-text {
@@ -1635,6 +1652,58 @@ body.light {
 .light .p-button.p-button-text:hover {
   background: #f1f5f9;
   color: #0f172a;
+}
+
+/* Light theme Primary buttons */
+.light .p-button:not(.p-button-text):not(.p-button-outlined):not(.p-button-link):not(.p-button-secondary):not(.p-button-danger):not(.p-button-success) {
+  background: linear-gradient(135deg, #9333ea 0%, #7c3aed 100%) !important;
+  box-shadow: 0 2px 8px rgba(147, 51, 234, 0.2) !important;
+  color: #ffffff !important;
+}
+
+.light .p-button:not(.p-button-text):not(.p-button-outlined):not(.p-button-link):not(.p-button-secondary):not(.p-button-danger):not(.p-button-success):hover {
+  background: linear-gradient(135deg, #7c3aed 0%, #6b21a8 100%) !important;
+  box-shadow: 0 4px 16px rgba(147, 51, 234, 0.3) !important;
+  color: #ffffff !important;
+}
+
+.light .p-button:not(.p-button-text):not(.p-button-outlined):not(.p-button-link):not(.p-button-secondary):not(.p-button-danger):not(.p-button-success) .p-button-label,
+.light .p-button:not(.p-button-text):not(.p-button-outlined):not(.p-button-link):not(.p-button-secondary):not(.p-button-danger):not(.p-button-success) .p-button-icon {
+  color: #ffffff !important;
+}
+
+.light .p-button.p-button-danger {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%) !important;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.2) !important;
+  color: #ffffff !important;
+}
+
+.light .p-button.p-button-danger:hover {
+  background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%) !important;
+  box-shadow: 0 4px 16px rgba(220, 38, 38, 0.3) !important;
+  color: #ffffff !important;
+}
+
+.light .p-button.p-button-danger .p-button-label,
+.light .p-button.p-button-danger .p-button-icon {
+  color: #ffffff !important;
+}
+
+.light .p-button.p-button-success {
+  background: linear-gradient(135deg, #16a34a 0%, #15803d 100%) !important;
+  box-shadow: 0 2px 8px rgba(22, 163, 74, 0.2) !important;
+  color: #ffffff !important;
+}
+
+.light .p-button.p-button-success:hover {
+  background: linear-gradient(135deg, #15803d 0%, #166534 100%) !important;
+  box-shadow: 0 4px 16px rgba(22, 163, 74, 0.3) !important;
+  color: #ffffff !important;
+}
+
+.light .p-button.p-button-success .p-button-label,
+.light .p-button.p-button-success .p-button-icon {
+  color: #ffffff !important;
 }
 
 /* Light theme ProgressBar */
@@ -1922,6 +1991,78 @@ html.light .group-text,
 html.light .no-data,
 .light .no-data {
   color: #94a3b8 !important;
+}
+
+/* Light theme Drop Zone */
+html.light .drop-zone,
+.light .drop-zone {
+  border-color: rgba(147, 51, 234, 0.25) !important;
+  background: rgba(147, 51, 234, 0.02) !important;
+}
+
+html.light .drop-zone:hover,
+.light .drop-zone:hover {
+  border-color: rgba(147, 51, 234, 0.4) !important;
+  background: rgba(147, 51, 234, 0.04) !important;
+}
+
+html.light .drop-zone-active,
+.light .drop-zone-active {
+  border-color: #9333ea !important;
+  background: rgba(147, 51, 234, 0.08) !important;
+}
+
+html.light .drop-zone-title,
+.light .drop-zone-title {
+  color: #0f172a !important;
+}
+
+html.light .drop-zone-hint,
+.light .drop-zone-hint {
+  color: #64748b !important;
+}
+
+html.light .format-badge,
+.light .format-badge {
+  background: rgba(0, 0, 0, 0.04) !important;
+  color: #475569 !important;
+}
+
+html.light .pending-files,
+.light .pending-files {
+  background: rgba(0, 0, 0, 0.02) !important;
+}
+
+html.light .pending-files-header,
+.light .pending-files-header {
+  color: #64748b !important;
+}
+
+html.light .pending-file,
+.light .pending-file {
+  background: rgba(0, 0, 0, 0.02) !important;
+}
+
+html.light .pending-file .file-name,
+.light .pending-file .file-name {
+  color: #0f172a !important;
+}
+
+html.light .pending-file .file-size,
+.light .pending-file .file-size {
+  color: #64748b !important;
+}
+
+html.light .divider-text,
+.light .divider-text {
+  color: #64748b !important;
+}
+
+html.light .divider-text::before,
+.light .divider-text::before,
+html.light .divider-text::after,
+.light .divider-text::after {
+  background: rgba(0, 0, 0, 0.1) !important;
 }
 
 /* Light theme DataTable deep styles */

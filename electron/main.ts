@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { spawn, ChildProcess } from 'child_process'
 import path from 'path'
-import FormData from 'form-data'
 
 let mainWindow: BrowserWindow | null = null
 let pythonProcess: ChildProcess | null = null
@@ -115,25 +114,23 @@ ipcMain.handle('api:request', async (_event, { method, endpoint, data }) => {
 // File upload handler
 ipcMain.handle('api:upload', async (_event, { endpoint, files, fields }) => {
   try {
+    // Use native FormData (Node 18+)
     const formData = new FormData()
 
-    // Add files
+    // Add files as Blob
     for (const file of files) {
-      formData.append(file.name, Buffer.from(file.data), {
-        filename: file.filename,
-        contentType: 'application/octet-stream'
-      })
+      const blob = new Blob([Buffer.from(file.data)], { type: 'application/octet-stream' })
+      formData.append(file.name, blob, file.filename)
     }
 
     // Add other fields
-    for (const [key, value] of Object.entries(fields)) {
+    for (const [key, value] of Object.entries(fields || {})) {
       formData.append(key, value as string)
     }
 
     const response = await fetch(`${BACKEND_URL}${endpoint}`, {
       method: 'POST',
-      body: formData as any,
-      headers: formData.getHeaders()
+      body: formData
     })
 
     if (!response.ok) {

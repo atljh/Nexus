@@ -1,14 +1,16 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Proxy, ProxyCreate, ProxyStatus } from '@/types'
+import type { Proxy, ProxyCreate, ProxyStatus, ProxyCheckBatchResult } from '@/types'
 
 interface ProxiesResponse {
   data: Proxy[]
 }
 
-interface ValidateResult {
-  valid: boolean
-  error?: string
+interface CheckResult {
+  status: ProxyStatus
+  ping_ms: number | null
+  external_ip: string | null
+  geo: string | null
 }
 
 export const useProxyStore = defineStore('proxies', () => {
@@ -18,13 +20,17 @@ export const useProxyStore = defineStore('proxies', () => {
 
   // Getters
   const validProxies = computed(() =>
-    proxies.value.filter(p => p.status === 'valid')
+    proxies.value.filter(p => p.status === 'working' || p.status === 'slow')
+  )
+
+  const workingProxies = computed(() =>
+    proxies.value.filter(p => ['working', 'slow', 'very_slow'].includes(p.status))
   )
 
   const proxyOptions = computed(() =>
     proxies.value.map(p => ({
       id: p.id,
-      label: `${p.host}:${p.port} (${p.type})`,
+      label: `${p.host}:${p.port} (${p.type})${p.geo ? ` [${p.geo}]` : ''}${p.ping_ms ? ` ${p.ping_ms}ms` : ''}`,
       value: p.id
     }))
   )
@@ -32,8 +38,11 @@ export const useProxyStore = defineStore('proxies', () => {
   const statusCounts = computed(() => {
     const counts: Record<ProxyStatus, number> = {
       unchecked: 0,
-      valid: 0,
-      invalid: 0
+      working: 0,
+      slow: 0,
+      very_slow: 0,
+      not_working: 0,
+      timeout: 0
     }
 
     proxies.value.forEach(p => {
@@ -76,35 +85,51 @@ export const useProxyStore = defineStore('proxies', () => {
     proxies.value = proxies.value.filter(p => p.id !== id)
   }
 
-  async function validateProxy(id: number) {
+  async function checkProxy(id: number): Promise<CheckResult> {
     const proxy = proxies.value.find(p => p.id === id)
-    if (proxy) {
-      proxy.status = 'unchecked'
-    }
 
     try {
-      const result = await window.api.post(`/api/proxy/${id}/validate`, {}) as ValidateResult
+      const result = await window.api.post(`/api/proxy/${id}/check`, {}) as CheckResult
       if (proxy) {
-        proxy.status = result.valid ? 'valid' : 'invalid'
+        proxy.status = result.status
+        proxy.ping_ms = result.ping_ms
+        proxy.external_ip = result.external_ip
+        proxy.geo = result.geo
         proxy.last_checked_at = new Date().toISOString()
       }
       return result
     } catch (error) {
       if (proxy) {
-        proxy.status = 'invalid'
+        proxy.status = 'not_working'
       }
       throw error
     }
   }
 
-  async function validateAllProxies() {
-    for (const proxy of proxies.value) {
-      try {
-        await validateProxy(proxy.id)
-      } catch {
-        // Continue validating other proxies
+  async function checkBatchProxies(proxyIds: number[], lookupGeo: boolean = true): Promise<ProxyCheckBatchResult> {
+    const result = await window.api.post('/api/proxy/check-batch', {
+      proxy_ids: proxyIds,
+      lookup_geo: lookupGeo
+    }) as ProxyCheckBatchResult
+
+    // Update proxies with results
+    result.results.forEach(r => {
+      const proxy = proxies.value.find(p => p.id === r.id)
+      if (proxy) {
+        proxy.status = r.status
+        proxy.ping_ms = r.ping_ms
+        proxy.external_ip = r.external_ip
+        proxy.geo = r.geo
+        proxy.last_checked_at = new Date().toISOString()
       }
-    }
+    })
+
+    return result
+  }
+
+  async function checkAllProxies(): Promise<ProxyCheckBatchResult> {
+    const allIds = proxies.value.map(p => p.id)
+    return checkBatchProxies(allIds)
   }
 
   async function importProxies(text: string, type: Proxy['type'] = 'socks5') {
@@ -145,6 +170,7 @@ export const useProxyStore = defineStore('proxies', () => {
     loading,
     // Getters
     validProxies,
+    workingProxies,
     proxyOptions,
     statusCounts,
     // Actions
@@ -152,8 +178,9 @@ export const useProxyStore = defineStore('proxies', () => {
     createProxy,
     updateProxy,
     deleteProxy,
-    validateProxy,
-    validateAllProxies,
+    checkProxy,
+    checkBatchProxies,
+    checkAllProxies,
     importProxies,
     getById
   }
