@@ -198,21 +198,49 @@ async function importPendingFiles() {
 
     // Import session + json pairs
     if (sessionFiles.length > 0 && jsonFiles.length > 0) {
-      const result = await accountStore.importSessionJsonPairs(
-        sessionFiles,
-        jsonFiles,
-        selectedProxy.value || undefined
-      )
-      totalImported += result.imported
-      totalErrors += result.errors
+      try {
+        const result = await accountStore.importSessionJsonPairs(
+          sessionFiles,
+          jsonFiles,
+          selectedProxy.value || undefined
+        )
+        totalImported += result.imported
+        totalErrors += result.errors
+        // Show individual errors
+        if (result.error_details?.length > 0) {
+          result.error_details.forEach((err: { file: string; error: string }) => {
+            toast.add({
+              severity: 'error',
+              summary: err.file,
+              detail: err.error,
+              life: 5000
+            })
+          })
+        }
+      } catch (e: any) {
+        console.error('Session+JSON import failed:', e.message || e)
+        toast.add({
+          severity: 'error',
+          summary: t('accounts.messages.importFailed'),
+          detail: e.message || 'Import failed',
+          life: 5000
+        })
+      }
     } else {
       // Import individual json files
       for (const file of jsonFiles) {
         try {
           const result = await accountStore.importJson(file, selectedProxy.value || undefined)
           totalImported += result.imported || 1
-        } catch {
+        } catch (e: any) {
           totalErrors++
+          console.error(`Failed to import ${file.name}:`, e.message || e)
+          toast.add({
+            severity: 'error',
+            summary: file.name,
+            detail: e.message || 'Import failed',
+            life: 5000
+          })
         }
       }
     }
@@ -222,8 +250,15 @@ async function importPendingFiles() {
       try {
         await accountStore.importTdata(file, selectedProxy.value || undefined)
         totalImported++
-      } catch {
+      } catch (e: any) {
         totalErrors++
+        console.error(`Failed to import ${file.name}:`, e.message || e)
+        toast.add({
+          severity: 'error',
+          summary: file.name,
+          detail: e.message || 'Import failed',
+          life: 5000
+        })
       }
     }
 
