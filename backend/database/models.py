@@ -65,7 +65,14 @@ class Proxy(Base):
     port: Mapped[int] = mapped_column(Integer)
     username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     password: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="unchecked")  # unchecked, valid, invalid
+    status: Mapped[str] = mapped_column(String(20), default="unchecked")
+    # Status: unchecked, working, slow, very_slow, not_working, timeout
+
+    # Check results
+    ping_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    geo: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)  # Country code: RU, US, UA
+    external_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)  # IPv4/IPv6
+
     last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -79,6 +86,9 @@ class Proxy(Base):
             "port": self.port,
             "username": self.username,
             "status": self.status,
+            "ping_ms": self.ping_ms,
+            "geo": self.geo,
+            "external_ip": self.external_ip,
             "accounts_count": len(self.accounts) if self.accounts else 0,
             "last_checked_at": self.last_checked_at.isoformat() if self.last_checked_at else None,
             "created_at": self.created_at.isoformat()
@@ -101,10 +111,22 @@ class Account(Base):
 
     # Status
     status: Mapped[str] = mapped_column(String(30), default="unchecked")
-    # unchecked, checking, valid, invalid, banned, spamblock, session_expired
+    # unchecked, checking, valid, invalid, banned, muted, spamblock, session_expired, deactivated, needs_reauth
 
     # Session storage
     session_string: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Extended metadata from JSON import
+    extra_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    spamblock: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    register_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    geo: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)  # Country code: RU, US, UA
+
+    # 2FA (Two-Factor Authentication)
+    has_2fa: Mapped[bool] = mapped_column(Boolean, default=False)
+    password_hint: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    two_fa_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Stored for auto-login
+    two_fa_set_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Proxy
     proxy_id: Mapped[Optional[int]] = mapped_column(ForeignKey("proxies.id", ondelete="SET NULL"), nullable=True)
@@ -134,6 +156,13 @@ class Account(Base):
             "first_name": self.first_name,
             "last_name": self.last_name,
             "status": self.status,
+            "spamblock": self.spamblock,
+            "geo": self.geo,
+            "register_time": self.register_time.isoformat() if self.register_time else None,
+            "has_2fa": self.has_2fa,
+            "password_hint": self.password_hint,
+            "two_fa_set_at": self.two_fa_set_at.isoformat() if self.two_fa_set_at else None,
+            "metadata": self.extra_data,
             "proxy": self.proxy.to_dict() if self.proxy else None,
             "proxy_id": self.proxy_id,
             "group": self.group.to_dict() if self.group else None,
