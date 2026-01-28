@@ -80,7 +80,11 @@ export default {
       proxyRequired: 'Проксі обов\'язковий для імпорту',
       noWorkingProxies: 'Немає робочих проксі. Спочатку додайте і перевірте проксі.',
       addNewProxy: 'Додати проксі',
-      addAndCheck: 'Додати і перевірити'
+      addAndCheck: 'Додати і перевірити',
+      proxyString: 'Рядок',
+      proxyForm: 'Форма',
+      proxyStringLabel: 'Рядок проксі',
+      proxyStringPlaceholder: 'host:port або host:port:user:pass'
     },
 
     tdata: {

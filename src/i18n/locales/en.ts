@@ -80,7 +80,11 @@ export default {
       proxyRequired: 'Proxy is required for import',
       noWorkingProxies: 'No working proxies. Add and check proxies first.',
       addNewProxy: 'Add Proxy',
-      addAndCheck: 'Add & Check'
+      addAndCheck: 'Add & Check',
+      proxyString: 'String',
+      proxyForm: 'Form',
+      proxyStringLabel: 'Proxy string',
+      proxyStringPlaceholder: 'host:port or host:port:user:pass'
     },
 
     tdata: {

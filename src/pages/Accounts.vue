@@ -78,6 +78,8 @@ const proxyTypes = [
   { label: 'HTTP', value: 'http' },
   { label: 'HTTPS', value: 'https' }
 ]
+const proxyString = ref('')
+const proxyInputMode = ref<'form' | 'string'>('string')
 
 // Computed
 const selectedIds = computed({
@@ -716,6 +718,89 @@ function resetInlineProxyForm() {
     username: '',
     password: ''
   }
+  proxyString.value = ''
+}
+
+function parseProxyString(str: string): { host: string; port: number; username?: string; password?: string } | null {
+  const trimmed = str.trim()
+  if (!trimmed) return null
+
+  // Format: host:port or host:port:user:pass
+  const parts = trimmed.split(':')
+  if (parts.length < 2) return null
+
+  const host = parts[0]
+  const port = parseInt(parts[1])
+
+  if (!host || isNaN(port)) return null
+
+  const result: { host: string; port: number; username?: string; password?: string } = { host, port }
+
+  if (parts.length >= 4) {
+    result.username = parts[2]
+    result.password = parts.slice(3).join(':') // Password may contain colons
+  }
+
+  return result
+}
+
+async function createProxyFromString() {
+  const parsed = parseProxyString(proxyString.value)
+  if (!parsed) {
+    toast.add({
+      severity: 'warn',
+      summary: t('common.warning'),
+      detail: t('proxy.messages.enterHostPort'),
+      life: 3000
+    })
+    return
+  }
+
+  inlineProxyLoading.value = true
+  try {
+    const created = await proxyStore.createProxy({
+      type: newProxy.value.type,
+      host: parsed.host,
+      port: parsed.port,
+      username: parsed.username,
+      password: parsed.password
+    })
+
+    // Check the proxy
+    await proxyStore.checkProxy(created.id)
+
+    // Auto-select if working
+    const proxy = proxyStore.getById(created.id)
+    if (proxy?.status === 'working') {
+      selectedProxy.value = created.id
+      toast.add({
+        severity: 'success',
+        summary: t('common.success'),
+        detail: t('proxy.messages.added'),
+        life: 3000
+      })
+    } else {
+      toast.add({
+        severity: 'warn',
+        summary: t('common.warning'),
+        detail: t('proxy.messages.proxyInvalid'),
+        life: 3000
+      })
+    }
+
+    // Reset form and close
+    resetInlineProxyForm()
+    showInlineProxyForm.value = false
+  } catch (error: any) {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: error.message || t('proxy.messages.addFailed'),
+      life: 5000
+    })
+  } finally {
+    inlineProxyLoading.value = false
+  }
 }
 </script>
 
@@ -1032,61 +1117,117 @@ function resetInlineProxyForm() {
 
           <!-- Inline Proxy Form -->
           <div v-if="showInlineProxyForm" class="inline-proxy-form">
-            <div class="proxy-form-row">
-              <div class="proxy-form-field type-field">
-                <label class="form-label-small">{{ t('proxy.addDialog.type') }}</label>
-                <Dropdown
-                  v-model="newProxy.type"
-                  :options="proxyTypes"
-                  optionLabel="label"
-                  optionValue="value"
-                  class="w-full"
-                />
-              </div>
-              <div class="proxy-form-field host-field">
-                <label class="form-label-small">{{ t('proxy.addDialog.host') }}</label>
-                <InputText
-                  v-model="newProxy.host"
-                  placeholder="127.0.0.1"
-                  class="w-full"
-                />
-              </div>
-              <div class="proxy-form-field port-field">
-                <label class="form-label-small">{{ t('proxy.addDialog.port') }}</label>
-                <InputText
-                  v-model="newProxy.port"
-                  placeholder="1080"
-                  class="w-full"
-                />
-              </div>
+            <!-- Mode Toggle -->
+            <div class="proxy-mode-toggle">
+              <Button
+                :label="t('accounts.importDialog.proxyString')"
+                :severity="proxyInputMode === 'string' ? 'primary' : 'secondary'"
+                :outlined="proxyInputMode !== 'string'"
+                size="small"
+                @click="proxyInputMode = 'string'"
+              />
+              <Button
+                :label="t('accounts.importDialog.proxyForm')"
+                :severity="proxyInputMode === 'form' ? 'primary' : 'secondary'"
+                :outlined="proxyInputMode !== 'form'"
+                size="small"
+                @click="proxyInputMode = 'form'"
+              />
             </div>
-            <div class="proxy-form-row">
-              <div class="proxy-form-field">
-                <label class="form-label-small">{{ t('proxy.addDialog.username') }} ({{ t('common.optional') }})</label>
-                <InputText
-                  v-model="newProxy.username"
-                  :placeholder="t('proxy.addDialog.username')"
-                  class="w-full"
-                />
+
+            <!-- String Input Mode -->
+            <div v-if="proxyInputMode === 'string'" class="proxy-string-input">
+              <div class="proxy-form-row">
+                <div class="proxy-form-field type-field">
+                  <label class="form-label-small">{{ t('proxy.addDialog.type') }}</label>
+                  <Dropdown
+                    v-model="newProxy.type"
+                    :options="proxyTypes"
+                    optionLabel="label"
+                    optionValue="value"
+                    class="w-full"
+                  />
+                </div>
+                <div class="proxy-form-field" style="flex: 2">
+                  <label class="form-label-small">{{ t('accounts.importDialog.proxyStringLabel') }}</label>
+                  <InputText
+                    v-model="proxyString"
+                    :placeholder="t('accounts.importDialog.proxyStringPlaceholder')"
+                    class="w-full font-mono"
+                    @keyup.enter="createProxyFromString"
+                  />
+                </div>
               </div>
-              <div class="proxy-form-field">
-                <label class="form-label-small">{{ t('proxy.addDialog.password') }} ({{ t('common.optional') }})</label>
-                <InputText
-                  v-model="newProxy.password"
-                  type="password"
-                  :placeholder="t('proxy.addDialog.password')"
-                  class="w-full"
-                />
-              </div>
+              <small class="proxy-format-hint">{{ t('proxy.addDialog.bulkFormat') }}</small>
+              <Button
+                :label="t('accounts.importDialog.addAndCheck')"
+                icon="pi pi-check"
+                :loading="inlineProxyLoading"
+                :disabled="!proxyString.trim()"
+                @click="createProxyFromString"
+                class="w-full mt-2"
+                size="small"
+              />
             </div>
-            <Button
-              :label="t('accounts.importDialog.addAndCheck')"
-              icon="pi pi-check"
-              :loading="inlineProxyLoading"
-              @click="createInlineProxy"
-              class="w-full mt-2"
-              size="small"
-            />
+
+            <!-- Form Input Mode -->
+            <div v-else>
+              <div class="proxy-form-row">
+                <div class="proxy-form-field type-field">
+                  <label class="form-label-small">{{ t('proxy.addDialog.type') }}</label>
+                  <Dropdown
+                    v-model="newProxy.type"
+                    :options="proxyTypes"
+                    optionLabel="label"
+                    optionValue="value"
+                    class="w-full"
+                  />
+                </div>
+                <div class="proxy-form-field host-field">
+                  <label class="form-label-small">{{ t('proxy.addDialog.host') }}</label>
+                  <InputText
+                    v-model="newProxy.host"
+                    placeholder="127.0.0.1"
+                    class="w-full"
+                  />
+                </div>
+                <div class="proxy-form-field port-field">
+                  <label class="form-label-small">{{ t('proxy.addDialog.port') }}</label>
+                  <InputText
+                    v-model="newProxy.port"
+                    placeholder="1080"
+                    class="w-full"
+                  />
+                </div>
+              </div>
+              <div class="proxy-form-row">
+                <div class="proxy-form-field">
+                  <label class="form-label-small">{{ t('proxy.addDialog.username') }} ({{ t('common.optional') }})</label>
+                  <InputText
+                    v-model="newProxy.username"
+                    :placeholder="t('proxy.addDialog.username')"
+                    class="w-full"
+                  />
+                </div>
+                <div class="proxy-form-field">
+                  <label class="form-label-small">{{ t('proxy.addDialog.password') }} ({{ t('common.optional') }})</label>
+                  <InputText
+                    v-model="newProxy.password"
+                    type="password"
+                    :placeholder="t('proxy.addDialog.password')"
+                    class="w-full"
+                  />
+                </div>
+              </div>
+              <Button
+                :label="t('accounts.importDialog.addAndCheck')"
+                icon="pi pi-check"
+                :loading="inlineProxyLoading"
+                @click="createInlineProxy"
+                class="w-full mt-2"
+                size="small"
+              />
+            </div>
           </div>
 
           <!-- Proxy Dropdown -->
@@ -2048,5 +2189,26 @@ function resetInlineProxyForm() {
   color: #9ca3af;
   margin-bottom: 4px;
   font-weight: 500;
+}
+
+.proxy-mode-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.proxy-mode-toggle :deep(.p-button) {
+  flex: 1;
+}
+
+.proxy-string-input {
+  display: flex;
+  flex-direction: column;
+}
+
+.proxy-format-hint {
+  color: #6b7280;
+  font-size: 11px;
+  margin-top: 4px;
 }
 </style>
