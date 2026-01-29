@@ -164,6 +164,47 @@ export const useProxyStore = defineStore('proxies', () => {
     return proxies.value.find(p => p.id === id)
   }
 
+  /**
+   * Create a single proxy from a string like "type://user:pass@host:port" or "host:port:user:pass"
+   */
+  async function createFromString(proxyString: string): Promise<Proxy | null> {
+    const trimmed = proxyString.trim()
+    if (!trimmed) return null
+
+    let type: Proxy['type'] = 'socks5'
+    let host = ''
+    let port = 0
+    let username: string | undefined
+    let password: string | undefined
+
+    // Try URL format first: type://user:pass@host:port
+    const urlMatch = trimmed.match(/^(socks5|socks4|http|https):\/\/(?:([^:]+):([^@]+)@)?([^:]+):(\d+)$/i)
+    if (urlMatch) {
+      type = urlMatch[1].toLowerCase() as Proxy['type']
+      username = urlMatch[2] || undefined
+      password = urlMatch[3] || undefined
+      host = urlMatch[4]
+      port = parseInt(urlMatch[5])
+    } else {
+      // Try simple format: host:port or host:port:user:pass
+      const parts = trimmed.split(':')
+      if (parts.length >= 2) {
+        host = parts[0]
+        port = parseInt(parts[1])
+        username = parts[2] || undefined
+        password = parts[3] || undefined
+      } else {
+        throw new Error('Invalid proxy format')
+      }
+    }
+
+    if (!host || !port || isNaN(port)) {
+      throw new Error('Invalid proxy format')
+    }
+
+    return createProxy({ type, host, port, username, password })
+  }
+
   return {
     // State
     proxies,
@@ -182,6 +223,7 @@ export const useProxyStore = defineStore('proxies', () => {
     checkBatchProxies,
     checkAllProxies,
     importProxies,
-    getById
+    getById,
+    createFromString
   }
 })
