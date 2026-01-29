@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import { useAccountStore, useProxyStore, useGroupStore, useTagStore } from '@/stores'
+import { useDebouncedRef } from '@/composables'
 import type { Account, AccountStatus, BulkAction } from '@/types'
 
 // Dialog components
@@ -141,8 +142,11 @@ const bulkMenuItems = computed(() => [
   }
 ])
 
-// Watch search query
-watch(searchQuery, (val) => {
+// Debounced search query for better performance
+const debouncedSearch = useDebouncedRef(searchQuery, 300)
+
+// Watch debounced search query
+watch(debouncedSearch, (val) => {
   accountStore.setFilter('search', val || undefined)
 })
 
@@ -897,6 +901,7 @@ async function createProxyFromString() {
                   rounded
                   size="small"
                   class="delete-btn"
+                  :aria-label="t('common.delete') + ' ' + tag.name"
                   @click.stop="deleteTag(tag.id)"
                 />
               </div>
@@ -971,6 +976,8 @@ async function createProxyFromString() {
                 severity="secondary"
                 text
                 rounded
+                :aria-label="t('accounts.bulk.clearSelection')"
+                v-tooltip.top="t('accounts.bulk.clearSelection')"
                 @click="accountStore.clearSelection"
               />
             </div>
@@ -1066,6 +1073,7 @@ async function createProxyFromString() {
                       text
                       rounded
                       v-tooltip.top="t('common.check')"
+                      :aria-label="t('common.check')"
                       @click="checkAccount(data)"
                     />
                     <Button
@@ -1074,6 +1082,7 @@ async function createProxyFromString() {
                       text
                       rounded
                       v-tooltip.top="t('accounts.twoFA.title')"
+                      :aria-label="t('accounts.twoFA.title')"
                       @click="openTwoFADialog(data)"
                     />
                     <Button
@@ -1082,6 +1091,7 @@ async function createProxyFromString() {
                       text
                       rounded
                       v-tooltip.top="t('common.delete')"
+                      :aria-label="t('common.delete')"
                       @click="confirmDelete(data)"
                     />
                   </div>
@@ -1301,6 +1311,8 @@ async function createProxyFromString() {
               text
               rounded
               size="small"
+              :aria-label="t('accounts.dropZone.clearFiles')"
+              v-tooltip.top="t('accounts.dropZone.clearFiles')"
               @click="clearPendingFiles"
             />
           </div>
