@@ -25,6 +25,7 @@ python-socks[asyncio]==2.7.1
 # Utils
 python-dotenv==1.0.1
 loguru==0.7.3
+cryptography==44.0.0
 
 # Session import
 telegram-desktop-decrypter @ git+https://github.com/ntqbit/tdesktop-decrypter.git

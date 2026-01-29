@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from database.database import get_session
 from database.models import Account, Proxy, AccountGroup, AccountTag
+from utils.encryption import encryption_service
 from telegram import (
     convert_tdata_to_session,
     validate_session,
@@ -1040,7 +1041,7 @@ async def set_2fa(
     # Update database
     account.has_2fa = True
     account.password_hint = data.hint
-    account.two_fa_password = data.password  # Store for auto-login
+    account.two_fa_password = encryption_service.encrypt(data.password)  # Encrypted for security
     account.two_fa_set_at = datetime.utcnow()
 
     await session.commit()
@@ -1094,7 +1095,7 @@ async def change_2fa(
 
     # Update database
     account.password_hint = data.new_hint
-    account.two_fa_password = data.new_password
+    account.two_fa_password = encryption_service.encrypt(data.new_password)  # Encrypted for security
     account.two_fa_set_at = datetime.utcnow()
 
     await session.commit()

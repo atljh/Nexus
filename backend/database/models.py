@@ -111,7 +111,7 @@ class Account(Base):
 
     # Status
     status: Mapped[str] = mapped_column(String(30), default="unchecked")
-    # unchecked, checking, valid, invalid, banned, muted, spamblock, session_expired, deactivated, needs_reauth
+    # unchecked, checking, valid, invalid, banned, muted, spamblock, session_expired, deactivated, needs_reauth, connection_failed
 
     # Session storage
     session_string: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
