@@ -128,7 +128,8 @@ export default {
       dropHint: 'Supports multiple files at once',
       selectedFiles: 'Selected files',
       importButton: 'Import',
-      orPasteSession: 'or paste session string'
+      orPasteSession: 'or paste session string',
+      clearFiles: 'Clear files'
     },
 
     batchCheck: {
@@ -193,7 +194,8 @@ export default {
       noProxy: 'No Proxy',
       setGroup: 'Set Group',
       noGroup: 'No Group',
-      delete: 'Delete'
+      delete: 'Delete',
+      clearSelection: 'Clear selection'
     },
 
     twoFA: {
@@ -499,6 +501,52 @@ export default {
       templateCreated: 'Template created',
       templateDeleted: 'Template deleted',
       defaultsLoaded: 'Default templates loaded'
+    }
+  },
+
+  errors: {
+    // Network errors
+    NETWORK_ERROR: 'Network connection failed. Please check your internet connection.',
+    TIMEOUT: 'Request timed out. Please try again.',
+    CONNECTION_REFUSED: 'Unable to connect to server. Please ensure the backend is running.',
+
+    // Auth errors
+    UNAUTHORIZED: 'Authentication required. Please log in.',
+    SESSION_EXPIRED: 'Your session has expired. Please reconnect the account.',
+    INVALID_CREDENTIALS: 'Invalid credentials provided.',
+
+    // Account errors
+    ACCOUNT_NOT_FOUND: 'Account not found.',
+    ACCOUNT_BANNED: 'This account has been banned.',
+    ACCOUNT_SPAMBLOCK: 'This account has spam restrictions.',
+    INVALID_SESSION: 'Invalid session. Please re-import the account.',
+    PROXY_REQUIRED: 'A proxy is required for this operation.',
+
+    // Proxy errors
+    PROXY_NOT_FOUND: 'Proxy not found.',
+    PROXY_NOT_WORKING: 'Proxy is not working.',
+    PROXY_TIMEOUT: 'Proxy connection timed out.',
+
+    // Import errors
+    IMPORT_FAILED: 'Failed to import account.',
+    INVALID_FILE_FORMAT: 'Invalid file format.',
+    NO_VALID_SESSIONS: 'No valid sessions found in the file.',
+
+    // 2FA errors
+    TWO_FA_REQUIRED: 'Two-factor authentication is required.',
+    TWO_FA_INVALID: 'Invalid 2FA password.',
+
+    // Generic errors
+    VALIDATION_ERROR: 'Please check the entered data.',
+    SERVER_ERROR: 'Server error. Please try again later.',
+    UNKNOWN: 'An unexpected error occurred.',
+
+    // Summaries
+    summary: {
+      network: 'Connection Error',
+      auth: 'Authentication Error',
+      validation: 'Validation Error',
+      default: 'Error'
     }
   }
 }
