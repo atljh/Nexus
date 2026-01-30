@@ -35,9 +35,13 @@ interface ImportResponse {
 }
 
 // Helper to convert File to serializable format for IPC
-async function fileToUpload(name: string, file: File): Promise<UploadFile> {
+async function fileToUpload(name: string, file: File, customFilename?: string): Promise<UploadFile> {
   const buffer = await file.arrayBuffer()
-  return { name, data: buffer, filename: file.name }
+  // Convert to Uint8Array for IPC serialization (ArrayBuffer can't be cloned)
+  const data = new Uint8Array(buffer)
+  // Use webkitRelativePath for folder uploads, or custom filename, or just file.name
+  const filename = customFilename || (file as any).webkitRelativePath || file.name
+  return { name, data, filename }
 }
 
 export const useAccountStore = defineStore('accounts', () => {
