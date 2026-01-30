@@ -9,10 +9,14 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import (
     AuthKeyUnregisteredError,
+    AuthKeyDuplicatedError,
+    AuthKeyPermEmptyError,
     UserDeactivatedError,
     UserDeactivatedBanError,
     SessionRevokedError,
+    SessionExpiredError as TelethonSessionExpired,
     PhoneNumberBannedError,
+    FloodWaitError,
 )
 
 from .session_manager import SessionManager
@@ -165,7 +169,8 @@ async def validate_session(
         api_hash: Optional API Hash
 
     Returns:
-        Tuple[is_valid, user_info, error_message]
+        Tuple[is_valid, user_info, error_code]
+        error_code is a translation key like "session_expired", "banned", etc.
     """
     try:
         client = BaseClient(
@@ -174,12 +179,43 @@ async def validate_session(
             api_hash=api_hash,
             proxy=proxy,
             connection_retries=3,
-            timeout=10,
+            timeout=15,
         )
 
         async with client:
             await client.check_auth()
             me = await client.get_me()
+
+            # Check if user is restricted/frozen
+            is_restricted = getattr(me, "restricted", False)
+            restriction_reason = getattr(me, "restriction_reason", None)
+
+            if is_restricted:
+                reason_text = ""
+                if restriction_reason:
+                    # restriction_reason is a list of RestrictionReason objects
+                    reasons = [getattr(r, "reason", str(r)) for r in restriction_reason]
+                    reason_text = ", ".join(reasons)
+                return False, None, f"restricted:{reason_text}" if reason_text else "restricted"
+
+            # Try to perform a search to detect frozen accounts
+            # Frozen accounts get FROZEN_METHOD_INVALID error
+            try:
+                from telethon.tl.functions.contacts import SearchRequest
+                await client._client(SearchRequest(q='telegram', limit=1))
+            except Exception as action_error:
+                error_str = str(action_error).lower()
+                if "frozen" in error_str:
+                    return False, None, "frozen"
+                elif "deactivated" in error_str or "banned" in error_str:
+                    return False, None, "banned"
+                elif "forbidden" in error_str or "restricted" in error_str:
+                    return False, None, "restricted"
+                elif "flood" in error_str:
+                    # Flood is not a permanent issue, account might still be valid
+                    pass
+                # Other errors - account might still be valid
+                pass
 
             user_info = {
                 "telegram_id": me.id,
@@ -192,7 +228,41 @@ async def validate_session(
 
             return True, user_info, None
 
-    except (UnauthorizedError, SessionExpiredError) as e:
-        return False, None, str(e)
+    except (UserDeactivatedBanError, PhoneNumberBannedError):
+        return False, None, "banned"
+    except UserDeactivatedError:
+        return False, None, "deactivated"
+    except AuthKeyDuplicatedError:
+        return False, None, "auth_key_duplicated"
+    except (AuthKeyUnregisteredError, AuthKeyPermEmptyError):
+        return False, None, "session_expired"
+    except (SessionRevokedError, TelethonSessionExpired):
+        return False, None, "session_revoked"
+    except FloodWaitError as e:
+        return False, None, f"flood_wait:{e.seconds}"
+    except (UnauthorizedError, SessionExpiredError):
+        return False, None, "session_expired"
+    except ConnectionError:
+        return False, None, "connection_failed"
     except Exception as e:
-        return False, None, f"Connection error: {str(e)}"
+        error_str = str(e).lower()
+        # Parse common errors
+        if "deactivated" in error_str and "ban" in error_str:
+            return False, None, "banned"
+        elif "deactivated" in error_str:
+            return False, None, "deactivated"
+        elif "auth" in error_str and "key" in error_str:
+            if "duplicat" in error_str:
+                return False, None, "auth_key_duplicated"
+            else:
+                return False, None, "session_expired"
+        elif "session" in error_str and ("revok" in error_str or "expir" in error_str):
+            return False, None, "session_revoked"
+        elif "flood" in error_str:
+            return False, None, "flood_wait"
+        elif "timeout" in error_str or "timed out" in error_str:
+            return False, None, "timeout"
+        elif "connection" in error_str or "connect" in error_str:
+            return False, None, "connection_failed"
+        else:
+            return False, None, f"unknown:{str(e)[:100]}"

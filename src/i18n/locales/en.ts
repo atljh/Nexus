@@ -84,7 +84,9 @@ export default {
       proxyString: 'String',
       proxyForm: 'Form',
       proxyStringLabel: 'Proxy string',
-      proxyStringPlaceholder: 'host:port or host:port:user:pass'
+      proxyStringPlaceholder: 'host:port or host:port:user:pass',
+      proxyStringPlaceholderFull: 'socks5://user:pass@host:port',
+      proxyStringFormats: 'Formats: socks5://user:pass@host:port, user:pass@host:port, host:port:user:pass'
     },
 
     tdata: {
@@ -125,7 +127,7 @@ export default {
 
     dropZone: {
       dropTitle: 'Drop files here or click to select',
-      dropHint: 'Supports multiple files at once',
+      dropHint: 'Supports multiple files and tdata folders at once',
       selectedFiles: 'Selected files',
       importButton: 'Import',
       orPasteSession: 'or paste session string',
@@ -196,6 +198,37 @@ export default {
       noGroup: 'No Group',
       delete: 'Delete',
       clearSelection: 'Clear selection'
+    },
+
+    importFlow: {
+      parsing: 'Processing files...',
+      noAccountsParsed: 'No accounts could be parsed',
+      orSelectTdata: 'or select tdata folder',
+      selectTdataFolder: 'Select tdata folder',
+      notTdataFolder: 'Selected folder is not a tdata folder',
+      folder: 'folder',
+      assignProxyFirst: 'Please assign proxy to all accounts first',
+      assignProxyToAll: 'Assign proxy to all',
+      applyToAll: 'Apply',
+      selectProxy: 'Select proxy',
+      verifyAll: 'Verify all',
+      verifyComplete: 'Verification complete: {valid} valid, {invalid} invalid',
+      noValidAccounts: 'No valid accounts to save',
+      saveValid: 'Save ({count})',
+      savedCount: 'Saved {count} accounts',
+      sourceFile: 'File',
+      unknown: 'Unknown',
+      total: 'Total',
+      valid: 'Valid',
+      invalid: 'Invalid',
+      pending: 'Pending',
+      error: 'Error',
+      status: {
+        pending: 'pending',
+        verifying: 'verifying...',
+        valid: 'valid',
+        invalid: 'invalid'
+      }
     },
 
     twoFA: {
@@ -284,7 +317,21 @@ export default {
       }
     },
 
-    addAccount: 'Add Account'
+    addAccount: 'Add Account',
+
+    errors: {
+      banned: 'Account banned',
+      deactivated: 'Account deactivated',
+      restricted: 'Account restricted',
+      frozen: 'Account frozen',
+      authKeyDuplicated: 'Session used on another device',
+      sessionExpired: 'Session expired',
+      sessionRevoked: 'Session revoked',
+      floodWait: 'Too many requests, please wait',
+      floodWaitSeconds: 'Too many requests, wait {seconds} sec',
+      connectionFailed: 'Connection failed',
+      timeout: 'Connection timeout'
+    }
   },
 
   groups: {
@@ -316,6 +363,18 @@ export default {
     lastCheck: 'Last Check',
     deleteConfirm: 'Delete proxy {host}:{port}?',
 
+    status: {
+      unchecked: 'Unchecked',
+      checking: 'Checking...',
+      pending: 'Pending',
+      working: 'Working',
+      slow: 'Slow',
+      very_slow: 'Very Slow',
+      not_working: 'Not Working',
+      timeout: 'Timeout',
+      duplicate: 'Duplicate'
+    },
+
     addDialog: {
       title: 'Add Proxy',
       type: 'Type',
@@ -323,12 +382,28 @@ export default {
       port: 'Port',
       username: 'Username',
       password: 'Password',
+      stringMode: 'String',
+      formMode: 'Form',
+      proxyString: 'Proxy String',
+      proxyStringPlaceholder: 'socks5://user:pass@host:port',
+      proxyStringFormats: 'Formats: socks5://user:pass@host:port, user:pass@host:port, host:port:user:pass',
       bulkImport: 'Bulk Import (one per line)',
-      bulkFormat: 'Format: host:port or host:port:user:pass'
+      bulkHint: 'All formats supported. Duplicates will be skipped.',
+      bulkPlaceholder: 'socks5://user:pass@192.168.1.1:1080\n192.168.1.2:1080:user:pass',
+      bulkFormat: 'Format: host:port or host:port:user:pass',
+      checkAndAdd: 'Check & Add',
+      checkResults: 'Check Results',
+      working: 'working',
+      selected: 'selected',
+      selectWorking: 'Working Only',
+      selectAll: 'Select All',
+      deselectAll: 'Deselect All',
+      addSelected: 'Add Selected ({count})'
     },
 
     editDialog: {
-      title: 'Edit Proxy'
+      title: 'Edit Proxy',
+      applyString: 'Apply'
     },
 
     messages: {
@@ -345,7 +420,13 @@ export default {
       updateFailed: 'Failed to update proxy',
       deleted: 'Proxy deleted',
       deleteFailed: 'Failed to delete proxy',
-      enterHostPort: 'Please enter host and port'
+      enterHostPort: 'Please enter host and port',
+      invalidProxyFormat: 'Invalid proxy format. Example: socks5://user:pass@host:port',
+      duplicateProxy: 'This proxy already exists',
+      duplicatesSkipped: 'Duplicates skipped: {count}',
+      allDuplicates: 'All proxies already exist',
+      selectProxies: 'Select proxies to add',
+      proxyParsed: 'String parsed, verify the data'
     }
   },
 

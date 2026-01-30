@@ -316,6 +316,101 @@ export const useAccountStore = defineStore('accounts', () => {
   }
 
   // ============================================================
+  // New Import Flow: Parse -> Verify -> Save
+  // ============================================================
+
+  interface ParsedAccount {
+    temp_id: string
+    session_string: string
+    telegram_id?: number
+    phone?: string
+    username?: string
+    first_name?: string
+    last_name?: string
+    spamblock?: boolean
+    register_time?: string
+    geo?: string
+    source_file?: string
+    // Added by frontend
+    proxy_id?: number
+    status?: string
+    error?: string
+  }
+
+  interface ParseResult {
+    accounts: ParsedAccount[]
+    errors: { file: string; error: string }[]
+    total_parsed: number
+    total_errors: number
+  }
+
+  interface VerifyResult {
+    results: { temp_id: string; status: string; error?: string; telegram_id?: number; username?: string; phone?: string; first_name?: string; last_name?: string }[]
+    total_valid: number
+    total_invalid: number
+  }
+
+  interface SaveResult {
+    saved: { temp_id: string; account_id: number; telegram_id?: number }[]
+    errors: { temp_id: string; error: string }[]
+    total_saved: number
+    total_errors: number
+  }
+
+  async function parseImportFiles(
+    sessionFiles: File[],
+    jsonFiles: File[],
+    tdataFile?: File
+  ): Promise<ParseResult> {
+    const files: UploadFile[] = []
+
+    for (const file of sessionFiles) {
+      files.push(await fileToUpload('session_files', file))
+    }
+
+    for (const file of jsonFiles) {
+      files.push(await fileToUpload('json_files', file))
+    }
+
+    if (tdataFile) {
+      files.push(await fileToUpload('tdata_file', tdataFile))
+    }
+
+    return await window.api.upload('/api/accounts/import/parse', files, {}) as ParseResult
+  }
+
+  async function parseTdataFiles(tdataFiles: File[]): Promise<ParseResult> {
+    const files: UploadFile[] = []
+
+    for (const file of tdataFiles) {
+      files.push(await fileToUpload('tdata_files', file))
+    }
+
+    // Send paths as fields for folder structure reconstruction
+    const fields: Record<string, string> = {}
+    tdataFiles.forEach((file, index) => {
+      const filePath = (file as any).webkitRelativePath || file.name
+      fields[`path_${index}`] = filePath
+    })
+
+    return await window.api.upload('/api/accounts/import/parse-tdata', files, fields) as ParseResult
+  }
+
+  async function verifyParsedAccounts(
+    accounts: { session_string: string; proxy_id: number; temp_id: string }[]
+  ): Promise<VerifyResult> {
+    return await window.api.post('/api/accounts/import/verify', { accounts }) as VerifyResult
+  }
+
+  async function saveParsedAccounts(
+    accounts: ParsedAccount[]
+  ): Promise<SaveResult> {
+    const result = await window.api.post('/api/accounts/import/save', { accounts }) as SaveResult
+    await fetchAccounts()
+    return result
+  }
+
+  // ============================================================
   // 2FA Methods
   // ============================================================
 
@@ -512,6 +607,11 @@ export const useAccountStore = defineStore('accounts', () => {
     importJson,
     importSessionString,
     importSessionJsonPairs,
+    // New import flow
+    parseImportFiles,
+    parseTdataFiles,
+    verifyParsedAccounts,
+    saveParsedAccounts,
     setFilter,
     clearFilters,
     toggleSelection,

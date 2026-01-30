@@ -31,6 +31,12 @@ class ProxyCheckBatch(BaseModel):
     lookup_geo: bool = True
 
 
+class ProxyCheckPreview(BaseModel):
+    """Check proxies without saving to database"""
+    proxies: List[dict]  # List of {type, host, port, username?, password?}
+    lookup_geo: bool = True
+
+
 @router.get("")
 async def get_proxies(
     status: Optional[str] = None,
@@ -306,3 +312,44 @@ async def check_all_proxies(
         "checked": len(response_results),
         "results": response_results
     }
+
+
+@router.post("/check-preview")
+async def check_proxies_preview(
+    data: ProxyCheckPreview
+):
+    """Check proxies without saving to database (for preview before adding)"""
+    if not data.proxies:
+        return {"results": []}
+
+    # Build proxy URLs for checking
+    proxy_data = []
+    for i, p in enumerate(data.proxies):
+        auth = f"{p.get('username')}:{p.get('password')}@" if p.get('username') else ""
+        url = f"{p.get('type', 'socks5')}://{auth}{p['host']}:{p['port']}"
+        proxy_data.append({"id": i, "url": url})
+
+    # Check all in parallel
+    check_results = await proxy_checker.check_batch(
+        proxies=proxy_data,
+        lookup_geo=data.lookup_geo
+    )
+
+    # Build response
+    response_results = []
+    for i, check_result in enumerate(check_results):
+        original = data.proxies[i]
+        response_results.append({
+            "index": i,
+            "type": original.get('type', 'socks5'),
+            "host": original['host'],
+            "port": original['port'],
+            "username": original.get('username'),
+            "status": check_result.status.value,
+            "ping_ms": check_result.ping_ms,
+            "external_ip": check_result.external_ip,
+            "geo": check_result.geo,
+            "error": check_result.error
+        })
+
+    return {"results": response_results}

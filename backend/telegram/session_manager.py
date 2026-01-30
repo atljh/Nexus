@@ -28,7 +28,7 @@ class SessionManager:
     @classmethod
     async def session_file_to_string(
         cls,
-        session_path: Path,
+        session_path: Path | str,
         api_id: Optional[int] = None,
         api_hash: Optional[str] = None,
     ) -> str:
@@ -36,7 +36,7 @@ class SessionManager:
         Convert .session file to StringSession.
 
         Args:
-            session_path: Path to .session file
+            session_path: Path to .session file (Path or str)
             api_id: API ID (optional, uses default)
             api_hash: API Hash (optional, uses default)
 
@@ -46,6 +46,10 @@ class SessionManager:
         Raises:
             SessionError: If failed to read session
         """
+        # Convert to Path if string
+        if isinstance(session_path, str):
+            session_path = Path(session_path)
+
         if not session_path.exists():
             raise SessionError(f"Session file not found: {session_path}")
 

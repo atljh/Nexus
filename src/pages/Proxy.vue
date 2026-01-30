@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import Button from 'primevue/button'
@@ -11,6 +11,7 @@ import Dropdown from 'primevue/dropdown'
 import Textarea from 'primevue/textarea'
 import Tag from 'primevue/tag'
 import ProgressBar from 'primevue/progressbar'
+import Checkbox from 'primevue/checkbox'
 import { useToast } from 'primevue/usetoast'
 import Toast from 'primevue/toast'
 
@@ -23,9 +24,25 @@ interface Proxy {
   type: string
   username: string | null
   password?: string | null
-  status: 'unchecked' | 'valid' | 'invalid'
+  status: 'unchecked' | 'working' | 'slow' | 'very_slow' | 'not_working' | 'timeout'
+  ping_ms?: number | null
+  geo?: string | null
+  external_ip?: string | null
   accounts_count: number
   last_checked_at: string | null
+}
+
+interface ProxyPreview {
+  type: string
+  host: string
+  port: number
+  username?: string
+  password?: string
+  status: 'pending' | 'checking' | 'working' | 'slow' | 'very_slow' | 'not_working' | 'timeout' | 'duplicate'
+  ping_ms?: number | null
+  geo?: string | null
+  external_ip?: string | null
+  selected: boolean
 }
 
 const toast = useToast()
@@ -35,6 +52,12 @@ const showEditDialog = ref(false)
 const loading = ref(false)
 const checking = ref(false)
 const selectedProxies = ref<Proxy[]>([])
+
+// Preview state
+const proxyPreviews = ref<ProxyPreview[]>([])
+const isCheckingPreviews = ref(false)
+const checkProgress = ref(0)
+const showPreview = ref(false)
 
 const proxyTypes = [
   { label: 'SOCKS5', value: 'socks5' },
@@ -53,6 +76,23 @@ const newProxy = ref({
 
 const editProxy = ref<Proxy | null>(null)
 const bulkProxies = ref('')
+const inputMode = ref<'form' | 'string'>('string')
+const proxyString = ref('')
+
+// Edit dialog state
+const editInputMode = ref<'form' | 'string'>('form')
+const editProxyString = ref('')
+const editCheckStatus = ref<'idle' | 'checking' | 'success' | 'error'>('idle')
+const editCheckResult = ref<{ status: string; ping_ms?: number; geo?: string } | null>(null)
+
+// Computed
+const workingPreviews = computed(() =>
+  proxyPreviews.value.filter(p => ['working', 'slow', 'very_slow'].includes(p.status))
+)
+
+const selectedPreviews = computed(() =>
+  proxyPreviews.value.filter(p => p.selected)
+)
 
 onMounted(() => {
   loadProxies()
@@ -80,10 +120,59 @@ async function loadProxies() {
 
 function getStatusSeverity(status: string): "success" | "danger" | "warn" | "secondary" {
   switch (status) {
-    case 'valid': return 'success'
-    case 'invalid': return 'danger'
+    case 'working': return 'success'
+    case 'slow': return 'warn'
+    case 'very_slow': return 'warn'
+    case 'not_working': return 'danger'
+    case 'timeout': return 'danger'
     default: return 'secondary'
   }
+}
+
+function parseProxyString(str: string): { type: 'socks5' | 'socks4' | 'http' | 'https'; host: string; port: number; username?: string; password?: string } | null {
+  const trimmed = str.trim()
+  if (!trimmed) return null
+
+  let type: 'socks5' | 'socks4' | 'http' | 'https' = 'socks5'
+  let host = ''
+  let port = 0
+  let username: string | undefined
+  let password: string | undefined
+
+  // Try URL format: type://[user:pass@]host:port
+  const urlMatch = trimmed.match(/^(socks5|socks4|http|https):\/\/(?:([^:]+):([^@]+)@)?([^:]+):(\d+)$/i)
+  if (urlMatch) {
+    type = urlMatch[1].toLowerCase() as typeof type
+    username = urlMatch[2] || undefined
+    password = urlMatch[3] || undefined
+    host = urlMatch[4]
+    port = parseInt(urlMatch[5])
+  } else {
+    // Try format: [user:pass@]host:port
+    const authMatch = trimmed.match(/^([^:]+):([^@]+)@([^:]+):(\d+)$/)
+    if (authMatch) {
+      username = authMatch[1]
+      password = authMatch[2]
+      host = authMatch[3]
+      port = parseInt(authMatch[4])
+    } else {
+      // Try simple format: host:port or host:port:user:pass
+      const parts = trimmed.split(':')
+      if (parts.length < 2) return null
+
+      host = parts[0]
+      port = parseInt(parts[1])
+
+      if (parts.length >= 4) {
+        username = parts[2]
+        password = parts.slice(3).join(':')
+      }
+    }
+  }
+
+  if (!host || !port || isNaN(port)) return null
+
+  return { type, host, port, username, password }
 }
 
 interface CheckResult { status: string; valid?: boolean }
@@ -143,42 +232,65 @@ async function checkAllProxies() {
   }
 }
 
-interface BulkCreateResult { created: number }
+interface CheckPreviewResult {
+  results: Array<{
+    index: number
+    type: string
+    host: string
+    port: number
+    username?: string
+    status: string
+    ping_ms?: number
+    external_ip?: string
+    geo?: string
+    error?: string
+  }>
+}
 
-async function addProxy() {
-  // Handle bulk import
+function isDuplicate(host: string, port: number): boolean {
+  return proxies.value.some(p => p.host === host && p.port === port)
+}
+
+function getProxiesToCheck(): Array<{ type: string; host: string; port: number; username?: string; password?: string }> {
+  const result: Array<{ type: string; host: string; port: number; username?: string; password?: string }> = []
+
+  // Bulk import
   if (bulkProxies.value.trim()) {
     const lines = bulkProxies.value.trim().split('\n').filter(l => l.trim())
-
-    try {
-      const response = await window.api.post('/api/proxy/bulk', {
-        proxies: lines,
-        type: newProxy.value.type
-      }) as BulkCreateResult
-
-      toast.add({
-        severity: 'success',
-        summary: t('common.success'),
-        detail: t('proxy.messages.addedCount', { count: response.created }),
-        life: 3000
-      })
-
-      resetForm()
-      showAddDialog.value = false
-      loadProxies()
-    } catch (error: any) {
-      toast.add({
-        severity: 'error',
-        summary: t('common.error'),
-        detail: error.message || t('proxy.messages.addFailed'),
-        life: 3000
-      })
+    for (const line of lines) {
+      const parsed = parseProxyString(line)
+      if (parsed) {
+        result.push(parsed)
+      }
     }
-    return
   }
 
-  // Handle single proxy
-  if (!newProxy.value.host || !newProxy.value.port) {
+  // String input mode
+  if (inputMode.value === 'string' && proxyString.value.trim()) {
+    const parsed = parseProxyString(proxyString.value)
+    if (parsed) {
+      result.push(parsed)
+    }
+  }
+
+  // Form input mode
+  if (inputMode.value === 'form' && newProxy.value.host && newProxy.value.port) {
+    result.push({
+      type: newProxy.value.type,
+      host: newProxy.value.host,
+      port: parseInt(newProxy.value.port),
+      username: newProxy.value.username || undefined,
+      password: newProxy.value.password || undefined
+    })
+  }
+
+  return result
+}
+
+async function checkAndPreview() {
+  const proxiesToCheck = getProxiesToCheck()
+
+  if (proxiesToCheck.length === 0) {
     toast.add({
       severity: 'warn',
       summary: t('common.warning'),
@@ -188,19 +300,112 @@ async function addProxy() {
     return
   }
 
-  try {
-    await window.api.post('/api/proxy', {
-      type: newProxy.value.type,
-      host: newProxy.value.host,
-      port: parseInt(newProxy.value.port),
-      username: newProxy.value.username || null,
-      password: newProxy.value.password || null
+  // Mark duplicates and prepare previews
+  proxyPreviews.value = proxiesToCheck.map(p => ({
+    ...p,
+    status: isDuplicate(p.host, p.port) ? 'duplicate' : 'pending',
+    selected: !isDuplicate(p.host, p.port)
+  }))
+
+  showPreview.value = true
+
+  // Check non-duplicate proxies
+  const toCheck = proxyPreviews.value
+    .map((p, i) => ({ ...p, index: i }))
+    .filter(p => p.status !== 'duplicate')
+
+  if (toCheck.length === 0) {
+    toast.add({
+      severity: 'warn',
+      summary: t('common.warning'),
+      detail: t('proxy.messages.allDuplicates'),
+      life: 3000
     })
+    return
+  }
+
+  isCheckingPreviews.value = true
+  checkProgress.value = 0
+
+  // Mark as checking
+  for (const p of toCheck) {
+    proxyPreviews.value[p.index].status = 'checking'
+  }
+
+  try {
+    const response = await window.api.post('/api/proxy/check-preview', {
+      proxies: toCheck.map(p => ({
+        type: p.type,
+        host: p.host,
+        port: p.port,
+        username: p.username,
+        password: p.password
+      })),
+      lookup_geo: true
+    }) as CheckPreviewResult
+
+    // Update previews with results
+    for (let i = 0; i < response.results.length; i++) {
+      const result = response.results[i]
+      const originalIndex = toCheck[i].index
+      proxyPreviews.value[originalIndex].status = result.status as ProxyPreview['status']
+      proxyPreviews.value[originalIndex].ping_ms = result.ping_ms
+      proxyPreviews.value[originalIndex].geo = result.geo
+      proxyPreviews.value[originalIndex].external_ip = result.external_ip
+
+      // Auto-select only working proxies
+      proxyPreviews.value[originalIndex].selected = ['working', 'slow', 'very_slow'].includes(result.status)
+    }
+
+    checkProgress.value = 100
+  } catch (error: any) {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: error.message || t('proxy.messages.checkFailed'),
+      life: 3000
+    })
+
+    // Mark all as failed
+    for (const p of toCheck) {
+      proxyPreviews.value[p.index].status = 'not_working'
+    }
+  } finally {
+    isCheckingPreviews.value = false
+  }
+}
+
+async function addSelectedProxies() {
+  const selected = proxyPreviews.value.filter(p => p.selected && p.status !== 'duplicate')
+
+  if (selected.length === 0) {
+    toast.add({
+      severity: 'warn',
+      summary: t('common.warning'),
+      detail: t('proxy.messages.selectProxies'),
+      life: 3000
+    })
+    return
+  }
+
+  try {
+    let addedCount = 0
+
+    for (const proxy of selected) {
+      await window.api.post('/api/proxy', {
+        type: proxy.type,
+        host: proxy.host,
+        port: proxy.port,
+        username: proxy.username || null,
+        password: proxy.password || null
+      })
+      addedCount++
+    }
 
     toast.add({
       severity: 'success',
       summary: t('common.success'),
-      detail: t('proxy.messages.added'),
+      detail: t('proxy.messages.addedCount', { count: addedCount }),
       life: 3000
     })
 
@@ -217,9 +422,104 @@ async function addProxy() {
   }
 }
 
+function toggleSelectAll(checked: boolean) {
+  for (const p of proxyPreviews.value) {
+    if (p.status !== 'duplicate') {
+      p.selected = checked
+    }
+  }
+}
+
+function selectWorkingOnly() {
+  for (const p of proxyPreviews.value) {
+    p.selected = ['working', 'slow', 'very_slow'].includes(p.status)
+  }
+}
+
 function openEditDialog(proxy: Proxy) {
   editProxy.value = { ...proxy }
+  editInputMode.value = 'form'
+  editProxyString.value = ''
+  editCheckStatus.value = 'idle'
+  editCheckResult.value = null
   showEditDialog.value = true
+}
+
+function resetEditDialog() {
+  editProxy.value = null
+  editInputMode.value = 'form'
+  editProxyString.value = ''
+  editCheckStatus.value = 'idle'
+  editCheckResult.value = null
+}
+
+function applyEditProxyString() {
+  if (!editProxy.value || !editProxyString.value.trim()) return
+
+  const parsed = parseProxyString(editProxyString.value)
+  if (!parsed) {
+    toast.add({
+      severity: 'warn',
+      summary: t('common.warning'),
+      detail: t('proxy.messages.invalidProxyFormat'),
+      life: 3000
+    })
+    return
+  }
+
+  editProxy.value.type = parsed.type
+  editProxy.value.host = parsed.host
+  editProxy.value.port = parsed.port
+  editProxy.value.username = parsed.username || null
+  editProxy.value.password = parsed.password || undefined
+
+  editCheckStatus.value = 'idle'
+  editCheckResult.value = null
+
+  toast.add({
+    severity: 'info',
+    summary: t('common.info'),
+    detail: t('proxy.messages.proxyParsed'),
+    life: 2000
+  })
+}
+
+async function checkEditProxy() {
+  if (!editProxy.value) return
+
+  editCheckStatus.value = 'checking'
+  editCheckResult.value = null
+
+  try {
+    const response = await window.api.post('/api/proxy/check-preview', {
+      proxies: [{
+        type: editProxy.value.type,
+        host: editProxy.value.host,
+        port: editProxy.value.port,
+        username: editProxy.value.username,
+        password: editProxy.value.password
+      }],
+      lookup_geo: true
+    }) as CheckPreviewResult
+
+    if (response.results.length > 0) {
+      const result = response.results[0]
+      editCheckResult.value = {
+        status: result.status,
+        ping_ms: result.ping_ms || undefined,
+        geo: result.geo || undefined
+      }
+      editCheckStatus.value = ['working', 'slow', 'very_slow'].includes(result.status) ? 'success' : 'error'
+    }
+  } catch (error: any) {
+    editCheckStatus.value = 'error'
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: error.message || t('proxy.messages.checkFailed'),
+      life: 3000
+    })
+  }
 }
 
 async function saveEditProxy() {
@@ -242,7 +542,7 @@ async function saveEditProxy() {
     })
 
     showEditDialog.value = false
-    editProxy.value = null
+    resetEditDialog()
     loadProxies()
   } catch (error: any) {
     toast.add({
@@ -289,6 +589,26 @@ function resetForm() {
     password: ''
   }
   bulkProxies.value = ''
+  proxyString.value = ''
+  inputMode.value = 'string'
+  proxyPreviews.value = []
+  showPreview.value = false
+  isCheckingPreviews.value = false
+  checkProgress.value = 0
+}
+
+function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn" | "secondary" | "info" {
+  switch (status) {
+    case 'working': return 'success'
+    case 'slow': return 'warn'
+    case 'very_slow': return 'warn'
+    case 'not_working': return 'danger'
+    case 'timeout': return 'danger'
+    case 'duplicate': return 'secondary'
+    case 'checking': return 'info'
+    case 'pending': return 'secondary'
+    default: return 'secondary'
+  }
 }
 
 function formatDate(dateStr: string | null): string {
@@ -366,7 +686,7 @@ function formatDate(dateStr: string | null): string {
           </Column>
           <Column field="status" :header="t('common.status')" sortable style="width: 120px">
             <template #body="{ data }">
-              <Tag :value="data.status" :severity="getStatusSeverity(data.status)" />
+              <Tag :value="t(`proxy.status.${data.status}`)" :severity="getStatusSeverity(data.status)" />
             </template>
           </Column>
           <Column :header="t('proxy.accounts')" style="width: 100px">
@@ -417,60 +737,174 @@ function formatDate(dateStr: string | null): string {
         v-model:visible="showAddDialog"
         :header="t('proxy.addDialog.title')"
         modal
-        :style="{ width: '520px' }"
+        :style="{ width: showPreview ? '720px' : '520px' }"
         class="custom-dialog"
+        @hide="resetForm"
       >
         <div class="dialog-content">
-          <div class="form-field">
-            <label class="form-label">{{ t('proxy.addDialog.type') }}</label>
-            <Dropdown
-              v-model="newProxy.type"
-              :options="proxyTypes"
-              optionLabel="label"
-              optionValue="value"
-              class="w-full"
-            />
-          </div>
-
-          <div class="form-row">
-            <div class="form-field flex-2">
-              <label class="form-label">{{ t('proxy.addDialog.host') }}</label>
-              <InputText v-model="newProxy.host" placeholder="127.0.0.1" class="w-full" />
+          <!-- Input Section (hidden when showing preview) -->
+          <template v-if="!showPreview">
+            <!-- Mode Toggle -->
+            <div class="mode-toggle">
+              <Button
+                :label="t('proxy.addDialog.stringMode')"
+                :severity="inputMode === 'string' ? 'primary' : 'secondary'"
+                :outlined="inputMode !== 'string'"
+                size="small"
+                @click="inputMode = 'string'"
+              />
+              <Button
+                :label="t('proxy.addDialog.formMode')"
+                :severity="inputMode === 'form' ? 'primary' : 'secondary'"
+                :outlined="inputMode !== 'form'"
+                size="small"
+                @click="inputMode = 'form'"
+              />
             </div>
-            <div class="form-field flex-1">
-              <label class="form-label">{{ t('proxy.addDialog.port') }}</label>
-              <InputText v-model="newProxy.port" placeholder="1080" class="w-full" />
+
+            <!-- String Input Mode -->
+            <div v-if="inputMode === 'string'" class="string-mode">
+              <div class="form-field">
+                <label class="form-label">{{ t('proxy.addDialog.proxyString') }}</label>
+                <InputText
+                  v-model="proxyString"
+                  :placeholder="t('proxy.addDialog.proxyStringPlaceholder')"
+                  class="w-full font-mono"
+                  @keyup.enter="checkAndPreview"
+                />
+                <small class="format-hint">{{ t('proxy.addDialog.proxyStringFormats') }}</small>
+              </div>
             </div>
-          </div>
 
-          <div class="form-row">
-            <div class="form-field flex-1">
-              <label class="form-label">{{ t('proxy.addDialog.username') }} ({{ t('common.optional') }})</label>
-              <InputText v-model="newProxy.username" class="w-full" />
+            <!-- Form Input Mode -->
+            <div v-else class="form-mode">
+              <div class="form-field">
+                <label class="form-label">{{ t('proxy.addDialog.type') }}</label>
+                <Dropdown
+                  v-model="newProxy.type"
+                  :options="proxyTypes"
+                  optionLabel="label"
+                  optionValue="value"
+                  class="w-full"
+                />
+              </div>
+
+              <div class="form-row">
+                <div class="form-field flex-2">
+                  <label class="form-label">{{ t('proxy.addDialog.host') }}</label>
+                  <InputText v-model="newProxy.host" placeholder="127.0.0.1" class="w-full" />
+                </div>
+                <div class="form-field flex-1">
+                  <label class="form-label">{{ t('proxy.addDialog.port') }}</label>
+                  <InputText v-model="newProxy.port" placeholder="1080" class="w-full" />
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-field flex-1">
+                  <label class="form-label">{{ t('proxy.addDialog.username') }} ({{ t('common.optional') }})</label>
+                  <InputText v-model="newProxy.username" class="w-full" />
+                </div>
+                <div class="form-field flex-1">
+                  <label class="form-label">{{ t('proxy.addDialog.password') }} ({{ t('common.optional') }})</label>
+                  <InputText v-model="newProxy.password" type="password" class="w-full" />
+                </div>
+              </div>
             </div>
-            <div class="form-field flex-1">
-              <label class="form-label">{{ t('proxy.addDialog.password') }} ({{ t('common.optional') }})</label>
-              <InputText v-model="newProxy.password" type="password" class="w-full" />
+
+            <div class="divider"></div>
+
+            <div class="form-field">
+              <label class="form-label">{{ t('proxy.addDialog.bulkImport') }}</label>
+              <p class="hint-text">{{ t('proxy.addDialog.bulkHint') }}</p>
+              <Textarea
+                v-model="bulkProxies"
+                :placeholder="t('proxy.addDialog.bulkPlaceholder')"
+                rows="4"
+                class="w-full font-mono"
+              />
             </div>
-          </div>
 
-          <div class="divider"></div>
+            <div class="dialog-actions">
+              <Button :label="t('common.cancel')" severity="secondary" @click="showAddDialog = false" />
+              <Button
+                :label="t('proxy.addDialog.checkAndAdd')"
+                icon="pi pi-check-circle"
+                @click="checkAndPreview"
+              />
+            </div>
+          </template>
 
-          <div class="form-field">
-            <label class="form-label">{{ t('proxy.addDialog.bulkImport') }}</label>
-            <p class="hint-text">{{ t('proxy.addDialog.bulkFormat') }}</p>
-            <Textarea
-              v-model="bulkProxies"
-              placeholder="192.168.1.1:1080&#10;192.168.1.2:1080:user:pass"
-              rows="4"
-              class="w-full font-mono"
-            />
-          </div>
+          <!-- Preview Section -->
+          <template v-else>
+            <div class="preview-header">
+              <h3>{{ t('proxy.addDialog.checkResults') }}</h3>
+              <div class="preview-stats">
+                <Tag :value="`${workingPreviews.length} ${t('proxy.addDialog.working')}`" severity="success" />
+                <Tag :value="`${selectedPreviews.length} ${t('proxy.addDialog.selected')}`" severity="info" />
+              </div>
+            </div>
 
-          <div class="dialog-actions">
-            <Button :label="t('common.cancel')" severity="secondary" @click="showAddDialog = false; resetForm()" />
-            <Button :label="t('common.add')" icon="pi pi-plus" @click="addProxy" />
-          </div>
+            <ProgressBar v-if="isCheckingPreviews" mode="indeterminate" style="height: 4px" class="mb-3" />
+
+            <div class="preview-actions">
+              <Button
+                :label="t('proxy.addDialog.selectWorking')"
+                size="small"
+                severity="secondary"
+                @click="selectWorkingOnly"
+              />
+              <Button
+                :label="t('proxy.addDialog.selectAll')"
+                size="small"
+                severity="secondary"
+                @click="toggleSelectAll(true)"
+              />
+              <Button
+                :label="t('proxy.addDialog.deselectAll')"
+                size="small"
+                severity="secondary"
+                @click="toggleSelectAll(false)"
+              />
+            </div>
+
+            <div class="preview-list">
+              <div
+                v-for="(preview, index) in proxyPreviews"
+                :key="index"
+                class="preview-item"
+                :class="{ 'preview-item-disabled': preview.status === 'duplicate' }"
+              >
+                <Checkbox
+                  v-model="preview.selected"
+                  :binary="true"
+                  :disabled="preview.status === 'duplicate'"
+                />
+                <div class="preview-info">
+                  <span class="preview-address">{{ preview.host }}:{{ preview.port }}</span>
+                  <Tag :value="preview.type.toUpperCase()" severity="secondary" class="preview-type" />
+                </div>
+                <div class="preview-status">
+                  <Tag
+                    :value="t(`proxy.status.${preview.status}`)"
+                    :severity="getPreviewStatusSeverity(preview.status)"
+                  />
+                  <span v-if="preview.ping_ms" class="preview-ping">{{ preview.ping_ms }}ms</span>
+                  <span v-if="preview.geo" class="preview-geo">{{ preview.geo }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="dialog-actions">
+              <Button :label="t('common.back')" severity="secondary" icon="pi pi-arrow-left" @click="showPreview = false" />
+              <Button
+                :label="t('proxy.addDialog.addSelected', { count: selectedPreviews.length })"
+                icon="pi pi-plus"
+                :disabled="selectedPreviews.length === 0"
+                @click="addSelectedProxies"
+              />
+            </div>
+          </template>
         </div>
       </Dialog>
 
@@ -481,43 +915,106 @@ function formatDate(dateStr: string | null): string {
         modal
         :style="{ width: '520px' }"
         class="custom-dialog"
+        @hide="resetEditDialog"
       >
         <div v-if="editProxy" class="dialog-content">
-          <div class="form-field">
-            <label class="form-label">{{ t('proxy.addDialog.type') }}</label>
-            <Dropdown
-              v-model="editProxy.type"
-              :options="proxyTypes"
-              optionLabel="label"
-              optionValue="value"
-              class="w-full"
+          <!-- Mode Toggle -->
+          <div class="mode-toggle">
+            <Button
+              :label="t('proxy.addDialog.formMode')"
+              :severity="editInputMode === 'form' ? 'primary' : 'secondary'"
+              :outlined="editInputMode !== 'form'"
+              size="small"
+              @click="editInputMode = 'form'"
+            />
+            <Button
+              :label="t('proxy.addDialog.stringMode')"
+              :severity="editInputMode === 'string' ? 'primary' : 'secondary'"
+              :outlined="editInputMode !== 'string'"
+              size="small"
+              @click="editInputMode = 'string'"
             />
           </div>
 
-          <div class="form-row">
-            <div class="form-field flex-2">
-              <label class="form-label">{{ t('proxy.addDialog.host') }}</label>
-              <InputText v-model="editProxy.host" class="w-full" />
-            </div>
-            <div class="form-field flex-1">
-              <label class="form-label">{{ t('proxy.addDialog.port') }}</label>
-              <InputText :modelValue="String(editProxy.port)" @update:modelValue="editProxy.port = Number($event)" class="w-full" />
+          <!-- String Input Mode -->
+          <div v-if="editInputMode === 'string'" class="string-mode">
+            <div class="form-field">
+              <label class="form-label">{{ t('proxy.addDialog.proxyString') }}</label>
+              <div class="string-input-row">
+                <InputText
+                  v-model="editProxyString"
+                  :placeholder="t('proxy.addDialog.proxyStringPlaceholder')"
+                  class="flex-1 font-mono"
+                  @keyup.enter="applyEditProxyString"
+                />
+                <Button
+                  icon="pi pi-check"
+                  severity="secondary"
+                  v-tooltip.top="t('proxy.editDialog.applyString')"
+                  @click="applyEditProxyString"
+                />
+              </div>
+              <small class="format-hint">{{ t('proxy.addDialog.proxyStringFormats') }}</small>
             </div>
           </div>
 
-          <div class="form-row">
-            <div class="form-field flex-1">
-              <label class="form-label">{{ t('proxy.addDialog.username') }}</label>
-              <InputText v-model="editProxy.username" class="w-full" />
+          <!-- Form Input Mode -->
+          <div class="form-mode">
+            <div class="form-field">
+              <label class="form-label">{{ t('proxy.addDialog.type') }}</label>
+              <Dropdown
+                v-model="editProxy.type"
+                :options="proxyTypes"
+                optionLabel="label"
+                optionValue="value"
+                class="w-full"
+              />
             </div>
-            <div class="form-field flex-1">
-              <label class="form-label">{{ t('proxy.addDialog.password') }}</label>
-              <InputText v-model="editProxy.password" type="password" class="w-full" />
+
+            <div class="form-row">
+              <div class="form-field flex-2">
+                <label class="form-label">{{ t('proxy.addDialog.host') }}</label>
+                <InputText v-model="editProxy.host" class="w-full" />
+              </div>
+              <div class="form-field flex-1">
+                <label class="form-label">{{ t('proxy.addDialog.port') }}</label>
+                <InputText :modelValue="String(editProxy.port)" @update:modelValue="editProxy.port = Number($event)" class="w-full" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-field flex-1">
+                <label class="form-label">{{ t('proxy.addDialog.username') }}</label>
+                <InputText v-model="editProxy.username" class="w-full" />
+              </div>
+              <div class="form-field flex-1">
+                <label class="form-label">{{ t('proxy.addDialog.password') }}</label>
+                <InputText v-model="editProxy.password" type="password" class="w-full" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Check Result -->
+          <div v-if="editCheckResult" class="edit-check-result">
+            <div class="check-result-content">
+              <Tag
+                :value="t(`proxy.status.${editCheckResult.status}`)"
+                :severity="getPreviewStatusSeverity(editCheckResult.status)"
+              />
+              <span v-if="editCheckResult.ping_ms" class="check-ping">{{ editCheckResult.ping_ms }}ms</span>
+              <span v-if="editCheckResult.geo" class="check-geo">{{ editCheckResult.geo }}</span>
             </div>
           </div>
 
           <div class="dialog-actions">
             <Button :label="t('common.cancel')" severity="secondary" @click="showEditDialog = false" />
+            <Button
+              :label="t('common.check')"
+              icon="pi pi-refresh"
+              severity="secondary"
+              :loading="editCheckStatus === 'checking'"
+              @click="checkEditProxy"
+            />
             <Button :label="t('common.save')" icon="pi pi-check" @click="saveEditProxy" />
           </div>
         </div>
@@ -703,5 +1200,146 @@ function formatDate(dateStr: string | null): string {
 :deep(.custom-dialog .p-dialog-content) {
   background: #161616;
   padding: 24px;
+}
+
+.mode-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.mode-toggle :deep(.p-button) {
+  flex: 1;
+}
+
+.string-mode,
+.form-mode {
+  margin-bottom: 8px;
+}
+
+.format-hint {
+  display: block;
+  color: #6b7280;
+  font-size: 11px;
+  margin-top: 6px;
+}
+
+/* Preview styles */
+.preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.preview-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #f3f4f6;
+  margin: 0;
+}
+
+.preview-stats {
+  display: flex;
+  gap: 8px;
+}
+
+.preview-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.preview-list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.preview-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background 0.2s;
+}
+
+.preview-item:last-child {
+  border-bottom: none;
+}
+
+.preview-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.preview-item-disabled {
+  opacity: 0.5;
+}
+
+.preview-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.preview-address {
+  font-family: monospace;
+  font-size: 13px;
+  color: #e5e7eb;
+}
+
+.preview-type {
+  font-size: 9px;
+}
+
+.preview-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preview-ping {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.preview-geo {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+/* Edit dialog styles */
+.string-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.edit-check-result {
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  margin-top: 12px;
+}
+
+.check-result-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.check-ping {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.check-geo {
+  font-size: 13px;
+  color: #6b7280;
+  font-weight: 500;
 }
 </style>

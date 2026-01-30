@@ -84,7 +84,9 @@ export default {
       proxyString: 'Рядок',
       proxyForm: 'Форма',
       proxyStringLabel: 'Рядок проксі',
-      proxyStringPlaceholder: 'host:port або host:port:user:pass'
+      proxyStringPlaceholder: 'host:port або host:port:user:pass',
+      proxyStringPlaceholderFull: 'socks5://user:pass@host:port',
+      proxyStringFormats: 'Формати: socks5://user:pass@host:port, user:pass@host:port, host:port:user:pass'
     },
 
     tdata: {
@@ -125,7 +127,7 @@ export default {
 
     dropZone: {
       dropTitle: 'Перетягніть файли сюди або натисніть',
-      dropHint: 'Підтримує кілька файлів одночасно',
+      dropHint: 'Підтримує кілька файлів та папок tdata одночасно',
       selectedFiles: 'Обрані файли',
       importButton: 'Імпортувати',
       orPasteSession: 'або вставте рядок сесії',
@@ -196,6 +198,37 @@ export default {
       noGroup: 'Без групи',
       delete: 'Видалити',
       clearSelection: 'Скасувати вибір'
+    },
+
+    importFlow: {
+      parsing: 'Обробка файлів...',
+      noAccountsParsed: 'Не вдалося розпарсити жодного акаунту',
+      orSelectTdata: 'або оберіть папку tdata',
+      selectTdataFolder: 'Обрати папку tdata',
+      notTdataFolder: 'Обрана папка не є папкою tdata',
+      folder: 'папка',
+      assignProxyFirst: 'Спочатку призначте проксі всім акаунтам',
+      assignProxyToAll: 'Призначити проксі всім',
+      applyToAll: 'Застосувати',
+      selectProxy: 'Оберіть проксі',
+      verifyAll: 'Перевірити всі',
+      verifyComplete: 'Перевірку завершено: {valid} активних, {invalid} невалідних',
+      noValidAccounts: 'Немає валідних акаунтів для збереження',
+      saveValid: 'Зберегти ({count})',
+      savedCount: 'Збережено {count} акаунтів',
+      sourceFile: 'Файл',
+      unknown: 'Невідомо',
+      total: 'Всього',
+      valid: 'Активні',
+      invalid: 'Невалідні',
+      pending: 'Очікують',
+      error: 'Помилка',
+      status: {
+        pending: 'очікує',
+        verifying: 'перевірка...',
+        valid: 'активний',
+        invalid: 'невалідний'
+      }
     },
 
     twoFA: {
@@ -284,7 +317,21 @@ export default {
       }
     },
 
-    addAccount: 'Додати акаунт'
+    addAccount: 'Додати акаунт',
+
+    errors: {
+      banned: 'Акаунт забанений',
+      deactivated: 'Акаунт деактивовано',
+      restricted: 'Акаунт обмежено',
+      frozen: 'Акаунт заморожено',
+      authKeyDuplicated: 'Сесія використовується на іншому пристрої',
+      sessionExpired: 'Сесія закінчилася',
+      sessionRevoked: 'Сесію відкликано',
+      floodWait: 'Забагато запитів, зачекайте',
+      floodWaitSeconds: 'Забагато запитів, зачекайте {seconds} сек',
+      connectionFailed: 'Помилка підключення',
+      timeout: 'Час очікування вичерпано'
+    }
   },
 
   groups: {
@@ -316,6 +363,18 @@ export default {
     lastCheck: 'Остання перевірка',
     deleteConfirm: 'Видалити проксі {host}:{port}?',
 
+    status: {
+      unchecked: 'Не перевірено',
+      checking: 'Перевірка...',
+      pending: 'Очікує',
+      working: 'Працює',
+      slow: 'Повільний',
+      very_slow: 'Дуже повільний',
+      not_working: 'Не працює',
+      timeout: 'Таймаут',
+      duplicate: 'Дублікат'
+    },
+
     addDialog: {
       title: 'Додати проксі',
       type: 'Тип',
@@ -323,12 +382,28 @@ export default {
       port: 'Порт',
       username: 'Логін',
       password: 'Пароль',
+      stringMode: 'Рядок',
+      formMode: 'Форма',
+      proxyString: 'Рядок проксі',
+      proxyStringPlaceholder: 'socks5://user:pass@host:port',
+      proxyStringFormats: 'Формати: socks5://user:pass@host:port, user:pass@host:port, host:port:user:pass',
       bulkImport: 'Масовий імпорт (по одному на рядок)',
-      bulkFormat: 'Формат: host:port або host:port:user:pass'
+      bulkHint: 'Підтримуються всі формати. Дублікати будуть пропущені.',
+      bulkPlaceholder: 'socks5://user:pass@192.168.1.1:1080\n192.168.1.2:1080:user:pass',
+      bulkFormat: 'Формат: host:port або host:port:user:pass',
+      checkAndAdd: 'Перевірити і додати',
+      checkResults: 'Результати перевірки',
+      working: 'працюють',
+      selected: 'обрано',
+      selectWorking: 'Тільки робочі',
+      selectAll: 'Обрати всі',
+      deselectAll: 'Зняти всі',
+      addSelected: 'Додати обрані ({count})'
     },
 
     editDialog: {
-      title: 'Редагувати проксі'
+      title: 'Редагувати проксі',
+      applyString: 'Застосувати'
     },
 
     messages: {
@@ -345,7 +420,13 @@ export default {
       updateFailed: 'Не вдалося оновити проксі',
       deleted: 'Проксі видалено',
       deleteFailed: 'Не вдалося видалити проксі',
-      enterHostPort: 'Введіть хост і порт'
+      enterHostPort: 'Введіть хост і порт',
+      invalidProxyFormat: 'Невірний формат проксі. Приклад: socks5://user:pass@host:port',
+      duplicateProxy: 'Такий проксі вже існує',
+      duplicatesSkipped: 'Пропущено дублікатів: {count}',
+      allDuplicates: 'Всі проксі вже існують',
+      selectProxies: 'Оберіть проксі для додавання',
+      proxyParsed: 'Рядок розпізнано, перевірте дані'
     }
   },
 

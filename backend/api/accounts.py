@@ -68,6 +68,38 @@ class AssignProxiesRequest(BaseModel):
     mode: Optional[str] = "sequential"  # sequential | random
 
 
+# Models for new import flow
+class ParsedAccount(BaseModel):
+    """Account parsed from files but not yet saved"""
+    temp_id: str  # Temporary ID for frontend tracking
+    session_string: str
+    telegram_id: Optional[int] = None
+    phone: Optional[str] = None
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    spamblock: Optional[bool] = None
+    register_time: Optional[str] = None
+    geo: Optional[str] = None
+    source_file: Optional[str] = None
+
+
+class VerifyAccountRequest(BaseModel):
+    """Request to verify a single account"""
+    session_string: str
+    proxy_id: int
+
+
+class VerifyAccountsRequest(BaseModel):
+    """Request to verify multiple accounts"""
+    accounts: List[dict]  # [{session_string, proxy_id, temp_id}]
+
+
+class SaveAccountsRequest(BaseModel):
+    """Request to save verified accounts"""
+    accounts: List[dict]  # Full account data with proxy_id and verification results
+
+
 # Country code mapping for GEO detection from phone number
 COUNTRY_CODES = {
     "7": "RU", "77": "KZ", "380": "UA", "375": "BY",
@@ -1310,3 +1342,458 @@ async def auth_session_info(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found or expired")
 
     return info
+
+
+# ============================================================
+# New Import Flow: Parse -> Assign Proxy -> Verify -> Save
+# ============================================================
+
+@router.post("/import/parse")
+async def parse_import_files(
+    session_files: List[UploadFile] = File(default=[]),
+    json_files: List[UploadFile] = File(default=[]),
+    tdata_file: Optional[UploadFile] = File(default=None),
+):
+    """
+    Parse import files without saving to database.
+    Returns list of parsed accounts for preview.
+    """
+    import uuid
+
+    parsed_accounts = []
+    errors = []
+
+    # Helper to get base name
+    def get_base_name(filename: str) -> str:
+        name = Path(filename).stem
+        if name.endswith("_telethon"):
+            name = name[:-9]
+        return name.lower()
+
+    # Process tdata
+    if tdata_file:
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_path = Path(temp_dir)
+                zip_path = temp_path / "tdata.zip"
+
+                content = await tdata_file.read()
+                zip_path.write_bytes(content)
+
+                extract_path = temp_path / "extracted"
+                with zipfile.ZipFile(zip_path, 'r') as zf:
+                    zf.extractall(extract_path)
+
+                # Find tdata folder
+                tdata_path = None
+                for root, dirs, files in extract_path.walk():
+                    if "tdata" in dirs:
+                        tdata_path = root / "tdata"
+                        break
+
+                if not tdata_path:
+                    if (extract_path / "key_data").exists() or (extract_path / "key_datas").exists():
+                        tdata_path = extract_path
+                    else:
+                        raise HTTPException(status_code=400, detail="tdata folder not found in archive")
+
+                # Convert tdata to session
+                session_string = await convert_tdata_to_session(tdata_path)
+
+                parsed_accounts.append({
+                    "temp_id": str(uuid.uuid4()),
+                    "session_string": session_string,
+                    "source_file": tdata_file.filename,
+                    "telegram_id": None,
+                    "phone": None,
+                    "username": None,
+                    "first_name": None,
+                    "last_name": None,
+                    "spamblock": None,
+                    "register_time": None,
+                    "geo": None,
+                })
+
+        except Exception as e:
+            errors.append({
+                "file": tdata_file.filename,
+                "error": str(e)
+            })
+
+    # Process session + json pairs
+    if session_files and json_files:
+        session_map = {}
+        for sf in session_files:
+            base = get_base_name(sf.filename)
+            session_map[base] = sf
+
+        json_map = {}
+        for jf in json_files:
+            base = get_base_name(jf.filename)
+            json_map[base] = jf
+
+        for base_name, session_file in session_map.items():
+            json_file = json_map.get(base_name)
+
+            if not json_file:
+                errors.append({
+                    "file": session_file.filename,
+                    "error": "No matching JSON file found"
+                })
+                continue
+
+            try:
+                # Read session file
+                session_content = await session_file.read()
+
+                # Convert .session file to string
+                with tempfile.NamedTemporaryFile(suffix=".session", delete=False) as tmp:
+                    tmp.write(session_content)
+                    tmp_path = tmp.name
+
+                try:
+                    session_string = await SessionManager.session_file_to_string(tmp_path)
+                finally:
+                    Path(tmp_path).unlink(missing_ok=True)
+
+                if not session_string:
+                    errors.append({
+                        "file": session_file.filename,
+                        "error": "Failed to convert session file"
+                    })
+                    continue
+
+                # Read and parse JSON
+                json_content = await json_file.read()
+                json_data = json.loads(json_content.decode("utf-8"))
+
+                # Extract metadata
+                telegram_id = json_data.get("id") or json_data.get("telegram_id")
+                phone = json_data.get("phone") or json_data.get("phone_number")
+                username = json_data.get("username")
+                first_name = json_data.get("first_name")
+                last_name = json_data.get("last_name")
+                geo = json_data.get("geo")
+
+                # Parse spamblock
+                spamblock_raw = json_data.get("spamblock")
+                spamblock = None
+                if isinstance(spamblock_raw, bool):
+                    spamblock = spamblock_raw
+                elif isinstance(spamblock_raw, str):
+                    spamblock = spamblock_raw.lower() not in ("free", "false", "no", "0", "")
+
+                register_time_str = json_data.get("register_time")
+
+                # Detect geo from phone if not provided
+                if not geo and phone:
+                    geo = detect_geo_from_phone(phone)
+
+                parsed_accounts.append({
+                    "temp_id": str(uuid.uuid4()),
+                    "session_string": session_string,
+                    "source_file": session_file.filename,
+                    "telegram_id": telegram_id,
+                    "phone": phone,
+                    "username": username,
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "spamblock": spamblock,
+                    "register_time": register_time_str,
+                    "geo": geo,
+                })
+
+            except Exception as e:
+                errors.append({
+                    "file": session_file.filename,
+                    "error": str(e)
+                })
+
+    return {
+        "accounts": parsed_accounts,
+        "errors": errors,
+        "total_parsed": len(parsed_accounts),
+        "total_errors": len(errors)
+    }
+
+
+@router.post("/import/parse-tdata")
+async def parse_tdata_folder(
+    tdata_files: List[UploadFile] = File(default=[]),
+    # Paths are sent as form fields: path_0, path_1, etc.
+):
+    """
+    Parse tdata folder files (uploaded as individual files with paths).
+    Reconstructs folder structure and converts to session.
+    """
+    import uuid
+    from fastapi import Request
+
+    parsed_accounts = []
+    errors = []
+
+    if not tdata_files:
+        return {
+            "accounts": [],
+            "errors": [{"file": "tdata", "error": "No files uploaded"}],
+            "total_parsed": 0,
+            "total_errors": 1
+        }
+
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            tdata_path = temp_path / "tdata"
+            tdata_path.mkdir(parents=True, exist_ok=True)
+
+            # Save files preserving folder structure
+            for i, file in enumerate(tdata_files):
+                content = await file.read()
+
+                # Get relative path from filename (webkitRelativePath is in filename)
+                # The path format is like "tdata/key_data" or "folder/tdata/key_data"
+                rel_path = file.filename or f"file_{i}"
+
+                # Extract path after "tdata/" if present
+                if "tdata/" in rel_path:
+                    rel_path = rel_path.split("tdata/", 1)[1]
+                elif "tdata\\" in rel_path:
+                    rel_path = rel_path.split("tdata\\", 1)[1]
+
+                # Create parent directories and save file
+                file_path = tdata_path / rel_path
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_bytes(content)
+
+            # Check if we have valid tdata structure
+            has_key_data = (tdata_path / "key_data").exists() or (tdata_path / "key_datas").exists()
+            has_session_files = any(
+                f.name.startswith("D877F783D5D3EF8C") or
+                (len(f.name) == 16 and all(c in "0123456789ABCDEF" for c in f.name))
+                for f in tdata_path.iterdir() if f.is_dir() or f.is_file()
+            )
+
+            if not has_key_data and not has_session_files:
+                # Maybe files are in root, check parent
+                for item in temp_path.iterdir():
+                    if item.is_dir() and item.name != "tdata":
+                        # Check if this is the actual tdata folder
+                        if (item / "key_data").exists() or (item / "key_datas").exists():
+                            tdata_path = item
+                            has_key_data = True
+                            break
+
+            if not has_key_data:
+                return {
+                    "accounts": [],
+                    "errors": [{"file": "tdata", "error": "Invalid tdata folder structure - key_data not found"}],
+                    "total_parsed": 0,
+                    "total_errors": 1
+                }
+
+            # Convert tdata to session
+            try:
+                session_string = await convert_tdata_to_session(tdata_path)
+
+                parsed_accounts.append({
+                    "temp_id": str(uuid.uuid4()),
+                    "session_string": session_string,
+                    "source_file": "tdata folder",
+                    "telegram_id": None,
+                    "phone": None,
+                    "username": None,
+                    "first_name": None,
+                    "last_name": None,
+                    "spamblock": None,
+                    "register_time": None,
+                    "geo": None,
+                })
+            except Exception as e:
+                errors.append({
+                    "file": "tdata",
+                    "error": str(e)
+                })
+
+    except Exception as e:
+        errors.append({
+            "file": "tdata",
+            "error": f"Failed to process tdata folder: {str(e)}"
+        })
+
+    return {
+        "accounts": parsed_accounts,
+        "errors": errors,
+        "total_parsed": len(parsed_accounts),
+        "total_errors": len(errors)
+    }
+
+
+@router.post("/import/verify")
+async def verify_parsed_accounts(
+    data: VerifyAccountsRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    Verify parsed accounts with their assigned proxies.
+    Each account must have a proxy_id assigned.
+    """
+    results = []
+
+    for acc_data in data.accounts:
+        session_string = acc_data.get("session_string")
+        proxy_id = acc_data.get("proxy_id")
+        temp_id = acc_data.get("temp_id")
+
+        if not session_string:
+            results.append({
+                "temp_id": temp_id,
+                "status": "error",
+                "error": "No session string"
+            })
+            continue
+
+        if not proxy_id:
+            results.append({
+                "temp_id": temp_id,
+                "status": "error",
+                "error": "No proxy assigned"
+            })
+            continue
+
+        # Get proxy config
+        proxy_result = await session.execute(
+            select(Proxy).where(Proxy.id == proxy_id)
+        )
+        proxy = proxy_result.scalar_one_or_none()
+
+        if not proxy:
+            results.append({
+                "temp_id": temp_id,
+                "status": "error",
+                "error": "Proxy not found"
+            })
+            continue
+
+        proxy_config = {
+            "type": proxy.type,
+            "host": proxy.host,
+            "port": proxy.port,
+            "username": proxy.username,
+            "password": proxy.password,
+        }
+
+        # Validate session with Telegram
+        try:
+            is_valid, user_info, error = await validate_session(
+                session_string,
+                proxy=proxy_config
+            )
+
+            if is_valid and user_info:
+                results.append({
+                    "temp_id": temp_id,
+                    "status": "valid",
+                    "telegram_id": user_info.get("telegram_id"),
+                    "username": user_info.get("username"),
+                    "phone": user_info.get("phone"),
+                    "first_name": user_info.get("first_name"),
+                    "last_name": user_info.get("last_name"),
+                })
+            else:
+                results.append({
+                    "temp_id": temp_id,
+                    "status": "invalid",
+                    "error": error or "Session invalid"
+                })
+
+        except Exception as e:
+            results.append({
+                "temp_id": temp_id,
+                "status": "error",
+                "error": str(e)
+            })
+
+    return {
+        "results": results,
+        "total_valid": len([r for r in results if r.get("status") == "valid"]),
+        "total_invalid": len([r for r in results if r.get("status") != "valid"])
+    }
+
+
+@router.post("/import/save")
+async def save_verified_accounts(
+    data: SaveAccountsRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    Save verified accounts to database.
+    """
+    saved = []
+    errors = []
+
+    for acc_data in data.accounts:
+        try:
+            telegram_id = acc_data.get("telegram_id")
+
+            # Check for duplicate
+            if telegram_id:
+                existing = await session.execute(
+                    select(Account).where(Account.telegram_id == telegram_id)
+                )
+                if existing.scalar_one_or_none():
+                    errors.append({
+                        "temp_id": acc_data.get("temp_id"),
+                        "error": "Account already exists"
+                    })
+                    continue
+
+            # Parse register_time
+            register_time = None
+            register_time_str = acc_data.get("register_time")
+            if register_time_str:
+                try:
+                    if isinstance(register_time_str, str):
+                        register_time = datetime.fromisoformat(
+                            register_time_str.replace("Z", "+00:00")
+                        )
+                except:
+                    pass
+
+            # Create account
+            account = Account(
+                telegram_id=telegram_id,
+                phone=acc_data.get("phone"),
+                username=acc_data.get("username"),
+                first_name=acc_data.get("first_name"),
+                last_name=acc_data.get("last_name"),
+                session_string=acc_data.get("session_string"),
+                proxy_id=acc_data.get("proxy_id"),
+                status=acc_data.get("status", "valid"),
+                spamblock=acc_data.get("spamblock"),
+                register_time=register_time,
+                geo=acc_data.get("geo"),
+            )
+
+            session.add(account)
+            await session.flush()
+
+            saved.append({
+                "temp_id": acc_data.get("temp_id"),
+                "account_id": account.id,
+                "telegram_id": telegram_id
+            })
+
+        except Exception as e:
+            errors.append({
+                "temp_id": acc_data.get("temp_id"),
+                "error": str(e)
+            })
+
+    await session.commit()
+
+    return {
+        "saved": saved,
+        "errors": errors,
+        "total_saved": len(saved),
+        "total_errors": len(errors)
+    }

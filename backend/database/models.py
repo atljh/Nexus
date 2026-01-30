@@ -1,9 +1,15 @@
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Table, Column, Text, JSON, Float
+from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Table, Column, Text, JSON, Float, inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.database import Base
+
+
+def _is_loaded(obj, attr_name: str) -> bool:
+    """Check if a relationship attribute is already loaded (to avoid lazy loading in async)."""
+    insp = inspect(obj)
+    return attr_name in insp.dict
 
 
 # Many-to-many relationship table for accounts and tags
@@ -26,11 +32,15 @@ class AccountGroup(Base):
     accounts: Mapped[List["Account"]] = relationship(back_populates="group")
 
     def to_dict(self):
+        accounts_count = 0
+        if _is_loaded(self, 'accounts'):
+            accounts_count = len(self.accounts) if self.accounts else 0
+
         return {
             "id": self.id,
             "name": self.name,
             "color": self.color,
-            "accounts_count": len(self.accounts) if self.accounts else 0,
+            "accounts_count": accounts_count,
             "created_at": self.created_at.isoformat()
         }
 
@@ -79,6 +89,11 @@ class Proxy(Base):
     accounts: Mapped[List["Account"]] = relationship(back_populates="proxy")
 
     def to_dict(self):
+        # Check if accounts relationship is loaded to avoid lazy loading in async context
+        accounts_count = 0
+        if _is_loaded(self, 'accounts'):
+            accounts_count = len(self.accounts) if self.accounts else 0
+
         return {
             "id": self.id,
             "type": self.type,
@@ -89,7 +104,7 @@ class Proxy(Base):
             "ping_ms": self.ping_ms,
             "geo": self.geo,
             "external_ip": self.external_ip,
-            "accounts_count": len(self.accounts) if self.accounts else 0,
+            "accounts_count": accounts_count,
             "last_checked_at": self.last_checked_at.isoformat() if self.last_checked_at else None,
             "created_at": self.created_at.isoformat()
         }
@@ -148,6 +163,19 @@ class Account(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     def to_dict(self):
+        # Handle relationships - only access if loaded
+        proxy_dict = None
+        if _is_loaded(self, 'proxy') and self.proxy:
+            proxy_dict = self.proxy.to_dict()
+
+        group_dict = None
+        if _is_loaded(self, 'group') and self.group:
+            group_dict = self.group.to_dict()
+
+        tags_list = []
+        if _is_loaded(self, 'tags') and self.tags:
+            tags_list = [tag.to_dict() for tag in self.tags]
+
         return {
             "id": self.id,
             "telegram_id": self.telegram_id,
@@ -163,11 +191,11 @@ class Account(Base):
             "password_hint": self.password_hint,
             "two_fa_set_at": self.two_fa_set_at.isoformat() if self.two_fa_set_at else None,
             "metadata": self.extra_data,
-            "proxy": self.proxy.to_dict() if self.proxy else None,
+            "proxy": proxy_dict,
             "proxy_id": self.proxy_id,
-            "group": self.group.to_dict() if self.group else None,
+            "group": group_dict,
             "group_id": self.group_id,
-            "tags": [tag.to_dict() for tag in self.tags] if self.tags else [],
+            "tags": tags_list,
             "last_checked_at": self.last_checked_at.isoformat() if self.last_checked_at else None,
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
             "created_at": self.created_at.isoformat()
@@ -227,6 +255,10 @@ class Task(Base):
     logs: Mapped[List["TaskLog"]] = relationship(back_populates="task", cascade="all, delete-orphan")
 
     def to_dict(self):
+        accounts_count = 0
+        if _is_loaded(self, 'accounts'):
+            accounts_count = len(self.accounts) if self.accounts else 0
+
         return {
             "id": self.id,
             "task_type": self.task_type,
@@ -242,7 +274,7 @@ class Task(Base):
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "created_at": self.created_at.isoformat(),
-            "accounts_count": len(self.accounts) if self.accounts else 0,
+            "accounts_count": accounts_count,
             "progress": round(self.completed_actions / self.total_actions * 100, 1) if self.total_actions > 0 else 0
         }
 
