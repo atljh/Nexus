@@ -65,10 +65,7 @@ const showBatchCheckDialog = ref(false)
 const showAddAccountDialog = ref(false)
 const showTwoFADialog = ref(false)
 const twoFAAccount = ref<Account | null>(null)
-const importing = ref(false)
 const batchChecking = ref(false)
-const selectedProxy = ref<number | null>(null)
-const sessionStringInput = ref('')
 const searchQuery = ref('')
 const bulkMenu = ref()
 const newGroupName = ref('')
@@ -84,24 +81,6 @@ const folderInput = ref<HTMLInputElement | null>(null)
 // Batch check options
 const batchCheckSpamblock = ref(false)
 const batchCheckMaxConcurrent = ref(3)
-// Inline proxy creation
-const showInlineProxyForm = ref(false)
-const inlineProxyLoading = ref(false)
-const newProxy = ref({
-  type: 'socks5' as 'socks5' | 'socks4' | 'http' | 'https',
-  host: '',
-  port: '',
-  username: '',
-  password: ''
-})
-const proxyTypes = [
-  { label: 'SOCKS5', value: 'socks5' },
-  { label: 'SOCKS4', value: 'socks4' },
-  { label: 'HTTP', value: 'http' },
-  { label: 'HTTPS', value: 'https' }
-]
-const proxyString = ref('')
-const proxyInputMode = ref<'form' | 'string'>('string')
 
 // New Import Flow State
 const importStep = ref<'upload' | 'preview'>('upload')
@@ -110,6 +89,7 @@ const parseErrors = ref<{ file: string; error: string }[]>([])
 const parsing = ref(false)
 const verifying = ref(false)
 const saving = ref(false)
+const checkingProxies = ref(false)
 const bulkProxyId = ref<number | null>(null)
 
 // Computed
@@ -128,9 +108,29 @@ const allParsedHaveProxy = computed(() =>
   parsedAccounts.value.every(a => a.proxy_id)
 )
 
+// Get unique proxy IDs assigned to parsed accounts
+const assignedProxyIds = computed(() => {
+  const ids = new Set<number>()
+  parsedAccounts.value.forEach(a => {
+    if (a.proxy_id) ids.add(a.proxy_id)
+  })
+  return Array.from(ids)
+})
+
+// Check if all assigned proxies have been checked and are working
+const proxiesChecked = computed(() => {
+  if (assignedProxyIds.value.length === 0) return false
+  return assignedProxyIds.value.every(id => {
+    const proxy = proxyStore.getById(id)
+    return proxy && proxy.status === 'working'
+  })
+})
+
 const canVerify = computed(() =>
   allParsedHaveProxy.value &&
+  proxiesChecked.value &&
   !verifying.value &&
+  !checkingProxies.value &&
   parsedAccounts.value.some(a => a.status === 'pending')
 )
 
@@ -142,13 +142,10 @@ const validAccountsCount = computed(() =>
   parsedAccounts.value.filter(a => a.status === 'valid').length
 )
 
-const invalidAccountsCount = computed(() =>
-  parsedAccounts.value.filter(a => a.status === 'invalid').length
+const accountsWithProxy = computed(() =>
+  parsedAccounts.value.filter(a => a.proxy_id).length
 )
 
-const pendingAccountsCount = computed(() =>
-  parsedAccounts.value.filter(a => a.status === 'pending').length
-)
 
 const statusOptions = computed(() => [
   { label: t('accounts.allStatuses'), value: null },
@@ -242,18 +239,35 @@ function handleFileSelect(event: Event) {
 function handleFolderSelect(event: Event) {
   const input = event.target as HTMLInputElement
   if (input.files && input.files.length > 0) {
-    // Filter tdata-relevant files
+    // Filter tdata-relevant files from selected folder (can contain multiple tdata folders)
     const files = Array.from(input.files)
     const tdataRelevant = files.filter(f => {
-      const path = f.webkitRelativePath || f.name
-      // Include key_data, key_datas, and D877F783D5D3EF8C* files
-      return path.includes('key_data') ||
-             path.includes('key_datas') ||
-             /D877F783D5D3EF8C[0-9A-F]*/.test(path) ||
-             /[0-9A-F]{16}/.test(f.name)
+      const path = (f.webkitRelativePath || f.name).replace(/\\/g, '/')
+      // Check if path contains tdata folder (either at start or as subfolder)
+      const hasTdata = path.startsWith('tdata/') || path.includes('/tdata/')
+      // Include key_data, key_datas, and tdata session files (D877F783D5D3EF8C pattern or 16 hex chars)
+      const isRelevantFile = path.includes('key_data') || /[0-9A-F]{16}/.test(path)
+      return hasTdata && isRelevantFile
     })
 
     if (tdataRelevant.length > 0) {
+      // Count unique tdata folders found
+      const tdataFolders = new Set<string>()
+      tdataRelevant.forEach(f => {
+        const path = (f.webkitRelativePath || f.name).replace(/\\/g, '/')
+        // Match tdata at start or as subfolder
+        const match = path.match(/^(tdata|.+\/tdata)\//)
+        if (match) tdataFolders.add(match[1])
+      })
+
+      const count = tdataFolders.size || 1
+      toast.add({
+        severity: 'info',
+        summary: t('accounts.importFlow.tdataFound'),
+        detail: t('accounts.importFlow.tdataFoundCount', { count }),
+        life: 3000
+      })
+
       tdataFiles.value = tdataRelevant
       parseTdataFolder()
     } else {
@@ -329,14 +343,8 @@ async function handleFileDrop(event: DragEvent) {
       await parseTdataFolder()
     }
     // Process regular files (session/json/zip) if found
-    // If we already have parsed accounts from tdata, append to them
     if (files.length > 0) {
-      const existingAccounts = [...parsedAccounts.value]
       await addFiles(files)
-      // Merge results if we had tdata accounts
-      if (existingAccounts.length > 0 && parsedAccounts.value.length > 0) {
-        parsedAccounts.value = [...existingAccounts, ...parsedAccounts.value]
-      }
     }
   }
   // Fallback to simple file list
@@ -358,43 +366,26 @@ async function addFiles(files: File[]) {
   }
 }
 
-function getFileIcon(filename: string): string {
-  if (filename.endsWith('.zip')) return 'pi pi-file-import'
-  if (filename.endsWith('.json')) return 'pi pi-file'
-  if (filename.endsWith('.session')) return 'pi pi-key'
-  return 'pi pi-file'
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
 // New Import Flow Methods
 async function parseTdataFolder() {
   if (tdataFiles.value.length === 0) return
 
   parsing.value = true
-  parseErrors.value = []
 
   try {
     const result = await accountStore.parseTdataFiles(tdataFiles.value)
 
-    parsedAccounts.value = result.accounts.map((a: any) => ({
+    const newAccounts = result.accounts.map((a: any) => ({
       ...a,
       status: 'pending' as const,
       proxy_id: undefined
     }))
 
-    parseErrors.value = result.errors || []
+    // Append to existing accounts instead of replacing
+    parsedAccounts.value = [...parsedAccounts.value, ...newAccounts]
 
-    if (parsedAccounts.value.length > 0) {
-      importStep.value = 'preview'
-    }
-
-    if (parseErrors.value.length > 0) {
-      parseErrors.value.forEach(err => {
+    if (result.errors?.length > 0) {
+      result.errors.forEach((err: { file: string; error: string }) => {
         toast.add({
           severity: 'error',
           summary: err.file,
@@ -404,7 +395,9 @@ async function parseTdataFolder() {
       })
     }
 
-    if (parsedAccounts.value.length === 0) {
+    if (newAccounts.length > 0) {
+      importStep.value = 'preview'
+    } else {
       toast.add({
         severity: 'warn',
         summary: t('common.warning'),
@@ -429,7 +422,6 @@ async function parseFiles() {
   if (pendingFiles.value.length === 0) return
 
   parsing.value = true
-  parseErrors.value = []
 
   try {
     const sessionFiles = pendingFiles.value.filter(f => f.name.endsWith('.session'))
@@ -439,20 +431,17 @@ async function parseFiles() {
 
     const result = await accountStore.parseImportFiles(sessionFiles, jsonFiles, tdataFile)
 
-    parsedAccounts.value = result.accounts.map(a => ({
+    const newAccounts = result.accounts.map(a => ({
       ...a,
       status: 'pending' as const,
       proxy_id: undefined
     }))
 
-    parseErrors.value = result.errors || []
+    // Append to existing accounts instead of replacing
+    parsedAccounts.value = [...parsedAccounts.value, ...newAccounts]
 
-    if (parsedAccounts.value.length > 0) {
-      importStep.value = 'preview'
-    }
-
-    if (parseErrors.value.length > 0) {
-      parseErrors.value.forEach(err => {
+    if (result.errors?.length > 0) {
+      result.errors.forEach(err => {
         toast.add({
           severity: 'error',
           summary: err.file,
@@ -462,7 +451,9 @@ async function parseFiles() {
       })
     }
 
-    if (parsedAccounts.value.length === 0) {
+    if (newAccounts.length > 0) {
+      importStep.value = 'preview'
+    } else {
       toast.add({
         severity: 'warn',
         summary: t('common.warning'),
@@ -489,6 +480,52 @@ function assignBulkProxy() {
   })
 }
 
+async function checkParsedProxies() {
+  if (!allParsedHaveProxy.value || assignedProxyIds.value.length === 0) {
+    toast.add({
+      severity: 'warn',
+      summary: t('common.warning'),
+      detail: t('accounts.importFlow.assignProxyFirst'),
+      life: 3000
+    })
+    return
+  }
+
+  checkingProxies.value = true
+
+  try {
+    const result = await proxyStore.checkBatchProxies(assignedProxyIds.value)
+
+    const workingCount = result.results.filter(r => r.status === 'working').length
+    const failedCount = result.results.length - workingCount
+
+    if (failedCount > 0) {
+      toast.add({
+        severity: 'warn',
+        summary: t('proxy.messages.checkComplete', { count: result.results.length }),
+        detail: `${workingCount} ${t('proxy.addDialog.working')}, ${failedCount} ${t('proxy.status.not_working')}`,
+        life: 5000
+      })
+    } else {
+      toast.add({
+        severity: 'success',
+        summary: t('proxy.messages.checkComplete', { count: result.results.length }),
+        detail: `${workingCount} ${t('proxy.addDialog.working')}`,
+        life: 3000
+      })
+    }
+  } catch (error: any) {
+    toast.add({
+      severity: 'error',
+      summary: t('proxy.messages.checkFailed'),
+      detail: error.message,
+      life: 5000
+    })
+  } finally {
+    checkingProxies.value = false
+  }
+}
+
 function setAccountProxy(tempId: string, proxyId: number | null) {
   const account = parsedAccounts.value.find(a => a.temp_id === tempId)
   if (account) {
@@ -507,6 +544,16 @@ async function verifyParsedAccounts() {
     return
   }
 
+  if (!proxiesChecked.value) {
+    toast.add({
+      severity: 'warn',
+      summary: t('common.warning'),
+      detail: t('accounts.importFlow.checkProxiesFirst'),
+      life: 3000
+    })
+    return
+  }
+
   verifying.value = true
 
   // Mark all pending as verifying
@@ -517,13 +564,14 @@ async function verifyParsedAccounts() {
   })
 
   try {
+    // Create plain objects to avoid Vue reactivity serialization issues
     const accountsToVerify = parsedAccounts.value
       .filter(a => a.status === 'verifying')
-      .map(a => ({
+      .map(a => JSON.parse(JSON.stringify({
         temp_id: a.temp_id,
         session_string: a.session_string,
-        proxy_id: a.proxy_id!
-      }))
+        proxy_id: a.proxy_id
+      })))
 
     const result = await accountStore.verifyParsedAccounts(accountsToVerify)
 
@@ -623,8 +671,6 @@ function resetImportDialog() {
   pendingFiles.value = []
   tdataFiles.value = []
   bulkProxyId.value = null
-  selectedProxy.value = null
-  sessionStringInput.value = ''
 }
 
 function backToUpload() {
@@ -641,48 +687,6 @@ function getImportStatusSeverity(status?: string): "success" | "info" | "warn" |
   }
 }
 
-function translateError(error?: string): string {
-  if (!error) return ''
-
-  // Check for known error codes
-  const errorMap: Record<string, string> = {
-    'banned': t('accounts.errors.banned'),
-    'deactivated': t('accounts.errors.deactivated'),
-    'restricted': t('accounts.errors.restricted'),
-    'frozen': t('accounts.errors.frozen'),
-    'auth_key_duplicated': t('accounts.errors.authKeyDuplicated'),
-    'session_expired': t('accounts.errors.sessionExpired'),
-    'session_revoked': t('accounts.errors.sessionRevoked'),
-    'flood_wait': t('accounts.errors.floodWait'),
-    'connection_failed': t('accounts.errors.connectionFailed'),
-    'timeout': t('accounts.errors.timeout'),
-  }
-
-  // Direct match
-  if (errorMap[error]) {
-    return errorMap[error]
-  }
-
-  // Check for prefixed errors like "flood_wait:60" or "restricted:reason"
-  if (error.startsWith('flood_wait:')) {
-    const seconds = error.split(':')[1]
-    return t('accounts.errors.floodWaitSeconds', { seconds })
-  }
-
-  if (error.startsWith('restricted:')) {
-    const reason = error.substring(11)
-    return `${t('accounts.errors.restricted')}${reason ? ': ' + reason : ''}`
-  }
-
-  // Check for unknown:message format
-  if (error.startsWith('unknown:')) {
-    return error.substring(8)
-  }
-
-  // Return as-is if no translation found
-  return error
-}
-
 function removeParsedAccount(tempId: string) {
   parsedAccounts.value = parsedAccounts.value.filter(a => a.temp_id !== tempId)
   if (parsedAccounts.value.length === 0) {
@@ -690,53 +694,40 @@ function removeParsedAccount(tempId: string) {
   }
 }
 
+function clearAllParsedAccounts() {
+  parsedAccounts.value = []
+  bulkProxyId.value = null
+}
 
-async function importSessionString() {
-  if (!selectedProxy.value) {
-    toast.add({
-      severity: 'warn',
-      summary: t('common.warning'),
-      detail: t('accounts.importDialog.proxyRequired'),
-      life: 3000
-    })
-    return
-  }
-
-  if (!sessionStringInput.value.trim()) {
-    toast.add({
-      severity: 'warn',
-      summary: t('common.warning'),
-      detail: t('accounts.messages.enterSessionString'),
-      life: 3000
-    })
-    return
-  }
-
-  importing.value = true
-  try {
-    await accountStore.importSessionString(
-      sessionStringInput.value.trim(),
-      selectedProxy.value || undefined
-    )
-    toast.add({
-      severity: 'success',
-      summary: t('common.success'),
-      detail: t('accounts.messages.importSuccess'),
-      life: 3000
-    })
-    sessionStringInput.value = ''
-    showImportDialog.value = false
-  } catch (error: any) {
-    toast.add({
-      severity: 'error',
-      summary: t('accounts.messages.importFailed'),
-      detail: error.message,
-      life: 5000
-    })
-  } finally {
-    importing.value = false
+function getAccountStatusLabel(status?: string): string {
+  switch (status) {
+    case 'valid': return t('accounts.importFlow.status.valid')
+    case 'invalid': return t('accounts.importFlow.status.invalid')
+    case 'verifying': return t('accounts.importFlow.status.verifying')
+    default: return t('accounts.importFlow.status.pending')
   }
 }
+
+function getProxyStatusLabel(proxyId: number): string {
+  const proxy = proxyStore.getById(proxyId)
+  if (!proxy) return '—'
+  return t(`proxy.status.${proxy.status}`)
+}
+
+function getProxyStatusSeverity(proxyId: number): "success" | "info" | "warn" | "danger" | "secondary" | undefined {
+  const proxy = proxyStore.getById(proxyId)
+  if (!proxy) return 'secondary'
+  switch (proxy.status) {
+    case 'working': return 'success'
+    case 'slow': return 'warn'
+    case 'very_slow': return 'warn'
+    case 'not_working': return 'danger'
+    case 'timeout': return 'danger'
+    case 'unchecked': return 'secondary'
+    default: return 'secondary'
+  }
+}
+
 
 async function checkAccount(account: Account) {
   try {
@@ -1027,180 +1018,6 @@ function onRowSelect(event: any) {
 
 function onRowUnselect(event: any) {
   accountStore.toggleSelection(event.data.id)
-}
-
-async function createInlineProxy() {
-  if (!newProxy.value.host || !newProxy.value.port) {
-    toast.add({
-      severity: 'warn',
-      summary: t('common.warning'),
-      detail: t('proxy.messages.enterHostPort'),
-      life: 3000
-    })
-    return
-  }
-
-  inlineProxyLoading.value = true
-  try {
-    const created = await proxyStore.createProxy({
-      type: newProxy.value.type,
-      host: newProxy.value.host.trim(),
-      port: parseInt(newProxy.value.port),
-      username: newProxy.value.username.trim() || undefined,
-      password: newProxy.value.password || undefined
-    })
-
-    // Check the proxy
-    await proxyStore.checkProxy(created.id)
-
-    // Auto-select if working
-    const proxy = proxyStore.getById(created.id)
-    if (proxy?.status === 'working') {
-      selectedProxy.value = created.id
-      toast.add({
-        severity: 'success',
-        summary: t('common.success'),
-        detail: t('proxy.messages.added'),
-        life: 3000
-      })
-    } else {
-      toast.add({
-        severity: 'warn',
-        summary: t('common.warning'),
-        detail: t('proxy.messages.proxyInvalid'),
-        life: 3000
-      })
-    }
-
-    // Reset form and close
-    resetInlineProxyForm()
-    showInlineProxyForm.value = false
-  } catch (error: any) {
-    toast.add({
-      severity: 'error',
-      summary: t('common.error'),
-      detail: error.message || t('proxy.messages.addFailed'),
-      life: 5000
-    })
-  } finally {
-    inlineProxyLoading.value = false
-  }
-}
-
-function resetInlineProxyForm() {
-  newProxy.value = {
-    type: 'socks5',
-    host: '',
-    port: '',
-    username: '',
-    password: ''
-  }
-  proxyString.value = ''
-}
-
-function parseProxyString(str: string): { type: 'socks5' | 'socks4' | 'http' | 'https'; host: string; port: number; username?: string; password?: string } | null {
-  const trimmed = str.trim()
-  if (!trimmed) return null
-
-  let type: 'socks5' | 'socks4' | 'http' | 'https' = 'socks5'
-  let host = ''
-  let port = 0
-  let username: string | undefined
-  let password: string | undefined
-
-  // Try URL format: type://[user:pass@]host:port
-  const urlMatch = trimmed.match(/^(socks5|socks4|http|https):\/\/(?:([^:]+):([^@]+)@)?([^:]+):(\d+)$/i)
-  if (urlMatch) {
-    type = urlMatch[1].toLowerCase() as typeof type
-    username = urlMatch[2] || undefined
-    password = urlMatch[3] || undefined
-    host = urlMatch[4]
-    port = parseInt(urlMatch[5])
-  } else {
-    // Try format: [user:pass@]host:port
-    const authMatch = trimmed.match(/^([^:]+):([^@]+)@([^:]+):(\d+)$/)
-    if (authMatch) {
-      username = authMatch[1]
-      password = authMatch[2]
-      host = authMatch[3]
-      port = parseInt(authMatch[4])
-    } else {
-      // Try simple format: host:port or host:port:user:pass
-      const parts = trimmed.split(':')
-      if (parts.length < 2) return null
-
-      host = parts[0]
-      port = parseInt(parts[1])
-
-      if (parts.length >= 4) {
-        username = parts[2]
-        password = parts.slice(3).join(':') // Password may contain colons
-      }
-    }
-  }
-
-  if (!host || !port || isNaN(port)) return null
-
-  return { type, host, port, username, password }
-}
-
-async function createProxyFromString() {
-  const parsed = parseProxyString(proxyString.value)
-  if (!parsed) {
-    toast.add({
-      severity: 'warn',
-      summary: t('common.warning'),
-      detail: t('proxy.messages.invalidProxyFormat'),
-      life: 3000
-    })
-    return
-  }
-
-  inlineProxyLoading.value = true
-  try {
-    const created = await proxyStore.createProxy({
-      type: parsed.type,
-      host: parsed.host,
-      port: parsed.port,
-      username: parsed.username,
-      password: parsed.password
-    })
-
-    // Check the proxy
-    await proxyStore.checkProxy(created.id)
-
-    // Auto-select if working
-    const proxy = proxyStore.getById(created.id)
-    if (proxy?.status === 'working') {
-      selectedProxy.value = created.id
-      toast.add({
-        severity: 'success',
-        summary: t('common.success'),
-        detail: t('proxy.messages.added'),
-        life: 3000
-      })
-    } else {
-      toast.add({
-        severity: 'warn',
-        summary: t('common.warning'),
-        detail: t('proxy.messages.proxyInvalid'),
-        life: 3000
-      })
-    }
-
-    // Reset form and close
-    resetInlineProxyForm()
-    showInlineProxyForm.value = false
-  } catch (error: any) {
-    toast.add({
-      severity: 'error',
-      summary: t('common.error'),
-      detail: error.message || t('proxy.messages.addFailed'),
-      life: 5000
-    })
-  } finally {
-    inlineProxyLoading.value = false
-  }
 }
 </script>
 
@@ -1503,411 +1320,243 @@ async function createProxyFromString() {
         v-model:visible="showImportDialog"
         :header="t('accounts.importDialog.title')"
         modal
-        :style="{ width: importStep === 'preview' ? '900px' : '560px' }"
+        :style="{ width: '1000px' }"
         :closable="!parsing && !verifying && !saving"
-        class="custom-dialog"
+        class="custom-dialog import-dialog-unified"
         @hide="resetImportDialog"
       >
-        <!-- Step 1: Upload Files -->
-        <template v-if="importStep === 'upload'">
-          <ProgressBar v-if="parsing" mode="indeterminate" style="height: 4px" class="mb-4" />
+        <ProgressBar v-if="parsing" mode="indeterminate" style="height: 4px" class="mb-4" />
 
-          <!-- Drag & Drop Zone -->
-          <div
-            class="drop-zone"
-            :class="{ 'drop-zone-active': isDragging, 'drop-zone-disabled': parsing }"
-            @dragenter.prevent="isDragging = true"
-            @dragover.prevent="isDragging = true"
-            @dragleave.prevent="isDragging = false"
-            @drop.prevent="handleFileDrop"
-            @click="openFileSelector"
+        <!-- Upload Cards -->
+        <div
+          class="upload-zone-unified"
+          :class="{ 'upload-zone-active': isDragging }"
+          @dragenter.prevent="isDragging = true"
+          @dragover.prevent="isDragging = true"
+          @dragleave.prevent="isDragging = false"
+          @drop.prevent="handleFileDrop"
+        >
+          <div class="upload-cards">
+            <div class="upload-card" @click.stop="openFolderSelector">
+              <div class="upload-card-icon tdata-icon">
+                <i class="pi pi-folder"></i>
+              </div>
+              <span class="upload-card-label">TData</span>
+            </div>
+            <div class="upload-card-divider"></div>
+            <div class="upload-card" @click.stop="openFileSelector">
+              <div class="upload-card-icon session-icon">
+                <i class="pi pi-file"></i>
+              </div>
+              <span class="upload-card-label">.session</span>
+            </div>
+          </div>
+          <div class="upload-hint">
+            <i class="pi pi-arrows-alt"></i>
+            <span>{{ t('accounts.importFlow.orDragHere') }}</span>
+          </div>
+          <input
+            ref="fileInput"
+            type="file"
+            multiple
+            accept=".zip,.json,.session"
+            class="hidden-input"
+            @change="handleFileSelect"
+          />
+          <input
+            ref="folderInput"
+            type="file"
+            webkitdirectory
+            directory
+            multiple
+            class="hidden-input"
+            @change="handleFolderSelect"
+          />
+        </div>
+
+        <!-- Proxy Selection Row -->
+        <div class="proxy-selection-row">
+          <Dropdown
+            v-model="bulkProxyId"
+            :options="proxyStore.workingProxies"
+            optionLabel="host"
+            optionValue="id"
+            :placeholder="t('accounts.importFlow.selectProxy')"
+            class="proxy-main-dropdown"
+            @update:model-value="assignBulkProxy"
           >
-            <div class="drop-zone-content">
-              <i class="pi pi-cloud-upload drop-zone-icon"></i>
-              <p class="drop-zone-title">{{ t('accounts.dropZone.dropTitle') }}</p>
-              <p class="drop-zone-hint">{{ t('accounts.dropZone.dropHint') }}</p>
-              <div class="drop-zone-formats">
-                <span class="format-badge">.session + .json</span>
-                <span class="format-badge">tdata {{ t('accounts.importFlow.folder') }}</span>
+            <template #value="{ value }">
+              <div class="proxy-dropdown-value">
+                <i class="pi pi-server"></i>
+                <span v-if="value">
+                  {{ proxyStore.getById(value)?.host }}:{{ proxyStore.getById(value)?.port }}
+                </span>
+                <span v-else>{{ t('accounts.importFlow.selectProxy') }}</span>
               </div>
-            </div>
-            <input
-              ref="fileInput"
-              type="file"
-              multiple
-              accept=".zip,.json,.session"
-              class="hidden-input"
-              @change="handleFileSelect"
-            />
-          </div>
-
-          <!-- TData Folder Button -->
-          <div class="tdata-folder-section">
-            <div class="divider-text">{{ t('accounts.importFlow.orSelectTdata') }}</div>
-            <Button
-              :label="t('accounts.importFlow.selectTdataFolder')"
-              icon="pi pi-folder-open"
-              severity="secondary"
-              :loading="parsing"
-              @click.stop="openFolderSelector"
-              class="w-full"
-            />
-            <input
-              ref="folderInput"
-              type="file"
-              webkitdirectory
-              directory
-              class="hidden-input"
-              @change="handleFolderSelect"
-            />
-          </div>
-
-          <!-- Selected Files Preview (shown during parsing) -->
-          <div v-if="pendingFiles.length > 0 && parsing" class="pending-files">
-            <div class="pending-files-header">
-              <span>{{ t('accounts.importFlow.parsing') }} ({{ pendingFiles.length }})</span>
-            </div>
-            <div class="pending-files-list">
-              <div v-for="(file, index) in pendingFiles" :key="index" class="pending-file">
-                <i :class="getFileIcon(file.name)"></i>
-                <span class="file-name">{{ file.name }}</span>
-                <span class="file-size">{{ formatFileSize(file.size) }}</span>
+            </template>
+            <template #option="{ option }">
+              <div class="proxy-option">
+                <span>{{ option.host }}:{{ option.port }}</span>
+                <span class="proxy-type">{{ option.type }}</span>
               </div>
-            </div>
+            </template>
+          </Dropdown>
+          <Button
+            icon="pi pi-trash"
+            severity="danger"
+            text
+            :disabled="parsedAccounts.length === 0"
+            @click="clearAllParsedAccounts"
+            v-tooltip.top="t('accounts.importFlow.clearAll')"
+          />
+        </div>
+
+        <!-- Stats Bar -->
+        <div class="import-stats-bar">
+          <div class="stat-badge">
+            <i class="pi pi-users"></i>
+            <span>{{ parsedAccounts.length }}</span>
           </div>
+          <div class="stat-badge stat-proxy">
+            <i class="pi pi-server"></i>
+            <span>{{ accountsWithProxy }}/{{ parsedAccounts.length }}</span>
+          </div>
+          <div class="stat-badge stat-verified">
+            <i class="pi pi-check-circle"></i>
+            <span>{{ validAccountsCount }}</span>
+          </div>
+        </div>
 
-          <!-- Session String Input -->
-          <div class="session-string-section">
-            <div class="divider-text">{{ t('accounts.dropZone.orPasteSession') }}</div>
+        <!-- Accounts Table -->
+        <div class="import-table-container">
+          <DataTable
+            v-if="parsedAccounts.length > 0"
+            :value="parsedAccounts"
+            :loading="verifying"
+            scrollable
+            scrollHeight="300px"
+            class="custom-table import-table-unified"
+          >
+            <Column :header="t('accounts.account')" style="min-width: 140px">
+              <template #body="{ data }">
+                <div class="account-cell">
+                  <i class="pi pi-user"></i>
+                  <span>{{ data.source_file || 'tdata' }}</span>
+                </div>
+              </template>
+            </Column>
 
-            <!-- Proxy Selection for Session String -->
-            <div class="form-field">
-              <div class="proxy-header">
-                <label class="form-label required-label">{{ t('accounts.importDialog.useProxy') }} *</label>
-                <Button
-                  :label="showInlineProxyForm ? t('common.cancel') : t('accounts.importDialog.addNewProxy')"
-                  :icon="showInlineProxyForm ? 'pi pi-times' : 'pi pi-plus'"
-                  severity="secondary"
-                  text
-                  size="small"
-                  @click="showInlineProxyForm = !showInlineProxyForm; if (!showInlineProxyForm) resetInlineProxyForm()"
+            <Column :header="t('accounts.importFlow.format')" style="min-width: 100px">
+              <template #body="{ data }">
+                <div class="format-cell">
+                  <i class="pi pi-file"></i>
+                  <span>{{ data.source_file?.includes('.session') ? 'session' : 'tdata' }}</span>
+                </div>
+              </template>
+            </Column>
+
+            <Column :header="t('accounts.importFlow.phone')" style="min-width: 120px">
+              <template #body="{ data }">
+                <span>{{ data.phone || '—' }}</span>
+              </template>
+            </Column>
+
+            <Column header="Username" style="min-width: 120px">
+              <template #body="{ data }">
+                <span>{{ data.username ? `@${data.username}` : '—' }}</span>
+              </template>
+            </Column>
+
+            <Column :header="t('accounts.proxy')" style="min-width: 180px">
+              <template #body="{ data }">
+                <Dropdown
+                  :model-value="data.proxy_id"
+                  :options="proxyStore.workingProxies"
+                  optionLabel="host"
+                  optionValue="id"
+                  :placeholder="t('accounts.importFlow.selectProxy')"
+                  class="table-proxy-dropdown"
+                  @update:model-value="setAccountProxy(data.temp_id, $event)"
+                >
+                  <template #value="{ value }">
+                    <span v-if="value" class="proxy-value-small">
+                      {{ proxyStore.getById(value)?.type }}://{{ proxyStore.getById(value)?.host }}:{{ proxyStore.getById(value)?.port }}
+                    </span>
+                    <span v-else class="placeholder-text">—</span>
+                  </template>
+                </Dropdown>
+              </template>
+            </Column>
+
+            <Column :header="t('accounts.importFlow.accountStatus')" style="min-width: 140px">
+              <template #body="{ data }">
+                <Tag
+                  :value="getAccountStatusLabel(data.status)"
+                  :severity="getImportStatusSeverity(data.status)"
+                  class="status-tag"
                 />
-              </div>
+              </template>
+            </Column>
 
-              <!-- Inline Proxy Form -->
-              <div v-if="showInlineProxyForm" class="inline-proxy-form">
-                <div class="proxy-mode-toggle">
-                  <Button
-                    :label="t('accounts.importDialog.proxyString')"
-                    :severity="proxyInputMode === 'string' ? 'primary' : 'secondary'"
-                    :outlined="proxyInputMode !== 'string'"
-                    size="small"
-                    @click="proxyInputMode = 'string'"
-                  />
-                  <Button
-                    :label="t('accounts.importDialog.proxyForm')"
-                    :severity="proxyInputMode === 'form' ? 'primary' : 'secondary'"
-                    :outlined="proxyInputMode !== 'form'"
-                    size="small"
-                    @click="proxyInputMode = 'form'"
-                  />
-                </div>
+            <Column :header="t('accounts.importFlow.proxyStatus')" style="min-width: 130px">
+              <template #body="{ data }">
+                <Tag
+                  v-if="data.proxy_id"
+                  :value="getProxyStatusLabel(data.proxy_id)"
+                  :severity="getProxyStatusSeverity(data.proxy_id)"
+                  class="status-tag"
+                />
+                <span v-else class="no-proxy-text">—</span>
+              </template>
+            </Column>
 
-                <div v-if="proxyInputMode === 'string'" class="proxy-string-input">
-                  <div class="proxy-form-field">
-                    <label class="form-label-small">{{ t('accounts.importDialog.proxyStringLabel') }}</label>
-                    <InputText
-                      v-model="proxyString"
-                      :placeholder="t('accounts.importDialog.proxyStringPlaceholderFull')"
-                      class="w-full font-mono"
-                      @keyup.enter="createProxyFromString"
-                    />
-                  </div>
-                  <small class="proxy-format-hint">{{ t('accounts.importDialog.proxyStringFormats') }}</small>
-                  <Button
-                    :label="t('accounts.importDialog.addAndCheck')"
-                    icon="pi pi-check"
-                    :loading="inlineProxyLoading"
-                    :disabled="!proxyString.trim()"
-                    @click="createProxyFromString"
-                    class="w-full mt-2"
-                    size="small"
-                  />
-                </div>
+            <Column style="width: 50px">
+              <template #body="{ data }">
+                <Button
+                  icon="pi pi-trash"
+                  severity="danger"
+                  text
+                  rounded
+                  size="small"
+                  @click="removeParsedAccount(data.temp_id)"
+                />
+              </template>
+            </Column>
+          </DataTable>
 
-                <div v-else>
-                  <div class="proxy-form-row">
-                    <div class="proxy-form-field type-field">
-                      <label class="form-label-small">{{ t('proxy.addDialog.type') }}</label>
-                      <Dropdown
-                        v-model="newProxy.type"
-                        :options="proxyTypes"
-                        optionLabel="label"
-                        optionValue="value"
-                        class="w-full"
-                      />
-                    </div>
-                    <div class="proxy-form-field host-field">
-                      <label class="form-label-small">{{ t('proxy.addDialog.host') }}</label>
-                      <InputText
-                        v-model="newProxy.host"
-                        placeholder="127.0.0.1"
-                        class="w-full"
-                      />
-                    </div>
-                    <div class="proxy-form-field port-field">
-                      <label class="form-label-small">{{ t('proxy.addDialog.port') }}</label>
-                      <InputText
-                        v-model="newProxy.port"
-                        placeholder="1080"
-                        class="w-full"
-                      />
-                    </div>
-                  </div>
-                  <div class="proxy-form-row">
-                    <div class="proxy-form-field">
-                      <label class="form-label-small">{{ t('proxy.addDialog.username') }} ({{ t('common.optional') }})</label>
-                      <InputText
-                        v-model="newProxy.username"
-                        :placeholder="t('proxy.addDialog.username')"
-                        class="w-full"
-                      />
-                    </div>
-                    <div class="proxy-form-field">
-                      <label class="form-label-small">{{ t('proxy.addDialog.password') }} ({{ t('common.optional') }})</label>
-                      <InputText
-                        v-model="newProxy.password"
-                        type="password"
-                        :placeholder="t('proxy.addDialog.password')"
-                        class="w-full"
-                      />
-                    </div>
-                  </div>
-                  <Button
-                    :label="t('accounts.importDialog.addAndCheck')"
-                    icon="pi pi-check"
-                    :loading="inlineProxyLoading"
-                    @click="createInlineProxy"
-                    class="w-full mt-2"
-                    size="small"
-                  />
-                </div>
-              </div>
-
-              <Dropdown
-                v-if="!showInlineProxyForm"
-                v-model="selectedProxy"
-                :options="proxyStore.workingProxies"
-                optionLabel="host"
-                optionValue="id"
-                :placeholder="t('accounts.importDialog.selectProxy')"
-                class="w-full"
-              >
-                <template #value="{ value }">
-                  <span v-if="value">
-                    {{ proxyStore.getById(value)?.host }}:{{ proxyStore.getById(value)?.port }}
-                  </span>
-                  <span v-else class="placeholder-text">{{ t('accounts.importDialog.selectProxy') }}</span>
-                </template>
-                <template #option="{ option }">
-                  <div class="proxy-option">
-                    <span>{{ option.host }}:{{ option.port }}</span>
-                    <span class="proxy-type">{{ option.type }}</span>
-                  </div>
-                </template>
-              </Dropdown>
-            </div>
-
-            <div class="form-field mb-0">
-              <InputText
-                v-model="sessionStringInput"
-                :placeholder="t('accounts.sessionString.placeholder')"
-                class="w-full font-mono"
-                :disabled="importing || !selectedProxy"
-                @keyup.enter="importSessionString"
-              />
-              <small v-if="!selectedProxy" class="proxy-required-hint mt-2">
-                {{ t('accounts.importDialog.proxyRequired') }}
-              </small>
-            </div>
+          <div v-else class="empty-table-message">
+            <i class="pi pi-inbox"></i>
+            <span>{{ t('accounts.importFlow.noAccountsYet') }}</span>
           </div>
-        </template>
+        </div>
 
-        <!-- Step 2: Preview & Verify Accounts -->
-        <template v-else-if="importStep === 'preview'">
-          <div class="import-preview-header">
-            <Button
-              icon="pi pi-arrow-left"
-              :label="t('common.back')"
-              severity="secondary"
-              text
-              @click="backToUpload"
-            />
-            <div class="import-stats">
-              <span class="stat-item">
-                <i class="pi pi-list"></i>
-                {{ t('accounts.importFlow.total') }}: {{ parsedAccounts.length }}
-              </span>
-              <span v-if="validAccountsCount > 0" class="stat-item stat-valid">
-                <i class="pi pi-check-circle"></i>
-                {{ t('accounts.importFlow.valid') }}: {{ validAccountsCount }}
-              </span>
-              <span v-if="invalidAccountsCount > 0" class="stat-item stat-invalid">
-                <i class="pi pi-times-circle"></i>
-                {{ t('accounts.importFlow.invalid') }}: {{ invalidAccountsCount }}
-              </span>
-              <span v-if="pendingAccountsCount > 0" class="stat-item stat-pending">
-                <i class="pi pi-clock"></i>
-                {{ t('accounts.importFlow.pending') }}: {{ pendingAccountsCount }}
-              </span>
-            </div>
-          </div>
-
-          <!-- Bulk Proxy Assignment -->
-          <div class="bulk-proxy-section">
-            <label class="form-label">{{ t('accounts.importFlow.assignProxyToAll') }}</label>
-            <div class="bulk-proxy-row">
-              <Dropdown
-                v-model="bulkProxyId"
-                :options="proxyStore.workingProxies"
-                optionLabel="host"
-                optionValue="id"
-                :placeholder="t('accounts.importDialog.selectProxy')"
-                class="flex-1"
-              >
-                <template #value="{ value }">
-                  <span v-if="value">
-                    {{ proxyStore.getById(value)?.host }}:{{ proxyStore.getById(value)?.port }}
-                  </span>
-                  <span v-else class="placeholder-text">{{ t('accounts.importDialog.selectProxy') }}</span>
-                </template>
-                <template #option="{ option }">
-                  <div class="proxy-option">
-                    <span>{{ option.host }}:{{ option.port }}</span>
-                    <span class="proxy-type">{{ option.type }}</span>
-                  </div>
-                </template>
-              </Dropdown>
-              <Button
-                :label="t('accounts.importFlow.applyToAll')"
-                icon="pi pi-check"
-                severity="secondary"
-                :disabled="!bulkProxyId"
-                @click="assignBulkProxy"
-              />
-            </div>
-          </div>
-
-          <!-- Parsed Accounts Table -->
-          <div class="parsed-accounts-table">
-            <DataTable
-              :value="parsedAccounts"
-              :loading="verifying"
-              scrollable
-              scrollHeight="350px"
-              class="custom-table import-table"
-            >
-              <Column :header="t('accounts.importFlow.sourceFile')" style="min-width: 150px">
-                <template #body="{ data }">
-                  <span class="source-file">{{ data.source_file || '—' }}</span>
-                </template>
-              </Column>
-
-              <Column :header="t('accounts.account')" style="min-width: 180px">
-                <template #body="{ data }">
-                  <div class="account-preview">
-                    <span v-if="data.username">@{{ data.username }}</span>
-                    <span v-else-if="data.phone">{{ data.phone }}</span>
-                    <span v-else-if="data.telegram_id">ID: {{ data.telegram_id }}</span>
-                    <span v-else class="no-data">{{ t('accounts.importFlow.unknown') }}</span>
-                  </div>
-                </template>
-              </Column>
-
-              <Column :header="t('accounts.proxy')" style="min-width: 200px">
-                <template #body="{ data }">
-                  <Dropdown
-                    :model-value="data.proxy_id"
-                    :options="proxyStore.workingProxies"
-                    optionLabel="host"
-                    optionValue="id"
-                    :placeholder="t('accounts.importFlow.selectProxy')"
-                    class="w-full import-proxy-dropdown"
-                    @update:model-value="setAccountProxy(data.temp_id, $event)"
-                  >
-                    <template #value="{ value }">
-                      <span v-if="value" class="proxy-text-small">
-                        {{ proxyStore.getById(value)?.host }}:{{ proxyStore.getById(value)?.port }}
-                      </span>
-                      <span v-else class="placeholder-text">{{ t('accounts.importFlow.selectProxy') }}</span>
-                    </template>
-                    <template #option="{ option }">
-                      <div class="proxy-option">
-                        <span>{{ option.host }}:{{ option.port }}</span>
-                        <span class="proxy-type">{{ option.type }}</span>
-                      </div>
-                    </template>
-                  </Dropdown>
-                </template>
-              </Column>
-
-              <Column :header="t('common.status')" style="min-width: 120px">
-                <template #body="{ data }">
-                  <Tag
-                    :value="t(`accounts.importFlow.status.${data.status}`)"
-                    :severity="getImportStatusSeverity(data.status)"
-                  />
-                </template>
-              </Column>
-
-              <Column :header="t('accounts.importFlow.error')" style="min-width: 150px">
-                <template #body="{ data }">
-                  <span v-if="data.error" class="error-text" v-tooltip.top="translateError(data.error)">
-                    {{ translateError(data.error) }}
-                  </span>
-                  <span v-else class="no-data">—</span>
-                </template>
-              </Column>
-
-              <Column style="width: 60px">
-                <template #body="{ data }">
-                  <Button
-                    icon="pi pi-trash"
-                    severity="danger"
-                    text
-                    rounded
-                    size="small"
-                    :aria-label="t('common.delete')"
-                    @click="removeParsedAccount(data.temp_id)"
-                  />
-                </template>
-              </Column>
-            </DataTable>
-          </div>
-
-          <!-- Action Buttons -->
-          <div class="import-actions">
-            <Button
-              :label="t('accounts.importFlow.verifyAll')"
-              icon="pi pi-refresh"
-              :loading="verifying"
-              :disabled="!canVerify"
-              @click="verifyParsedAccounts"
-              class="flex-1"
-            />
-            <Button
-              :label="t('accounts.importFlow.saveValid', { count: validAccountsCount })"
-              icon="pi pi-save"
-              :loading="saving"
-              :disabled="!canSave"
-              @click="saveVerifiedAccounts"
-              class="flex-1"
-            />
-          </div>
-          <small v-if="!allParsedHaveProxy" class="proxy-required-hint">
-            {{ t('accounts.importFlow.assignProxyFirst') }}
-          </small>
-        </template>
+        <!-- Action Buttons -->
+        <div class="import-action-buttons">
+          <Button
+            :label="t('accounts.importFlow.checkProxies')"
+            icon="pi pi-wifi"
+            class="action-btn action-btn-orange"
+            :disabled="parsedAccounts.length === 0 || !allParsedHaveProxy || checkingProxies"
+            :loading="checkingProxies"
+            @click="checkParsedProxies"
+          />
+          <Button
+            :label="t('accounts.importFlow.checkAccounts')"
+            icon="pi pi-check-circle"
+            class="action-btn action-btn-blue"
+            :disabled="!canVerify || checkingProxies"
+            :loading="verifying"
+            @click="verifyParsedAccounts"
+          />
+          <Button
+            :label="t('accounts.importFlow.saveToApp')"
+            icon="pi pi-check"
+            class="action-btn action-btn-green"
+            :disabled="!canSave"
+            :loading="saving"
+            @click="saveVerifiedAccounts"
+          />
+        </div>
       </Dialog>
 
       <!-- Create Group Dialog -->
@@ -2544,28 +2193,21 @@ async function createProxyFromString() {
   margin-bottom: 12px;
 }
 
-.drop-zone-formats {
+.drop-zone-buttons {
   display: flex;
-  gap: 8px;
+  gap: 16px;
   justify-content: center;
   flex-wrap: wrap;
+  margin-top: 16px;
+  pointer-events: auto;
 }
 
-.format-badge {
-  font-size: 11px;
-  padding: 4px 10px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #9ca3af;
-  font-family: monospace;
+.drop-zone-buttons :deep(.p-button) {
+  padding: 12px 24px;
 }
 
 .hidden-input {
   display: none;
-}
-
-.tdata-folder-section {
-  margin-top: 16px;
 }
 
 /* Pending Files */
@@ -2894,5 +2536,93 @@ async function createProxyFromString() {
 
 .import-actions .p-button {
   justify-content: center;
+}
+
+/* Unified Import Dialog Styles - base styles in main.css */
+.upload-cards {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  margin-bottom: 16px;
+}
+
+.proxy-selection-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.proxy-main-dropdown {
+  flex: 1;
+}
+
+.proxy-dropdown-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.proxy-dropdown-value i {
+  color: #a855f7;
+}
+
+:deep(.import-table-unified .p-datatable-tbody > tr > td) {
+  padding: 10px 12px;
+}
+
+.table-proxy-dropdown {
+  min-width: 150px;
+}
+
+:deep(.table-proxy-dropdown .p-dropdown-label) {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.proxy-value-small {
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.status-tag {
+  font-size: 11px;
+}
+
+.no-proxy-text {
+  color: #6b7280;
+}
+
+.format-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.format-cell i {
+  color: #6b7280;
+}
+
+.import-action-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+:deep(.import-dialog-unified .p-dialog-content) {
+  padding: 20px 24px !important;
+  background: var(--color-bg-elevated, #18181b) !important;
+}
+
+:deep(.import-dialog-unified .p-dialog-header) {
+  background: var(--color-bg-elevated, #18181b) !important;
+}
+
+:deep(.light .import-dialog-unified .p-dialog-content),
+:deep(.light .import-dialog-unified .p-dialog-header) {
+  background: #ffffff !important;
 }
 </style>
