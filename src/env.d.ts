@@ -8,7 +8,7 @@ declare module '*.vue' {
 
 interface UploadFile {
   name: string
-  data: ArrayBuffer
+  data: Uint8Array
   filename: string
 }
 
