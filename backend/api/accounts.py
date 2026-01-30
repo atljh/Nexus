@@ -1524,10 +1524,11 @@ async def parse_tdata_folder(
 ):
     """
     Parse tdata folder files (uploaded as individual files with paths).
-    Reconstructs folder structure and converts to session.
+    Supports multiple tdata folders in one request.
+    Reconstructs folder structure and converts each to session.
     """
     import uuid
-    from fastapi import Request
+    import re
 
     parsed_accounts = []
     errors = []
@@ -1541,83 +1542,98 @@ async def parse_tdata_folder(
         }
 
     try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-            tdata_path = temp_path / "tdata"
-            tdata_path.mkdir(parents=True, exist_ok=True)
+        # Group files by their tdata root path
+        # Path format: "parent/account1/tdata/key_data" -> group by "parent/account1/tdata"
+        tdata_groups: dict[str, list[tuple[UploadFile, str]]] = {}
 
-            # Save files preserving folder structure
-            for i, file in enumerate(tdata_files):
-                content = await file.read()
+        for file in tdata_files:
+            filename = file.filename or ""
+            normalized = filename.replace('\\', '/')
+            # Find tdata path in filename
+            match = re.search(r'^(.*?/tdata|tdata)/', normalized)
+            if match:
+                tdata_root = match.group(1)
+                # Get relative path after tdata/
+                if normalized.startswith('tdata/'):
+                    rel_path = normalized[6:]  # Remove "tdata/"
+                else:
+                    rel_path = normalized.split('/tdata/', 1)[-1]
+                if tdata_root not in tdata_groups:
+                    tdata_groups[tdata_root] = []
+                tdata_groups[tdata_root].append((file, rel_path))
 
-                # Get relative path from filename (webkitRelativePath is in filename)
-                # The path format is like "tdata/key_data" or "folder/tdata/key_data"
-                rel_path = file.filename or f"file_{i}"
+        if not tdata_groups:
+            return {
+                "accounts": [],
+                "errors": [{"file": "tdata", "error": "No valid tdata paths found"}],
+                "total_parsed": 0,
+                "total_errors": 1
+            }
 
-                # Extract path after "tdata/" if present
-                if "tdata/" in rel_path:
-                    rel_path = rel_path.split("tdata/", 1)[1]
-                elif "tdata\\" in rel_path:
-                    rel_path = rel_path.split("tdata\\", 1)[1]
-
-                # Create parent directories and save file
-                file_path = tdata_path / rel_path
-                file_path.parent.mkdir(parents=True, exist_ok=True)
-                file_path.write_bytes(content)
-
-            # Check if we have valid tdata structure
-            has_key_data = (tdata_path / "key_data").exists() or (tdata_path / "key_datas").exists()
-            has_session_files = any(
-                f.name.startswith("D877F783D5D3EF8C") or
-                (len(f.name) == 16 and all(c in "0123456789ABCDEF" for c in f.name))
-                for f in tdata_path.iterdir() if f.is_dir() or f.is_file()
-            )
-
-            if not has_key_data and not has_session_files:
-                # Maybe files are in root, check parent
-                for item in temp_path.iterdir():
-                    if item.is_dir() and item.name != "tdata":
-                        # Check if this is the actual tdata folder
-                        if (item / "key_data").exists() or (item / "key_datas").exists():
-                            tdata_path = item
-                            has_key_data = True
-                            break
-
-            if not has_key_data:
-                return {
-                    "accounts": [],
-                    "errors": [{"file": "tdata", "error": "Invalid tdata folder structure - key_data not found"}],
-                    "total_parsed": 0,
-                    "total_errors": 1
-                }
-
-            # Convert tdata to session
+        # Process each tdata group separately
+        for tdata_root, files in tdata_groups.items():
             try:
-                session_string = await convert_tdata_to_session(tdata_path)
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    temp_path = Path(temp_dir)
+                    tdata_path = temp_path / "tdata"
+                    tdata_path.mkdir(parents=True, exist_ok=True)
 
-                parsed_accounts.append({
-                    "temp_id": str(uuid.uuid4()),
-                    "session_string": session_string,
-                    "source_file": "tdata folder",
-                    "telegram_id": None,
-                    "phone": None,
-                    "username": None,
-                    "first_name": None,
-                    "last_name": None,
-                    "spamblock": None,
-                    "register_time": None,
-                    "geo": None,
-                })
+                    # Save files preserving folder structure
+                    for file, rel_path in files:
+                        content = await file.read()
+                        await file.seek(0)  # Reset for potential re-read
+
+                        file_path = tdata_path / rel_path
+                        file_path.parent.mkdir(parents=True, exist_ok=True)
+                        file_path.write_bytes(content)
+
+                    # Check if we have valid tdata structure
+                    has_key_data = (tdata_path / "key_data").exists() or (tdata_path / "key_datas").exists()
+
+                    if not has_key_data:
+                        errors.append({
+                            "file": tdata_root,
+                            "error": "Invalid tdata structure - key_data not found"
+                        })
+                        continue
+
+                    # Convert tdata to session
+                    try:
+                        session_string = await convert_tdata_to_session(tdata_path)
+
+                        # Extract folder name for source_file
+                        source_name = tdata_root.rsplit('/', 1)[0] if '/' in tdata_root else tdata_root
+                        source_name = source_name.rsplit('/', 1)[-1] if '/' in source_name else source_name
+
+                        parsed_accounts.append({
+                            "temp_id": str(uuid.uuid4()),
+                            "session_string": session_string,
+                            "source_file": source_name or "tdata",
+                            "telegram_id": None,
+                            "phone": None,
+                            "username": None,
+                            "first_name": None,
+                            "last_name": None,
+                            "spamblock": None,
+                            "register_time": None,
+                            "geo": None,
+                        })
+                    except Exception as e:
+                        errors.append({
+                            "file": tdata_root,
+                            "error": str(e)
+                        })
+
             except Exception as e:
                 errors.append({
-                    "file": "tdata",
-                    "error": str(e)
+                    "file": tdata_root,
+                    "error": f"Failed to process: {str(e)}"
                 })
 
     except Exception as e:
         errors.append({
             "file": "tdata",
-            "error": f"Failed to process tdata folder: {str(e)}"
+            "error": f"Failed to process tdata folders: {str(e)}"
         })
 
     return {
