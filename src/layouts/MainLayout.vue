@@ -234,7 +234,7 @@ function toggleTheme() {
 .main-content {
   flex: 1;
   margin-left: 260px;
-  padding: 28px 32px;
+  padding: 20px 24px;
   background: #0a0a0a;
   min-height: 100vh;
   transition: background-color 0.2s ease;

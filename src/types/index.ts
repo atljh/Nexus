@@ -428,3 +428,57 @@ export interface AuthSessionInfo {
   expires_at: string
   created_at: string
 }
+
+// ============================================================
+// WebK Viewer Types
+// ============================================================
+
+export interface WebKSessionData {
+  dc: number
+  [key: string]: unknown // dc2_auth_key, dc2_server_salt, etc.
+  user_auth?: {
+    dcID: number
+    id: number
+  }
+  account1?: Record<string, unknown>
+  auth_key_fingerprint?: string
+}
+
+export interface WebKHealthStatus {
+  sessionPresent: boolean
+  connected: boolean
+  dcId: number | null
+  userId: number | null
+  timestamp: number
+}
+
+export interface DeviceFingerprint {
+  device_model?: string
+  system_version?: string
+  app_version?: string
+  lang_code?: string
+  system_lang_code?: string
+}
+
+export interface WebKSessionResponse {
+  success: boolean
+  session_data: WebKSessionData
+  proxy: ProxyConfig
+  device_fingerprint: DeviceFingerprint | null
+  account: {
+    id: number
+    telegram_id: number
+    username: string | null
+    phone: string | null
+    first_name: string | null
+    last_name: string | null
+  }
+}
+
+export interface WebViewState {
+  loading: boolean
+  error: string | null
+  sessionInjected: boolean
+  connected: boolean
+  partition: string | null
+}

@@ -70,7 +70,7 @@ export default {
     noProxy: 'No proxy',
     group: 'Group',
     tags: 'Tags',
-    deleteConfirm: 'Delete account @{name}?',
+    deleteConfirm: "Delete account {'@'}{name}?",
 
     importDialog: {
       title: 'Import Accounts',
@@ -167,7 +167,7 @@ export default {
       importPartialFail: '{count} accounts failed to import',
       enterSessionString: 'Please enter a session string',
       accountValid: 'Account Valid',
-      accountWorking: '@{name} is working',
+      accountWorking: "{'@'}{name} is working",
       accountInvalid: 'Account Invalid',
       sessionNotValid: 'Session is not valid',
       checkFailed: 'Check Failed',
@@ -603,6 +603,24 @@ export default {
       templateDeleted: 'Template deleted',
       defaultsLoaded: 'Default templates loaded'
     }
+  },
+
+  webviewer: {
+    title: 'Telegram WebK',
+    loading: 'Loading...',
+    initializing: 'Initializing Telegram Web...',
+    connected: 'Connected',
+    disconnected: 'Disconnected',
+    injected: 'Session Injected',
+    error: 'Error',
+    reload: 'Reload',
+    refreshSession: 'Refresh Session',
+    cannotOpen: 'Cannot open this account',
+    requirementsNotMet: 'Account requirements not met:',
+    noTelegramId: 'Account has no Telegram ID (not verified)',
+    noProxy: 'No proxy assigned to account',
+    notValid: 'Account status is not valid',
+    openInWebK: 'Open in WebK'
   },
 
   errors: {

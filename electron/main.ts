@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { spawn, ChildProcess } from 'child_process'
 import path from 'path'
+import { webViewManager, ProxyConfig, DeviceFingerprint } from './webview-manager'
 
 let mainWindow: BrowserWindow | null = null
 let pythonProcess: ChildProcess | null = null
@@ -18,7 +19,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      webviewTag: true
     },
     titleBarStyle: 'hiddenInset',
     show: false
@@ -151,6 +153,104 @@ ipcMain.handle('backend:status', () => ({
   ready: backendReady,
   running: pythonProcess !== null
 }))
+
+// WebView IPC Handlers
+
+// Get preload path for webview
+ipcMain.handle('webview:getPreloadPath', () => {
+  const preloadPath = path.join(__dirname, '../preload/webview-preload.js')
+  // Webview preload requires file:// protocol
+  return `file://${preloadPath}`
+})
+
+// Create webview session with proxy
+ipcMain.handle(
+  'webview:createSession',
+  async (
+    _event,
+    {
+      accountId,
+      proxy,
+      deviceFingerprint,
+    }: {
+      accountId: number
+      proxy?: ProxyConfig
+      deviceFingerprint?: DeviceFingerprint
+    }
+  ) => {
+    try {
+      const session = await webViewManager.createSession(accountId, proxy, deviceFingerprint)
+      return {
+        success: true,
+        partition: session.partition,
+      }
+    } catch (error: unknown) {
+      console.error('[WebView] Failed to create session:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      }
+    }
+  }
+)
+
+// Get session info
+ipcMain.handle('webview:getSession', (_event, { accountId }: { accountId: number }) => {
+  const session = webViewManager.getSession(accountId)
+  if (session) {
+    return {
+      exists: true,
+      partition: session.partition,
+      accountId: session.accountId,
+    }
+  }
+  return { exists: false }
+})
+
+// Clear session data
+ipcMain.handle('webview:clearSession', async (_event, { accountId }: { accountId: number }) => {
+  try {
+    await webViewManager.clearSession(accountId)
+    return { success: true }
+  } catch (error: unknown) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
+})
+
+// Destroy session
+ipcMain.handle('webview:destroySession', async (_event, { accountId }: { accountId: number }) => {
+  try {
+    await webViewManager.destroySession(accountId)
+    return { success: true }
+  } catch (error: unknown) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
+})
+
+// Get partition name for account
+ipcMain.handle('webview:getPartition', (_event, { accountId }: { accountId: number }) => {
+  return webViewManager.getPartitionName(accountId)
+})
+
+// Listen for webview events from renderer
+ipcMain.on('webview:ready', () => {
+  console.log('[WebView] Webview ready')
+})
+
+ipcMain.on('webview:session-injected', (_event, data) => {
+  console.log('[WebView] Session injected:', data)
+})
+
+ipcMain.on('webview:health-update', (_event, status) => {
+  // Forward health updates to renderer if needed
+  mainWindow?.webContents.send('webview:health-status', status)
+})
 
 // App lifecycle
 app.whenReady().then(() => {

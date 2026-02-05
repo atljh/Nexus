@@ -6,7 +6,14 @@ import { resolve } from 'path'
 
 export default defineConfig({
   plugins: [
-    vue(),
+    vue({
+      template: {
+        compilerOptions: {
+          // Treat webview as native Electron element
+          isCustomElement: (tag) => tag === 'webview'
+        }
+      }
+    }),
     electron([
       {
         entry: 'electron/main.ts',
@@ -24,6 +31,17 @@ export default defineConfig({
       },
       {
         entry: 'electron/preload.ts',
+        onstart(args) {
+          args.reload()
+        },
+        vite: {
+          build: {
+            outDir: 'dist-electron/preload'
+          }
+        }
+      },
+      {
+        entry: 'electron/webview-preload.ts',
         onstart(args) {
           args.reload()
         },

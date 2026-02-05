@@ -1,0 +1,229 @@
+/**
+ * Composable for managing Telegram WebK session in Electron webview
+ */
+
+import { ref, computed, onUnmounted, type Ref } from 'vue'
+import type {
+  Account,
+  WebKSessionData,
+  WebKSessionResponse,
+  WebViewState,
+} from '@/types'
+
+export function useWebKSession(accountRef: Ref<Account | null>) {
+  const state = ref<WebViewState>({
+    loading: false,
+    error: null,
+    sessionInjected: false,
+    connected: false,
+    partition: null,
+  })
+
+  const sessionData = ref<WebKSessionData | null>(null)
+  const healthStatus = ref<WebViewHealthStatus | null>(null)
+  const preloadPath = ref<string | null>(null)
+
+  const account = computed(() => accountRef.value)
+
+  const canOpen = computed(() => {
+    const acc = account.value
+    if (!acc) return false
+    return acc.telegram_id !== null && acc.proxy !== null && acc.status === 'valid'
+  })
+
+  const webkUrl = 'https://web.telegram.org/k/'
+
+  /**
+   * Fetch WebK session data from backend
+   */
+  async function fetchSessionData(): Promise<WebKSessionResponse | null> {
+    const acc = account.value
+    if (!acc) {
+      state.value.error = 'No account selected'
+      return null
+    }
+
+    state.value.loading = true
+    state.value.error = null
+
+    try {
+      const response = (await window.api.get(
+        `/api/accounts/${acc.id}/webk-session?fetch_real_salt=true`
+      )) as WebKSessionResponse
+
+      if (response.success) {
+        sessionData.value = response.session_data
+        return response
+      } else {
+        throw new Error('Failed to get session data')
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      state.value.error = message
+      console.error('[useWebKSession] Failed to fetch session:', error)
+      return null
+    } finally {
+      state.value.loading = false
+    }
+  }
+
+  /**
+   * Initialize webview session with proxy
+   */
+  async function initializeWebView(): Promise<boolean> {
+    const acc = account.value
+    if (!acc || !acc.proxy) {
+      state.value.error = 'Account or proxy not available'
+      return false
+    }
+
+    state.value.loading = true
+    state.value.error = null
+
+    try {
+      // Get preload path
+      preloadPath.value = await window.api.webview.getPreloadPath()
+
+      // Prepare proxy config
+      const proxyConfig: WebViewProxyConfig = {
+        type: acc.proxy.type,
+        host: acc.proxy.host,
+        port: acc.proxy.port,
+        username: acc.proxy.username ?? undefined,
+        password: acc.proxy.password ?? undefined,
+      }
+
+      // Get device fingerprint from account metadata
+      const deviceFingerprint: WebViewDeviceFingerprint | undefined = acc.metadata?.device_fingerprint as
+        | WebViewDeviceFingerprint
+        | undefined
+
+      // Create isolated session with proxy
+      const result = await window.api.webview.createSession(acc.id, proxyConfig, deviceFingerprint)
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to create webview session')
+      }
+
+      state.value.partition = result.partition || null
+
+      // Setup health status listener
+      window.api.webview.onHealthStatus((status: WebViewHealthStatus) => {
+        healthStatus.value = status
+        state.value.connected = status.connected
+      })
+
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      state.value.error = message
+      console.error('[useWebKSession] Failed to initialize webview:', error)
+      return false
+    } finally {
+      state.value.loading = false
+    }
+  }
+
+  /**
+   * Get partition name for webview
+   */
+  async function getPartition(): Promise<string | null> {
+    const acc = account.value
+    if (!acc) return null
+
+    try {
+      const partition = await window.api.webview.getPartition(acc.id)
+      state.value.partition = partition
+      return partition
+    } catch (error) {
+      console.error('[useWebKSession] Failed to get partition:', error)
+      return null
+    }
+  }
+
+  /**
+   * Refresh session with new salt from Telegram
+   */
+  async function refreshSession(): Promise<boolean> {
+    const acc = account.value
+    if (!acc) return false
+
+    state.value.loading = true
+    state.value.error = null
+
+    try {
+      const response = (await window.api.post(
+        `/api/accounts/${acc.id}/webk-session/refresh`,
+        {}
+      )) as WebKSessionResponse
+
+      if (response.success) {
+        sessionData.value = response.session_data
+        return true
+      }
+      return false
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      state.value.error = message
+      return false
+    } finally {
+      state.value.loading = false
+    }
+  }
+
+  /**
+   * Clear session data
+   */
+  async function clearSession(): Promise<void> {
+    const acc = account.value
+    if (!acc) return
+
+    try {
+      await window.api.webview.clearSession(acc.id)
+      state.value.sessionInjected = false
+      state.value.connected = false
+    } catch (error) {
+      console.error('[useWebKSession] Failed to clear session:', error)
+    }
+  }
+
+  /**
+   * Cleanup on unmount
+   */
+  function cleanup(): void {
+    const acc = account.value
+    if (acc) {
+      window.api.webview.destroySession(acc.id).catch(console.error)
+    }
+    window.api.webview.removeHealthListener()
+    sessionData.value = null
+    healthStatus.value = null
+    state.value = {
+      loading: false,
+      error: null,
+      sessionInjected: false,
+      connected: false,
+      partition: null,
+    }
+  }
+
+  // Cleanup on unmount
+  onUnmounted(() => {
+    cleanup()
+  })
+
+  return {
+    state,
+    sessionData,
+    healthStatus,
+    preloadPath,
+    canOpen,
+    webkUrl,
+    fetchSessionData,
+    initializeWebView,
+    getPartition,
+    refreshSession,
+    clearSession,
+    cleanup,
+  }
+}

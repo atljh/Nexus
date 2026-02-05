@@ -9,6 +9,7 @@ import type { Account, AccountStatus, BulkAction } from '@/types'
 // Dialog components
 import TwoFADialog from '@/components/accounts/TwoFADialog.vue'
 import AddAccountDialog from '@/components/accounts/AddAccountDialog.vue'
+import WebViewer from '@/components/accounts/WebViewer.vue'
 
 import Button from 'primevue/button'
 import DataTable from 'primevue/datatable'
@@ -65,6 +66,8 @@ const showBatchCheckDialog = ref(false)
 const showAddAccountDialog = ref(false)
 const showTwoFADialog = ref(false)
 const twoFAAccount = ref<Account | null>(null)
+const showWebViewer = ref(false)
+const webViewerAccount = ref<Account | null>(null)
 const batchChecking = ref(false)
 const searchQuery = ref('')
 const bulkMenu = ref()
@@ -909,7 +912,7 @@ async function addQuickProxy() {
       proxyData.geo = quickProxyResult.value.geo
     }
 
-    const newProxy = await window.api.post('/api/proxy', proxyData)
+    const newProxy = await window.api.post('/api/proxy', proxyData) as { id: number }
     await proxyStore.fetchProxies()
 
     // Auto-select the new proxy
@@ -1219,6 +1222,11 @@ function openTwoFADialog(account: Account) {
   showTwoFADialog.value = true
 }
 
+function openWebViewer(account: Account) {
+  webViewerAccount.value = account
+  showWebViewer.value = true
+}
+
 function handleAccountAdded() {
   showAddAccountDialog.value = false
   toast.add({
@@ -1347,18 +1355,21 @@ function onRowUnselect(event: any) {
               <Button
                 :label="t('accounts.addAccount')"
                 icon="pi pi-plus"
+                size="small"
                 @click="showAddAccountDialog = true"
               />
               <Button
                 :label="t('accounts.import')"
                 icon="pi pi-upload"
                 severity="secondary"
+                size="small"
                 @click="showImportDialog = true"
               />
               <Button
                 :label="t('accounts.checkAll')"
                 icon="pi pi-refresh"
                 severity="secondary"
+                size="small"
                 @click="checkAllAccounts"
                 :disabled="accountStore.accounts.length === 0"
               />
@@ -1443,7 +1454,7 @@ function onRowUnselect(event: any) {
 
               <Column selectionMode="multiple" headerStyle="width: 3rem"></Column>
 
-              <Column field="id" header="ID" sortable style="width: 80px" />
+              <Column field="id" header="ID" sortable style="width: 60px" />
 
               <Column :header="t('accounts.account')" sortable>
                 <template #body="{ data }">
@@ -1459,13 +1470,13 @@ function onRowUnselect(event: any) {
                 </template>
               </Column>
 
-              <Column field="status" :header="t('common.status')" sortable style="width: 140px">
+              <Column field="status" :header="t('common.status')" sortable style="width: 110px">
                 <template #body="{ data }">
                   <Tag :value="t(`accounts.status.${data.status}`)" :severity="getStatusSeverity(data.status)" />
                 </template>
               </Column>
 
-              <Column :header="t('accounts.proxy')" style="width: 180px">
+              <Column :header="t('accounts.proxy')" style="width: 140px">
                 <template #body="{ data }">
                   <span v-if="data.proxy" class="proxy-text">
                     {{ data.proxy.host }}:{{ data.proxy.port }}
@@ -1474,14 +1485,14 @@ function onRowUnselect(event: any) {
                 </template>
               </Column>
 
-              <Column :header="t('accounts.group')" style="width: 150px">
+              <Column :header="t('accounts.group')" style="width: 120px">
                 <template #body="{ data }">
                   <span v-if="data.group" class="group-text">{{ data.group.name }}</span>
                   <span v-else class="no-data">—</span>
                 </template>
               </Column>
 
-              <Column :header="t('accounts.tags')" style="width: 180px">
+              <Column :header="t('accounts.tags')" style="width: 140px">
                 <template #body="{ data }">
                   <div class="tags-cell">
                     <Tag
@@ -1494,7 +1505,7 @@ function onRowUnselect(event: any) {
                 </template>
               </Column>
 
-              <Column :header="t('common.actions')" style="width: 160px">
+              <Column :header="t('common.actions')" style="width: 140px">
                 <template #body="{ data }">
                   <div class="actions-cell">
                     <Button
@@ -1502,15 +1513,28 @@ function onRowUnselect(event: any) {
                       severity="secondary"
                       text
                       rounded
+                      size="small"
                       v-tooltip.top="t('common.check')"
                       :aria-label="t('common.check')"
                       @click="checkAccount(data)"
+                    />
+                    <Button
+                      icon="pi pi-external-link"
+                      severity="info"
+                      text
+                      rounded
+                      size="small"
+                      v-tooltip.top="t('webviewer.openInWebK')"
+                      :aria-label="t('webviewer.openInWebK')"
+                      :disabled="data.status !== 'valid' || !data.proxy || !data.telegram_id"
+                      @click="openWebViewer(data)"
                     />
                     <Button
                       :icon="data.has_2fa ? 'pi pi-lock' : 'pi pi-lock-open'"
                       :severity="data.has_2fa ? 'success' : 'secondary'"
                       text
                       rounded
+                      size="small"
                       v-tooltip.top="t('accounts.twoFA.title')"
                       :aria-label="t('accounts.twoFA.title')"
                       @click="openTwoFADialog(data)"
@@ -1520,6 +1544,7 @@ function onRowUnselect(event: any) {
                       severity="danger"
                       text
                       rounded
+                      size="small"
                       v-tooltip.top="t('common.delete')"
                       :aria-label="t('common.delete')"
                       @click="confirmDelete(data)"
@@ -2007,6 +2032,13 @@ function onRowUnselect(event: any) {
         :account="twoFAAccount"
         @updated="accountStore.fetchAccounts"
       />
+
+      <!-- WebK Viewer -->
+      <WebViewer
+        v-model:visible="showWebViewer"
+        :account="webViewerAccount"
+        @close="showWebViewer = false"
+      />
     </div>
   </MainLayout>
 </template>
@@ -2018,18 +2050,18 @@ function onRowUnselect(event: any) {
 
 .accounts-layout {
   display: flex;
-  gap: 24px;
+  gap: 16px;
   height: 100%;
 }
 
 /* Sidebar */
 .groups-sidebar {
-  width: 280px;
+  width: 200px;
   flex-shrink: 0;
   background: linear-gradient(145deg, #161616 0%, #111111 100%);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 16px;
-  padding: 16px;
+  border-radius: 12px;
+  padding: 12px;
   overflow-y: auto;
 }
 
@@ -2037,11 +2069,11 @@ function onRowUnselect(event: any) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .sidebar-title {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
   color: #6b7280;
   text-transform: uppercase;
@@ -2049,8 +2081,8 @@ function onRowUnselect(event: any) {
 }
 
 .sidebar-section {
-  margin-top: 24px;
-  padding-top: 24px;
+  margin-top: 16px;
+  padding-top: 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -2063,9 +2095,9 @@ function onRowUnselect(event: any) {
 .group-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: 10px;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -2088,35 +2120,42 @@ function onRowUnselect(event: any) {
 }
 
 .group-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
-  font-size: 14px;
+  font-size: 12px;
+  flex-shrink: 0;
 }
 
 .group-info {
   flex: 1;
+  min-width: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 4px;
 }
 
 .group-name {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: #e5e7eb;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .group-count {
-  font-size: 12px;
+  font-size: 11px;
   color: #6b7280;
   background: rgba(255, 255, 255, 0.05);
-  padding: 2px 8px;
-  border-radius: 10px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  flex-shrink: 0;
 }
 
 /* Tags */
@@ -2129,9 +2168,9 @@ function onRowUnselect(event: any) {
 .tag-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-radius: 8px;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -2154,14 +2193,18 @@ function onRowUnselect(event: any) {
 }
 
 .tag-dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .tag-name {
-  font-size: 13px;
+  font-size: 12px;
   color: #d1d5db;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Main Content */
@@ -2174,11 +2217,11 @@ function onRowUnselect(event: any) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .page-title {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
   color: #f3f4f6;
   letter-spacing: -0.5px;
@@ -2186,23 +2229,23 @@ function onRowUnselect(event: any) {
 
 .header-actions {
   display: flex;
-  gap: 12px;
+  gap: 8px;
 }
 
 /* Filters Bar */
 .filters-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 .search-input {
-  width: 280px;
+  width: 220px;
 }
 
 .status-filter {
-  width: 180px;
+  width: 160px;
 }
 
 .bulk-actions {
@@ -2224,9 +2267,9 @@ function onRowUnselect(event: any) {
 .table-card {
   background: linear-gradient(145deg, #161616 0%, #111111 100%);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 16px;
-  padding: 16px;
-  overflow: hidden;
+  border-radius: 12px;
+  padding: 12px;
+  overflow-x: auto;
 }
 
 .empty-state {
@@ -2261,62 +2304,75 @@ function onRowUnselect(event: any) {
 .account-cell {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .account-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   color: white;
+  flex-shrink: 0;
 }
 
 .account-info {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .account-name {
+  font-size: 13px;
   font-weight: 500;
   color: #e5e7eb;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .account-phone {
-  font-size: 12px;
+  font-size: 11px;
   color: #6b7280;
 }
 
 .proxy-text {
-  font-size: 13px;
+  font-size: 12px;
   color: #9ca3af;
   font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
 }
 
 .group-text {
-  font-size: 13px;
+  font-size: 12px;
   color: #9ca3af;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .no-data {
   color: #4b5563;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .tags-cell {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 
 .actions-cell {
   display: flex;
-  gap: 4px;
+  gap: 2px;
 }
 
 /* Dialogs */
@@ -2403,9 +2459,10 @@ function onRowUnselect(event: any) {
   border-color: rgba(255, 255, 255, 0.06);
   color: #6b7280;
   font-weight: 600;
-  font-size: 12px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  padding: 10px 12px;
 }
 
 :deep(.custom-table .p-datatable-tbody > tr) {
@@ -2420,7 +2477,7 @@ function onRowUnselect(event: any) {
 
 :deep(.custom-table .p-datatable-tbody > tr > td) {
   border-color: rgba(255, 255, 255, 0.04);
-  padding: 16px;
+  padding: 10px 12px;
 }
 
 :deep(.custom-table .p-datatable-tbody > tr.p-highlight) {

@@ -70,7 +70,7 @@ export default {
     noProxy: 'Без проксі',
     group: 'Група',
     tags: 'Теги',
-    deleteConfirm: 'Видалити акаунт @{name}?',
+    deleteConfirm: "Видалити акаунт {'@'}{name}?",
 
     importDialog: {
       title: 'Імпорт акаунтів',
@@ -167,7 +167,7 @@ export default {
       importPartialFail: '{count} акаунтів не вдалося імпортувати',
       enterSessionString: 'Введіть рядок сесії',
       accountValid: 'Акаунт активний',
-      accountWorking: '@{name} працює',
+      accountWorking: "{'@'}{name} працює",
       accountInvalid: 'Акаунт недійсний',
       sessionNotValid: 'Сесія недійсна',
       checkFailed: 'Помилка перевірки',
@@ -603,6 +603,24 @@ export default {
       templateDeleted: 'Шаблон видалено',
       defaultsLoaded: 'Стандартні шаблони завантажено'
     }
+  },
+
+  webviewer: {
+    title: 'Telegram WebK',
+    loading: 'Завантаження...',
+    initializing: 'Ініціалізація Telegram Web...',
+    connected: 'Підключено',
+    disconnected: 'Відключено',
+    injected: 'Сесію інжектовано',
+    error: 'Помилка',
+    reload: 'Перезавантажити',
+    refreshSession: 'Оновити сесію',
+    cannotOpen: 'Неможливо відкрити цей акаунт',
+    requirementsNotMet: 'Вимоги до акаунту не виконані:',
+    noTelegramId: 'Акаунт не має Telegram ID (не верифіковано)',
+    noProxy: 'Проксі не призначено акаунту',
+    notValid: 'Статус акаунту не валідний',
+    openInWebK: 'Відкрити у WebK'
   },
 
   errors: {
