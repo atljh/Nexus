@@ -19,6 +19,7 @@ from database.models import Account, Proxy, AccountGroup, AccountTag
 from utils.encryption import encryption_service
 from telegram import (
     convert_tdata_to_session,
+    parse_tdata_to_session,
     validate_session,
     SessionManager,
     TDataError,
@@ -98,6 +99,73 @@ class VerifyAccountsRequest(BaseModel):
 class SaveAccountsRequest(BaseModel):
     """Request to save verified accounts"""
     accounts: List[dict]  # Full account data with proxy_id and verification results
+
+
+def extract_api_credentials(json_data: dict) -> dict:
+    """
+    Extract API credentials from JSON data.
+    Supports both naming conventions: api_id/app_id, api_hash/app_hash.
+    """
+    # api_id (supports api_id and app_id)
+    api_id = json_data.get("api_id") or json_data.get("app_id")
+    if api_id:
+        api_id = int(api_id)
+
+    # api_hash (supports api_hash and app_hash)
+    api_hash = json_data.get("api_hash") or json_data.get("app_hash")
+
+    return {
+        "api_id": api_id,
+        "api_hash": api_hash,
+    }
+
+
+def extract_device_fingerprint(json_data: dict) -> dict:
+    """
+    Extract device fingerprint from JSON data.
+    Supports various naming conventions.
+    """
+    # Device model
+    device_model = (
+        json_data.get("device") or
+        json_data.get("device_model") or
+        json_data.get("device_name")
+    )
+
+    # System version (SDK for Android)
+    system_version = (
+        json_data.get("sdk") or
+        json_data.get("system_version") or
+        json_data.get("android_version")
+    )
+
+    # App version
+    app_version = (
+        json_data.get("app_version") or
+        json_data.get("appVersion")
+    )
+
+    # Lang code (supports lang_code and lang_pack)
+    lang_code = (
+        json_data.get("lang_code") or
+        json_data.get("lang_pack") or
+        "en"
+    )
+
+    # System lang code
+    system_lang_code = (
+        json_data.get("system_lang_code") or
+        json_data.get("system_lang_pack") or
+        "en"
+    )
+
+    return {
+        "device_model": device_model,
+        "system_version": system_version,
+        "app_version": app_version,
+        "lang_code": lang_code,
+        "system_lang_code": system_lang_code,
+    }
 
 
 # Country code mapping for GEO detection from phone number
@@ -273,19 +341,33 @@ async def check_account(
     if not account.session_string:
         return {"valid": False, "error": "No session string"}
 
-    proxy_config = None
-    if account.proxy:
-        proxy_config = {
-            "type": account.proxy.type,
-            "host": account.proxy.host,
-            "port": account.proxy.port,
-            "username": account.proxy.username,
-            "password": account.proxy.password,
-        }
+    # SECURITY: Proxy is required for checking accounts
+    if not account.proxy:
+        return {"valid": False, "error": "No proxy assigned. Assign a proxy before checking."}
 
+    proxy_config = {
+        "type": account.proxy.type,
+        "host": account.proxy.host,
+        "port": account.proxy.port,
+        "username": account.proxy.username,
+        "password": account.proxy.password,
+    }
+
+    # Get device fingerprint from account
+    device_fp = account.device_fingerprint or {}
+
+    # Use phone for consistent device fingerprint
+    unique_id = account.phone or str(account.telegram_id) or account.session_string[:32]
     is_valid, user_info, error = await validate_session(
         account.session_string,
-        proxy=proxy_config
+        proxy=proxy_config,
+        api_id=account.api_id,
+        api_hash=account.api_hash,
+        unique_id=unique_id,
+        device_model=device_fp.get("device_model"),
+        system_version=device_fp.get("system_version"),
+        app_version=device_fp.get("app_version"),
+        lang_code=device_fp.get("lang_code"),
     )
 
     if is_valid and user_info:
@@ -325,20 +407,27 @@ async def import_tdata(
             detail="File must be a .zip archive containing tdata folder"
         )
 
-    proxy_config = None
-    if proxy_id:
-        proxy_result = await session.execute(
-            select(Proxy).where(Proxy.id == proxy_id)
+    # Get proxy config - REQUIRED for security
+    if not proxy_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Proxy is required for tdata import to protect your IP"
         )
-        proxy = proxy_result.scalar_one_or_none()
-        if proxy:
-            proxy_config = {
-                "type": proxy.type,
-                "host": proxy.host,
-                "port": proxy.port,
-                "username": proxy.username,
-                "password": proxy.password,
-            }
+
+    proxy_result = await session.execute(
+        select(Proxy).where(Proxy.id == proxy_id)
+    )
+    proxy = proxy_result.scalar_one_or_none()
+    if not proxy:
+        raise HTTPException(status_code=404, detail="Proxy not found")
+
+    proxy_config = {
+        "type": proxy.type,
+        "host": proxy.host,
+        "port": proxy.port,
+        "username": proxy.username,
+        "password": proxy.password,
+    }
 
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
@@ -450,21 +539,27 @@ async def import_json_session(
     if not isinstance(data, list):
         raise HTTPException(status_code=400, detail="JSON must be array or object")
 
-    # Get proxy config
-    proxy_config = None
-    if proxy_id:
-        proxy_result = await session.execute(
-            select(Proxy).where(Proxy.id == proxy_id)
+    # Get proxy config - REQUIRED for security
+    if not proxy_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Proxy is required for import to protect your IP"
         )
-        proxy = proxy_result.scalar_one_or_none()
-        if proxy:
-            proxy_config = {
-                "type": proxy.type,
-                "host": proxy.host,
-                "port": proxy.port,
-                "username": proxy.username,
-                "password": proxy.password,
-            }
+
+    proxy_result = await session.execute(
+        select(Proxy).where(Proxy.id == proxy_id)
+    )
+    proxy = proxy_result.scalar_one_or_none()
+    if not proxy:
+        raise HTTPException(status_code=404, detail="Proxy not found")
+
+    proxy_config = {
+        "type": proxy.type,
+        "host": proxy.host,
+        "port": proxy.port,
+        "username": proxy.username,
+        "password": proxy.password,
+    }
 
     imported = []
     errors = []
@@ -482,9 +577,12 @@ async def import_json_session(
             continue
 
         # Validate with Telegram
+        # Use phone from item for consistent device fingerprint
+        unique_id = item.get("phone") or str(i)
         is_valid, user_info, error = await validate_session(
             session_string,
-            proxy=proxy_config
+            proxy=proxy_config,
+            unique_id=unique_id,
         )
 
         if not is_valid:
@@ -540,26 +638,34 @@ async def import_session_string(
     if not SessionManager.validate_session_string(data.session_string):
         raise HTTPException(status_code=400, detail="Invalid session string format")
 
-    # Get proxy config
-    proxy_config = None
-    if data.proxy_id:
-        proxy_result = await session.execute(
-            select(Proxy).where(Proxy.id == data.proxy_id)
+    # Get proxy config - REQUIRED for security
+    if not data.proxy_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Proxy is required for import to protect your IP"
         )
-        proxy = proxy_result.scalar_one_or_none()
-        if proxy:
-            proxy_config = {
-                "type": proxy.type,
-                "host": proxy.host,
-                "port": proxy.port,
-                "username": proxy.username,
-                "password": proxy.password,
-            }
+
+    proxy_result = await session.execute(
+        select(Proxy).where(Proxy.id == data.proxy_id)
+    )
+    proxy = proxy_result.scalar_one_or_none()
+    if not proxy:
+        raise HTTPException(status_code=404, detail="Proxy not found")
+
+    proxy_config = {
+        "type": proxy.type,
+        "host": proxy.host,
+        "port": proxy.port,
+        "username": proxy.username,
+        "password": proxy.password,
+    }
 
     # Validate with Telegram
+    # Use session string hash for consistent device fingerprint
     is_valid, user_info, error = await validate_session(
         data.session_string,
-        proxy=proxy_config
+        proxy=proxy_config,
+        unique_id=data.session_string[:32],
     )
 
     if not is_valid:
@@ -638,28 +744,42 @@ async def check_batch_accounts(
     if not accounts:
         return {"checked": 0, "results": []}
 
-    # Set checking status
+    # Filter accounts without proxy (SECURITY: proxy is required)
+    accounts_with_proxy = []
+    accounts_without_proxy = []
     for acc in accounts:
+        if acc.proxy:
+            accounts_with_proxy.append(acc)
+        else:
+            accounts_without_proxy.append(acc)
+
+    # Set checking status only for accounts with proxy
+    for acc in accounts_with_proxy:
         acc.status = "checking"
     await session.commit()
 
     # Prepare account data for checker
     account_data = []
-    for acc in accounts:
-        proxy_config = None
-        if acc.proxy:
-            proxy_config = {
-                "type": acc.proxy.type,
-                "host": acc.proxy.host,
-                "port": acc.proxy.port,
-                "username": acc.proxy.username,
-                "password": acc.proxy.password,
-            }
+    for acc in accounts_with_proxy:
+        proxy_config = {
+            "type": acc.proxy.type,
+            "host": acc.proxy.host,
+            "port": acc.proxy.port,
+            "username": acc.proxy.username,
+            "password": acc.proxy.password,
+        }
 
         account_data.append({
             "id": acc.id,
             "session_string": acc.session_string,
             "proxy": proxy_config,
+            "phone": acc.phone,  # For consistent device fingerprint
+            "telegram_id": acc.telegram_id,
+            # API credentials from account
+            "api_id": acc.api_id,
+            "api_hash": acc.api_hash,
+            # Device fingerprint from account
+            "device_fingerprint": acc.device_fingerprint,
         })
 
     # Configure checker concurrency
@@ -709,8 +829,20 @@ async def check_batch_accounts(
 
     await session.commit()
 
+    # Add accounts without proxy to results as errors
+    for acc in accounts_without_proxy:
+        response_results.append({
+            "id": acc.id,
+            "status": "error",
+            "telegram_id": acc.telegram_id,
+            "username": acc.username,
+            "spamblock": None,
+            "error": "No proxy assigned. Assign a proxy before checking."
+        })
+
     return {
-        "checked": len(response_results),
+        "checked": len(accounts_with_proxy),
+        "skipped_no_proxy": len(accounts_without_proxy),
         "results": response_results
     }
 
@@ -1011,6 +1143,10 @@ async def get_2fa_status(
     check_result = await two_factor_manager.check_2fa_status(
         account.session_string,
         proxy=proxy_config,
+        api_id=account.api_id,
+        api_hash=account.api_hash,
+        device_fingerprint=account.device_fingerprint,
+        unique_id=account.phone or str(account.telegram_id),
     )
 
     # Update database with current status
@@ -1065,6 +1201,10 @@ async def set_2fa(
         new_password=data.password,
         hint=data.hint or "",
         proxy=proxy_config,
+        api_id=account.api_id,
+        api_hash=account.api_hash,
+        device_fingerprint=account.device_fingerprint,
+        unique_id=account.phone or str(account.telegram_id),
     )
 
     if not set_result.success:
@@ -1120,6 +1260,10 @@ async def change_2fa(
         new_password=data.new_password,
         new_hint=data.new_hint or "",
         proxy=proxy_config,
+        api_id=account.api_id,
+        api_hash=account.api_hash,
+        device_fingerprint=account.device_fingerprint,
+        unique_id=account.phone or str(account.telegram_id),
     )
 
     if not change_result.success:
@@ -1172,6 +1316,10 @@ async def remove_2fa(
         account.session_string,
         current_password=data.current_password,
         proxy=proxy_config,
+        api_id=account.api_id,
+        api_hash=account.api_hash,
+        device_fingerprint=account.device_fingerprint,
+        unique_id=account.phone or str(account.telegram_id),
     )
 
     if not remove_result.success:
@@ -1397,8 +1545,8 @@ async def parse_import_files(
                     else:
                         raise HTTPException(status_code=400, detail="tdata folder not found in archive")
 
-                # Convert tdata to session
-                session_string = await convert_tdata_to_session(tdata_path)
+                # Convert tdata to session (without validation - proxy not assigned yet)
+                session_string = await parse_tdata_to_session(tdata_path)
 
                 parsed_accounts.append({
                     "temp_id": str(uuid.uuid4()),
@@ -1475,6 +1623,12 @@ async def parse_import_files(
                 last_name = json_data.get("last_name")
                 geo = json_data.get("geo")
 
+                # Extract API credentials from JSON
+                api_creds = extract_api_credentials(json_data)
+
+                # Extract device fingerprint from JSON
+                device_fp = extract_device_fingerprint(json_data)
+
                 # Parse spamblock
                 spamblock_raw = json_data.get("spamblock")
                 spamblock = None
@@ -1501,6 +1655,11 @@ async def parse_import_files(
                     "spamblock": spamblock,
                     "register_time": register_time_str,
                     "geo": geo,
+                    # API credentials from JSON
+                    "api_id": api_creds.get("api_id"),
+                    "api_hash": api_creds.get("api_hash"),
+                    # Device fingerprint from JSON
+                    "device_fingerprint": device_fp,
                 })
 
             except Exception as e:
@@ -1597,9 +1756,9 @@ async def parse_tdata_folder(
                         })
                         continue
 
-                    # Convert tdata to session
+                    # Convert tdata to session (without validation - proxy not assigned yet)
                     try:
-                        session_string = await convert_tdata_to_session(tdata_path)
+                        session_string = await parse_tdata_to_session(tdata_path)
 
                         # Extract folder name for source_file
                         source_name = tdata_root.rsplit('/', 1)[0] if '/' in tdata_root else tdata_root
@@ -1698,11 +1857,26 @@ async def verify_parsed_accounts(
             "password": proxy.password,
         }
 
+        # Get API credentials and device fingerprint from JSON
+        api_id = acc_data.get("api_id")
+        api_hash = acc_data.get("api_hash")
+        device_fp = acc_data.get("device_fingerprint") or {}
+
         # Validate session with Telegram
+        # Use phone for consistent device fingerprinting
+        unique_id = acc_data.get("phone") or temp_id
         try:
             is_valid, user_info, error = await validate_session(
                 session_string,
-                proxy=proxy_config
+                proxy=proxy_config,
+                api_id=api_id,  # From JSON file
+                api_hash=api_hash,  # From JSON file
+                unique_id=unique_id,
+                # Device fingerprint from JSON
+                device_model=device_fp.get("device_model"),
+                system_version=device_fp.get("system_version"),
+                app_version=device_fp.get("app_version"),
+                lang_code=device_fp.get("lang_code"),
             )
 
             if is_valid and user_info:
@@ -1714,6 +1888,10 @@ async def verify_parsed_accounts(
                     "phone": user_info.get("phone"),
                     "first_name": user_info.get("first_name"),
                     "last_name": user_info.get("last_name"),
+                    # Return api_id/api_hash/device_fingerprint for saving
+                    "api_id": api_id,
+                    "api_hash": api_hash,
+                    "device_fingerprint": device_fp,
                 })
             else:
                 results.append({
@@ -1788,6 +1966,11 @@ async def save_verified_accounts(
                 spamblock=acc_data.get("spamblock"),
                 register_time=register_time,
                 geo=acc_data.get("geo"),
+                # API credentials from JSON
+                api_id=acc_data.get("api_id"),
+                api_hash=acc_data.get("api_hash"),
+                # Device fingerprint from JSON
+                device_fingerprint=acc_data.get("device_fingerprint"),
             )
 
             session.add(account)

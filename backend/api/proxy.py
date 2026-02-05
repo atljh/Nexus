@@ -19,6 +19,11 @@ class ProxyCreate(BaseModel):
     port: int
     username: Optional[str] = None
     password: Optional[str] = None
+    # Optional: pass check results when adding after preview
+    status: Optional[str] = None
+    ping_ms: Optional[int] = None
+    external_ip: Optional[str] = None
+    geo: Optional[str] = None
 
 
 class ProxyBulkCreate(BaseModel):
@@ -86,6 +91,14 @@ async def create_proxy(
         username=data.username,
         password=data.password
     )
+
+    # If check results provided, use them
+    if data.status:
+        proxy.status = data.status
+        proxy.ping_ms = data.ping_ms
+        proxy.external_ip = data.external_ip
+        proxy.geo = data.geo
+        proxy.last_checked_at = datetime.utcnow()
 
     session.add(proxy)
     await session.commit()

@@ -241,12 +241,24 @@ class LikesWorker:
                 "password": account.proxy.password,
             }
 
+        # Get device fingerprint from account
+        device_fp = account.device_fingerprint or {}
+
         try:
             client = BaseClient(
                 session_string=account.session_string,
+                api_id=account.api_id,
+                api_hash=account.api_hash,
                 proxy=proxy,
                 connection_retries=3,
                 timeout=15,
+                # Device fingerprint from account
+                device_model=device_fp.get("device_model"),
+                system_version=device_fp.get("system_version"),
+                app_version=device_fp.get("app_version"),
+                lang_code=device_fp.get("lang_code"),
+                system_lang_code=device_fp.get("system_lang_code"),
+                unique_id=account.phone or str(account.telegram_id),
             )
 
             async with client:

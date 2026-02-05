@@ -11,6 +11,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 from .exceptions import SessionError
+from .device_generator import OFFICIAL_APIS
 
 
 class SessionManager:
@@ -22,8 +23,9 @@ class SessionManager:
     - StringSession → data for DB
     """
 
-    DEFAULT_API_ID = 2040
-    DEFAULT_API_HASH = "b18441a1ff607e10a989891a5462e627"
+    # Use Android official API (consistent with other modules)
+    DEFAULT_API_ID = OFFICIAL_APIS["android"]["api_id"]  # 6
+    DEFAULT_API_HASH = OFFICIAL_APIS["android"]["api_hash"]
 
     @classmethod
     async def session_file_to_string(

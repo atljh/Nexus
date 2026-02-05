@@ -23,6 +23,7 @@ from telethon.tl.functions.messages import GetHistoryRequest
 from telethon.tl.functions.account import GetAuthorizationsRequest
 
 from .session_manager import SessionManager
+from .device_generator import generate_fingerprint_for_api, OFFICIAL_APIS
 
 
 class AccountStatus(str, Enum):
@@ -56,8 +57,9 @@ class AccountCheckResult:
 class AccountChecker:
     """Async account checker with parallel execution and detailed status detection."""
 
-    DEFAULT_API_ID = 2040
-    DEFAULT_API_HASH = "b18441a1ff607e10a989891a5462e627"
+    # Use Android official API (most common, least suspicious)
+    DEFAULT_API_ID = OFFICIAL_APIS["android"]["api_id"]  # 6
+    DEFAULT_API_HASH = OFFICIAL_APIS["android"]["api_hash"]
 
     def __init__(
         self,
@@ -101,6 +103,10 @@ class AccountChecker:
         session_string: str,
         proxy: Optional[Dict] = None,
         check_spamblock: bool = False,
+        unique_id: Optional[str] = None,
+        api_id: Optional[int] = None,
+        api_hash: Optional[str] = None,
+        device_fingerprint: Optional[Dict] = None,
     ) -> AccountCheckResult:
         """
         Check a single account.
@@ -110,6 +116,10 @@ class AccountChecker:
             session_string: Telethon session string
             proxy: Optional proxy config
             check_spamblock: Whether to check spamblock status via @SpamBot
+            unique_id: Optional unique ID for consistent device fingerprint
+            api_id: Optional API ID from account (uses default if not provided)
+            api_hash: Optional API hash from account (uses default if not provided)
+            device_fingerprint: Optional device fingerprint from account
 
         Returns:
             AccountCheckResult with detailed status
@@ -119,18 +129,48 @@ class AccountChecker:
             status=AccountStatus.INVALID
         )
 
+        # Use provided api_id/api_hash or defaults
+        used_api_id = api_id or self.DEFAULT_API_ID
+        used_api_hash = api_hash or self.DEFAULT_API_HASH
+
         client = None
         try:
             session = SessionManager.create_memory_session(session_string)
             proxy_tuple = self._format_proxy(proxy)
 
+            # Use device fingerprint from account if provided, otherwise generate
+            if device_fingerprint and device_fingerprint.get("device_model"):
+                device_model = device_fingerprint.get("device_model")
+                system_version = device_fingerprint.get("system_version")
+                app_version = device_fingerprint.get("app_version")
+                lang_code = device_fingerprint.get("lang_code", "en")
+                system_lang_code = device_fingerprint.get("system_lang_code", "en")
+            else:
+                # Generate device fingerprint for consistent emulation
+                seed = unique_id or session_string[:32] if session_string else str(account_id)
+                fingerprint = generate_fingerprint_for_api(
+                    unique_id=seed,
+                    api_id=used_api_id,
+                )
+                device_model = fingerprint["device_model"]
+                system_version = fingerprint["system_version"]
+                app_version = fingerprint["app_version"]
+                lang_code = fingerprint["lang_code"]
+                system_lang_code = fingerprint["system_lang_code"]
+
             client = TelegramClient(
                 session,
-                self.DEFAULT_API_ID,
-                self.DEFAULT_API_HASH,
+                used_api_id,
+                used_api_hash,
                 proxy=proxy_tuple,
                 connection_retries=3,
                 timeout=self.connection_timeout,
+                # Device fingerprint parameters
+                device_model=device_model,
+                system_version=system_version,
+                app_version=app_version,
+                lang_code=lang_code,
+                system_lang_code=system_lang_code,
             )
 
             await client.connect()
@@ -277,7 +317,8 @@ class AccountChecker:
         Check multiple accounts in parallel.
 
         Args:
-            accounts: List of dicts with 'id', 'session_string', and optional 'proxy'
+            accounts: List of dicts with 'id', 'session_string', optional 'proxy', 'phone',
+                      'api_id', 'api_hash', 'device_fingerprint'
             check_spamblock: Whether to check spamblock for each account
 
         Returns:
@@ -287,11 +328,23 @@ class AccountChecker:
 
         async def check_with_semaphore(account_data: Dict[str, Any]) -> AccountCheckResult:
             async with self._semaphore:
+                # Use phone or telegram_id for consistent device fingerprint
+                unique_id = (
+                    account_data.get("phone") or
+                    str(account_data.get("telegram_id", "")) or
+                    account_data["session_string"][:32]
+                )
                 return await self.check_single(
                     account_id=account_data["id"],
                     session_string=account_data["session_string"],
                     proxy=account_data.get("proxy"),
                     check_spamblock=check_spamblock,
+                    unique_id=unique_id,
+                    # API credentials from account
+                    api_id=account_data.get("api_id"),
+                    api_hash=account_data.get("api_hash"),
+                    # Device fingerprint from account
+                    device_fingerprint=account_data.get("device_fingerprint"),
                 )
 
         tasks = [check_with_semaphore(acc) for acc in accounts]

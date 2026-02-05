@@ -397,7 +397,12 @@ async function addSelectedProxies() {
         host: proxy.host,
         port: proxy.port,
         username: proxy.username || null,
-        password: proxy.password || null
+        password: proxy.password || null,
+        // Pass check results so proxy is added with correct status
+        status: proxy.status,
+        ping_ms: proxy.ping_ms || null,
+        external_ip: proxy.external_ip || null,
+        geo: proxy.geo || null
       })
       addedCount++
     }

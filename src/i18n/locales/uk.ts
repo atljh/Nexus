@@ -238,6 +238,11 @@ export default {
       saveToApp: 'Зберегти',
       clearAll: 'Очистити все',
       noAccountsYet: 'Акаунтів поки немає',
+      addProxy: 'Додати проксі',
+      proxyString: 'Рядок проксі',
+      proxyStringPlaceholder: 'socks5://user:pass@host:port',
+      invalidProxyFormat: 'Невірний формат проксі',
+      proxyAdded: 'Проксі додано',
       status: {
         pending: 'очікує',
         verifying: 'перевірка...',

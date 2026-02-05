@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import { useAccountStore, useProxyStore, useGroupStore, useTagStore } from '@/stores'
@@ -91,6 +91,30 @@ const verifying = ref(false)
 const saving = ref(false)
 const checkingProxies = ref(false)
 const bulkProxyId = ref<number | null>(null)
+const importLogs = ref<{ time: string; type: 'info' | 'success' | 'error' | 'warn'; message: string }[]>([])
+const logsContainer = ref<HTMLElement | null>(null)
+const showLogs = ref(false)
+
+// Quick proxy add dialog
+const showQuickProxyDialog = ref(false)
+const quickProxyString = ref('')
+const quickProxyChecking = ref(false)
+const quickProxyResult = ref<{ status: string; ping_ms?: number; geo?: string; error?: string } | null>(null)
+
+function addImportLog(type: 'info' | 'success' | 'error' | 'warn', message: string) {
+  const time = new Date().toLocaleTimeString()
+  importLogs.value.push({ time, type, message })
+  // Keep only last 50 logs
+  if (importLogs.value.length > 50) {
+    importLogs.value.shift()
+  }
+  // Auto-scroll to bottom
+  nextTick(() => {
+    if (logsContainer.value) {
+      logsContainer.value.scrollTop = logsContainer.value.scrollHeight
+    }
+  })
+}
 
 // Computed
 const selectedIds = computed({
@@ -117,12 +141,12 @@ const assignedProxyIds = computed(() => {
   return Array.from(ids)
 })
 
-// Check if all assigned proxies have been checked and are working
+// Check if all assigned proxies have been checked and are working (including slow)
 const proxiesChecked = computed(() => {
   if (assignedProxyIds.value.length === 0) return false
   return assignedProxyIds.value.every(id => {
     const proxy = proxyStore.getById(id)
-    return proxy && proxy.status === 'working'
+    return proxy && ['working', 'slow', 'very_slow'].includes(proxy.status)
   })
 })
 
@@ -371,9 +395,11 @@ async function parseTdataFolder() {
   if (tdataFiles.value.length === 0) return
 
   parsing.value = true
+  addImportLog('info', `Парсинг tdata папки (${tdataFiles.value.length} файлов)...`)
 
   try {
     const result = await accountStore.parseTdataFiles(tdataFiles.value)
+    addImportLog('success', `Распарсено: ${result.accounts.length} аккаунтов`)
 
     const newAccounts = result.accounts.map((a: any) => ({
       ...a,
@@ -386,6 +412,7 @@ async function parseTdataFolder() {
 
     if (result.errors?.length > 0) {
       result.errors.forEach((err: { file: string; error: string }) => {
+        addImportLog('error', `Ошибка: ${err.file} - ${err.error}`)
         toast.add({
           severity: 'error',
           summary: err.file,
@@ -397,7 +424,11 @@ async function parseTdataFolder() {
 
     if (newAccounts.length > 0) {
       importStep.value = 'preview'
+      newAccounts.forEach((acc: any, i: number) => {
+        addImportLog('info', `Аккаунт ${i + 1}: ${acc.source_file || 'tdata'}, session=${!!acc.session_string}`)
+      })
     } else {
+      addImportLog('warn', 'Не удалось распарсить аккаунты')
       toast.add({
         severity: 'warn',
         summary: t('common.warning'),
@@ -406,6 +437,7 @@ async function parseTdataFolder() {
       })
     }
   } catch (error: any) {
+    addImportLog('error', `Ошибка парсинга: ${error.message}`)
     toast.add({
       severity: 'error',
       summary: t('accounts.messages.importFailed'),
@@ -481,7 +513,10 @@ function assignBulkProxy() {
 }
 
 async function checkParsedProxies() {
+  addImportLog('info', 'Запуск проверки прокси...')
+
   if (!allParsedHaveProxy.value || assignedProxyIds.value.length === 0) {
+    addImportLog('warn', 'Не все аккаунты имеют назначенные прокси')
     toast.add({
       severity: 'warn',
       summary: t('common.warning'),
@@ -491,13 +526,25 @@ async function checkParsedProxies() {
     return
   }
 
+  addImportLog('info', `Проверяем ${assignedProxyIds.value.length} прокси: [${assignedProxyIds.value.join(', ')}]`)
   checkingProxies.value = true
 
   try {
     const result = await proxyStore.checkBatchProxies(assignedProxyIds.value)
 
-    const workingCount = result.results.filter(r => r.status === 'working').length
+    const workingCount = result.results.filter(r => ['working', 'slow', 'very_slow'].includes(r.status)).length
     const failedCount = result.results.length - workingCount
+
+    result.results.forEach(r => {
+      const proxy = proxyStore.getById(r.id)
+      if (['working', 'slow', 'very_slow'].includes(r.status)) {
+        addImportLog('success', `✓ Прокси ${proxy?.host}:${proxy?.port} работает (${r.status}, ${r.ping_ms}ms)`)
+      } else {
+        addImportLog('error', `✗ Прокси ${proxy?.host}:${proxy?.port} не работает (${r.status})`)
+      }
+    })
+
+    addImportLog('info', `Проверка завершена: ${workingCount} работают, ${failedCount} не работают`)
 
     if (failedCount > 0) {
       toast.add({
@@ -515,6 +562,7 @@ async function checkParsedProxies() {
       })
     }
   } catch (error: any) {
+    addImportLog('error', `Ошибка проверки прокси: ${error.message}`)
     toast.add({
       severity: 'error',
       summary: t('proxy.messages.checkFailed'),
@@ -534,7 +582,18 @@ function setAccountProxy(tempId: string, proxyId: number | null) {
 }
 
 async function verifyParsedAccounts() {
+  addImportLog('info', `Запуск верификации аккаунтов...`)
+  addImportLog('info', `allParsedHaveProxy: ${allParsedHaveProxy.value}, proxiesChecked: ${proxiesChecked.value}, canVerify: ${canVerify.value}`)
+  addImportLog('info', `Аккаунтов: ${parsedAccounts.value.length}, assignedProxyIds: [${assignedProxyIds.value.join(', ')}]`)
+
+  // Log each account's state
+  parsedAccounts.value.forEach((a, i) => {
+    const proxy = a.proxy_id ? proxyStore.getById(a.proxy_id) : null
+    addImportLog('info', `Аккаунт ${i + 1}: proxy_id=${a.proxy_id}, status=${a.status}, hasSession=${!!a.session_string}, proxyStatus=${proxy?.status || 'none'}`)
+  })
+
   if (!allParsedHaveProxy.value) {
+    addImportLog('warn', 'Не все аккаунты имеют прокси!')
     toast.add({
       severity: 'warn',
       summary: t('common.warning'),
@@ -545,6 +604,12 @@ async function verifyParsedAccounts() {
   }
 
   if (!proxiesChecked.value) {
+    addImportLog('warn', 'Прокси не проверены или не работают!')
+    // Log proxy statuses
+    assignedProxyIds.value.forEach(id => {
+      const proxy = proxyStore.getById(id)
+      addImportLog('info', `Прокси ${id}: status=${proxy?.status || 'not found'}`)
+    })
     toast.add({
       severity: 'warn',
       summary: t('common.warning'),
@@ -555,6 +620,7 @@ async function verifyParsedAccounts() {
   }
 
   verifying.value = true
+  addImportLog('info', 'Начинаем верификацию...')
 
   // Mark all pending as verifying
   parsedAccounts.value.forEach(a => {
@@ -573,7 +639,16 @@ async function verifyParsedAccounts() {
         proxy_id: a.proxy_id
       })))
 
+    addImportLog('info', `Отправляем ${accountsToVerify.length} аккаунтов на верификацию...`)
+
+    if (accountsToVerify.length === 0) {
+      addImportLog('warn', 'Нет аккаунтов для верификации!')
+      verifying.value = false
+      return
+    }
+
     const result = await accountStore.verifyParsedAccounts(accountsToVerify)
+    addImportLog('success', `Получен ответ от сервера`)
 
     // Update statuses from results
     result.results.forEach(r => {
@@ -586,8 +661,16 @@ async function verifyParsedAccounts() {
         if (r.phone) account.phone = r.phone
         if (r.first_name) account.first_name = r.first_name
         if (r.last_name) account.last_name = r.last_name
+
+        if (r.status === 'valid') {
+          addImportLog('success', `✓ Аккаунт ${r.username || r.telegram_id || r.temp_id} валиден`)
+        } else {
+          addImportLog('error', `✗ Аккаунт ${r.temp_id}: ${r.error || 'invalid'}`)
+        }
       }
     })
+
+    addImportLog('success', `Верификация завершена: ${result.total_valid} валидных, ${result.total_invalid} невалидных`)
 
     toast.add({
       severity: 'success',
@@ -596,6 +679,7 @@ async function verifyParsedAccounts() {
       life: 5000
     })
   } catch (error: any) {
+    addImportLog('error', `Ошибка: ${error.message}`)
     // Reset statuses on error
     parsedAccounts.value.forEach(a => {
       if (a.status === 'verifying') {
@@ -626,9 +710,14 @@ async function saveVerifiedAccounts() {
   }
 
   saving.value = true
+  addImportLog('info', `Сохраняем ${validAccounts.length} аккаунтов...`)
 
   try {
-    const result = await accountStore.saveParsedAccounts(validAccounts)
+    // Convert to plain objects to avoid Vue reactivity serialization issues
+    const accountsToSave = validAccounts.map(a => JSON.parse(JSON.stringify(a)))
+    const result = await accountStore.saveParsedAccounts(accountsToSave)
+
+    addImportLog('success', `Збережено ${result.total_saved} акаунтів`)
 
     toast.add({
       severity: 'success',
@@ -640,6 +729,7 @@ async function saveVerifiedAccounts() {
     // Show errors if any
     if (result.errors?.length > 0) {
       result.errors.forEach(err => {
+        addImportLog('error', `Помилка: ${err.error}`)
         toast.add({
           severity: 'error',
           summary: t('common.error'),
@@ -653,6 +743,7 @@ async function saveVerifiedAccounts() {
     resetImportDialog()
     showImportDialog.value = false
   } catch (error: any) {
+    addImportLog('error', `Помилка збереження: ${error.message}`)
     toast.add({
       severity: 'error',
       summary: t('common.error'),
@@ -671,6 +762,8 @@ function resetImportDialog() {
   pendingFiles.value = []
   tdataFiles.value = []
   bulkProxyId.value = null
+  importLogs.value = []
+  showLogs.value = false
 }
 
 function backToUpload() {
@@ -728,6 +821,130 @@ function getProxyStatusSeverity(proxyId: number): "success" | "info" | "warn" | 
   }
 }
 
+// Quick proxy add functions
+function parseProxyString(str: string): { type: string; host: string; port: number; username?: string; password?: string } | null {
+  const trimmed = str.trim()
+  if (!trimmed) return null
+
+  // Try URL format: type://user:pass@host:port
+  const urlMatch = trimmed.match(/^(socks5|socks4|http|https):\/\/(?:([^:]+):([^@]+)@)?([^:]+):(\d+)$/i)
+  if (urlMatch) {
+    return {
+      type: urlMatch[1].toLowerCase(),
+      username: urlMatch[2] || undefined,
+      password: urlMatch[3] || undefined,
+      host: urlMatch[4],
+      port: parseInt(urlMatch[5])
+    }
+  }
+
+  // Try simple format: host:port or host:port:user:pass
+  const parts = trimmed.split(':')
+  if (parts.length >= 2) {
+    return {
+      type: 'socks5',
+      host: parts[0],
+      port: parseInt(parts[1]),
+      username: parts[2] || undefined,
+      password: parts[3] || undefined
+    }
+  }
+
+  return null
+}
+
+async function checkQuickProxy() {
+  const parsed = parseProxyString(quickProxyString.value)
+  if (!parsed) {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: t('accounts.importFlow.invalidProxyFormat'),
+      life: 3000
+    })
+    return
+  }
+
+  quickProxyChecking.value = true
+  quickProxyResult.value = null
+  addImportLog('info', `Проверяем прокси ${parsed.host}:${parsed.port}...`)
+
+  try {
+    const result = await window.api.post('/api/proxy/check-preview', {
+      proxies: [parsed],
+      lookup_geo: true
+    }) as { results: any[] }
+
+    if (result.results.length > 0) {
+      quickProxyResult.value = result.results[0]
+      if (result.results[0].status === 'working') {
+        addImportLog('success', `✓ Прокси работает (${result.results[0].ping_ms}ms, ${result.results[0].geo || 'unknown'})`)
+      } else {
+        addImportLog('error', `✗ Прокси не работает: ${result.results[0].error || result.results[0].status}`)
+      }
+    }
+  } catch (error: any) {
+    addImportLog('error', `Ошибка проверки: ${error.message}`)
+    quickProxyResult.value = { status: 'error', error: error.message }
+  } finally {
+    quickProxyChecking.value = false
+  }
+}
+
+async function addQuickProxy() {
+  const parsed = parseProxyString(quickProxyString.value)
+  if (!parsed) return
+
+  try {
+    const proxyData: any = {
+      ...parsed,
+      username: parsed.username || null,
+      password: parsed.password || null
+    }
+
+    // If checked and working, include check results
+    if (quickProxyResult.value && quickProxyResult.value.status === 'working') {
+      proxyData.status = quickProxyResult.value.status
+      proxyData.ping_ms = quickProxyResult.value.ping_ms
+      proxyData.geo = quickProxyResult.value.geo
+    }
+
+    const newProxy = await window.api.post('/api/proxy', proxyData)
+    await proxyStore.fetchProxies()
+
+    // Auto-select the new proxy
+    bulkProxyId.value = newProxy.id
+    assignBulkProxy()
+
+    addImportLog('success', `Прокси добавлен: ${parsed.host}:${parsed.port}`)
+
+    toast.add({
+      severity: 'success',
+      summary: t('common.success'),
+      detail: t('accounts.importFlow.proxyAdded'),
+      life: 3000
+    })
+
+    // Reset dialog
+    showQuickProxyDialog.value = false
+    quickProxyString.value = ''
+    quickProxyResult.value = null
+  } catch (error: any) {
+    addImportLog('error', `Ошибка добавления прокси: ${error.message}`)
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: error.message,
+      life: 5000
+    })
+  }
+}
+
+function resetQuickProxyDialog() {
+  quickProxyString.value = ''
+  quickProxyResult.value = null
+  quickProxyChecking.value = false
+}
 
 async function checkAccount(account: Account) {
   try {
@@ -1378,7 +1595,7 @@ function onRowUnselect(event: any) {
         <div class="proxy-selection-row">
           <Dropdown
             v-model="bulkProxyId"
-            :options="proxyStore.workingProxies"
+            :options="proxyStore.proxies"
             optionLabel="host"
             optionValue="id"
             :placeholder="t('accounts.importFlow.selectProxy')"
@@ -1397,10 +1614,20 @@ function onRowUnselect(event: any) {
             <template #option="{ option }">
               <div class="proxy-option">
                 <span>{{ option.host }}:{{ option.port }}</span>
-                <span class="proxy-type">{{ option.type }}</span>
+                <Tag
+                  :value="t(`proxy.status.${option.status}`)"
+                  :severity="option.status === 'working' ? 'success' : option.status === 'unchecked' ? 'secondary' : 'danger'"
+                  class="proxy-status-tag"
+                />
               </div>
             </template>
           </Dropdown>
+          <Button
+            icon="pi pi-plus"
+            severity="secondary"
+            v-tooltip.top="t('accounts.importFlow.addProxy')"
+            @click="showQuickProxyDialog = true"
+          />
           <Button
             icon="pi pi-trash"
             severity="danger"
@@ -1467,11 +1694,11 @@ function onRowUnselect(event: any) {
               </template>
             </Column>
 
-            <Column :header="t('accounts.proxy')" style="min-width: 180px">
+            <Column :header="t('accounts.proxy')" style="min-width: 200px">
               <template #body="{ data }">
                 <Dropdown
                   :model-value="data.proxy_id"
-                  :options="proxyStore.workingProxies"
+                  :options="proxyStore.proxies"
                   optionLabel="host"
                   optionValue="id"
                   :placeholder="t('accounts.importFlow.selectProxy')"
@@ -1483,6 +1710,16 @@ function onRowUnselect(event: any) {
                       {{ proxyStore.getById(value)?.type }}://{{ proxyStore.getById(value)?.host }}:{{ proxyStore.getById(value)?.port }}
                     </span>
                     <span v-else class="placeholder-text">—</span>
+                  </template>
+                  <template #option="{ option }">
+                    <div class="proxy-option">
+                      <span>{{ option.host }}:{{ option.port }}</span>
+                      <Tag
+                        :value="t(`proxy.status.${option.status}`)"
+                        :severity="option.status === 'working' ? 'success' : option.status === 'unchecked' ? 'secondary' : 'danger'"
+                        class="proxy-status-tag"
+                      />
+                    </div>
                   </template>
                 </Dropdown>
               </template>
@@ -1530,6 +1767,43 @@ function onRowUnselect(event: any) {
           </div>
         </div>
 
+        <!-- Logs Toggle Button -->
+        <div class="logs-toggle-row">
+          <Button
+            :label="showLogs ? 'Скрыть логи' : `Показать логи (${importLogs.length})`"
+            :icon="showLogs ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
+            severity="secondary"
+            text
+            size="small"
+            :disabled="importLogs.length === 0"
+            @click="showLogs = !showLogs"
+          />
+          <Button
+            v-if="importLogs.length > 0"
+            icon="pi pi-trash"
+            severity="secondary"
+            text
+            size="small"
+            @click="importLogs = []; showLogs = false"
+            v-tooltip.top="'Очистить логи'"
+          />
+        </div>
+
+        <!-- Logs Panel -->
+        <div v-if="showLogs && importLogs.length > 0" class="import-logs-panel">
+          <div class="logs-content" ref="logsContainer">
+            <div
+              v-for="(log, index) in importLogs"
+              :key="index"
+              class="log-entry"
+              :class="'log-' + log.type"
+            >
+              <span class="log-time">{{ log.time }}</span>
+              <span class="log-message">{{ log.message }}</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Action Buttons -->
         <div class="import-action-buttons">
           <Button
@@ -1556,6 +1830,61 @@ function onRowUnselect(event: any) {
             :loading="saving"
             @click="saveVerifiedAccounts"
           />
+        </div>
+      </Dialog>
+
+      <!-- Quick Proxy Add Dialog -->
+      <Dialog
+        v-model:visible="showQuickProxyDialog"
+        :header="t('accounts.importFlow.addProxy')"
+        modal
+        :style="{ width: '450px' }"
+        class="custom-dialog"
+        @hide="resetQuickProxyDialog"
+      >
+        <div class="quick-proxy-content">
+          <div class="form-field">
+            <label class="form-label">{{ t('accounts.importFlow.proxyString') }}</label>
+            <InputText
+              v-model="quickProxyString"
+              :placeholder="t('accounts.importFlow.proxyStringPlaceholder')"
+              class="w-full font-mono"
+              @keyup.enter="checkQuickProxy"
+            />
+            <small class="format-hint">socks5://user:pass@host:port {{ t('common.or') }} host:port:user:pass</small>
+          </div>
+
+          <!-- Check Result -->
+          <div v-if="quickProxyResult" class="quick-proxy-result">
+            <Tag
+              :value="t(`proxy.status.${quickProxyResult.status}`)"
+              :severity="quickProxyResult.status === 'working' ? 'success' : 'danger'"
+            />
+            <span v-if="quickProxyResult.ping_ms" class="result-ping">{{ quickProxyResult.ping_ms }}ms</span>
+            <span v-if="quickProxyResult.geo" class="result-geo">{{ quickProxyResult.geo }}</span>
+            <span v-if="quickProxyResult.error" class="result-error">{{ quickProxyResult.error }}</span>
+          </div>
+
+          <div class="dialog-actions">
+            <Button
+              :label="t('common.cancel')"
+              severity="secondary"
+              @click="showQuickProxyDialog = false"
+            />
+            <Button
+              :label="t('common.check')"
+              icon="pi pi-refresh"
+              severity="secondary"
+              :loading="quickProxyChecking"
+              @click="checkQuickProxy"
+            />
+            <Button
+              :label="t('common.add')"
+              icon="pi pi-plus"
+              :disabled="!quickProxyString.trim()"
+              @click="addQuickProxy"
+            />
+          </div>
         </div>
       </Dialog>
 
@@ -2624,5 +2953,128 @@ function onRowUnselect(event: any) {
 :deep(.light .import-dialog-unified .p-dialog-content),
 :deep(.light .import-dialog-unified .p-dialog-header) {
   background: #ffffff !important;
+}
+
+/* Logs Toggle Row */
+.logs-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* Import Logs Panel */
+.import-logs-panel {
+  margin-bottom: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.logs-content {
+  max-height: 150px;
+  overflow-y: auto;
+  padding: 8px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 11px;
+}
+
+.log-entry {
+  display: flex;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  margin-bottom: 2px;
+}
+
+.log-entry:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.log-time {
+  color: #6b7280;
+  flex-shrink: 0;
+}
+
+.log-message {
+  word-break: break-word;
+}
+
+.log-info .log-message {
+  color: #9ca3af;
+}
+
+.log-success .log-message {
+  color: #22c55e;
+}
+
+.log-error .log-message {
+  color: #ef4444;
+}
+
+.log-warn .log-message {
+  color: #f59e0b;
+}
+
+/* Light theme logs */
+.light .import-logs-panel {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.light .logs-header {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(0, 0, 0, 0.06);
+}
+
+.light .log-entry:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.light .logs-toggle-row {
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Quick Proxy Dialog */
+.quick-proxy-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.quick-proxy-result {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.result-ping {
+  color: #22c55e;
+  font-size: 13px;
+}
+
+.result-geo {
+  color: #9ca3af;
+  font-size: 13px;
+}
+
+.result-error {
+  color: #ef4444;
+  font-size: 13px;
+}
+
+.proxy-status-tag {
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.light .quick-proxy-result {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(0, 0, 0, 0.06);
 }
 </style>

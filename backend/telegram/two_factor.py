@@ -16,6 +16,7 @@ from telethon.password import compute_check
 from telethon.errors import PasswordHashInvalidError
 
 from .session_manager import SessionManager
+from .device_generator import OFFICIAL_APIS
 
 
 class TwoFactorStatus(str, Enum):
@@ -50,8 +51,9 @@ class TwoFactorManager:
         remove_2fa: Disable 2FA on account
     """
 
-    DEFAULT_API_ID = 2040
-    DEFAULT_API_HASH = "b18441a1ff607e10a989891a5462e627"
+    # Use Android official API (consistent with other modules)
+    DEFAULT_API_ID = OFFICIAL_APIS["android"]["api_id"]  # 6
+    DEFAULT_API_HASH = OFFICIAL_APIS["android"]["api_hash"]
 
     def __init__(self, connection_timeout: int = 30):
         self.connection_timeout = connection_timeout
@@ -86,23 +88,62 @@ class TwoFactorManager:
         self,
         session_string: str,
         proxy: Optional[Dict] = None,
+        api_id: Optional[int] = None,
+        api_hash: Optional[str] = None,
+        device_fingerprint: Optional[Dict] = None,
+        unique_id: Optional[str] = None,
     ) -> TelegramClient:
-        """Create TelegramClient instance."""
+        """Create TelegramClient instance with device fingerprint."""
+        from .device_generator import generate_fingerprint_for_api
+
         session = SessionManager.create_memory_session(session_string)
         proxy_tuple = self._format_proxy(proxy)
 
+        # Use provided api_id/api_hash or defaults
+        used_api_id = api_id or self.DEFAULT_API_ID
+        used_api_hash = api_hash or self.DEFAULT_API_HASH
+
+        # Use device fingerprint from account if provided, otherwise generate
+        if device_fingerprint and device_fingerprint.get("device_model"):
+            device_model = device_fingerprint.get("device_model")
+            system_version = device_fingerprint.get("system_version")
+            app_version = device_fingerprint.get("app_version")
+            lang_code = device_fingerprint.get("lang_code", "en")
+            system_lang_code = device_fingerprint.get("system_lang_code", "en")
+        else:
+            # Generate fingerprint
+            seed = unique_id or session_string[:32]
+            fingerprint = generate_fingerprint_for_api(
+                unique_id=seed,
+                api_id=used_api_id,
+            )
+            device_model = fingerprint["device_model"]
+            system_version = fingerprint["system_version"]
+            app_version = fingerprint["app_version"]
+            lang_code = fingerprint["lang_code"]
+            system_lang_code = fingerprint["system_lang_code"]
+
         return TelegramClient(
             session,
-            self.DEFAULT_API_ID,
-            self.DEFAULT_API_HASH,
+            used_api_id,
+            used_api_hash,
             proxy=proxy_tuple,
             timeout=self.connection_timeout,
+            device_model=device_model,
+            system_version=system_version,
+            app_version=app_version,
+            lang_code=lang_code,
+            system_lang_code=system_lang_code,
         )
 
     async def check_2fa_status(
         self,
         session_string: str,
         proxy: Optional[Dict] = None,
+        api_id: Optional[int] = None,
+        api_hash: Optional[str] = None,
+        device_fingerprint: Optional[Dict] = None,
+        unique_id: Optional[str] = None,
     ) -> TwoFactorCheckResult:
         """
         Check if account has 2FA enabled and get password hint.
@@ -110,13 +151,19 @@ class TwoFactorManager:
         Args:
             session_string: Telethon session string
             proxy: Optional proxy configuration
+            api_id: Optional API ID from account
+            api_hash: Optional API hash from account
+            device_fingerprint: Optional device fingerprint from account
+            unique_id: Optional unique ID for fingerprint generation
 
         Returns:
             TwoFactorCheckResult with has_2fa status and hint
         """
         client = None
         try:
-            client = self._create_client(session_string, proxy)
+            client = self._create_client(
+                session_string, proxy, api_id, api_hash, device_fingerprint, unique_id
+            )
             await client.connect()
 
             if not await client.is_user_authorized():
@@ -147,6 +194,10 @@ class TwoFactorManager:
         new_password: str,
         hint: str = "",
         proxy: Optional[Dict] = None,
+        api_id: Optional[int] = None,
+        api_hash: Optional[str] = None,
+        device_fingerprint: Optional[Dict] = None,
+        unique_id: Optional[str] = None,
     ) -> TwoFactorSetResult:
         """
         Set 2FA password on account.
@@ -156,13 +207,19 @@ class TwoFactorManager:
             new_password: New 2FA password to set
             hint: Optional password hint
             proxy: Optional proxy configuration
+            api_id: Optional API ID from account
+            api_hash: Optional API hash from account
+            device_fingerprint: Optional device fingerprint from account
+            unique_id: Optional unique ID for fingerprint generation
 
         Returns:
             TwoFactorSetResult with success status
         """
         client = None
         try:
-            client = self._create_client(session_string, proxy)
+            client = self._create_client(
+                session_string, proxy, api_id, api_hash, device_fingerprint, unique_id
+            )
             await client.connect()
 
             if not await client.is_user_authorized():
@@ -206,6 +263,10 @@ class TwoFactorManager:
         new_password: str,
         new_hint: str = "",
         proxy: Optional[Dict] = None,
+        api_id: Optional[int] = None,
+        api_hash: Optional[str] = None,
+        device_fingerprint: Optional[Dict] = None,
+        unique_id: Optional[str] = None,
     ) -> TwoFactorSetResult:
         """
         Change existing 2FA password.
@@ -216,13 +277,19 @@ class TwoFactorManager:
             new_password: New 2FA password
             new_hint: Optional new password hint
             proxy: Optional proxy configuration
+            api_id: Optional API ID from account
+            api_hash: Optional API hash from account
+            device_fingerprint: Optional device fingerprint from account
+            unique_id: Optional unique ID for fingerprint generation
 
         Returns:
             TwoFactorSetResult with success status
         """
         client = None
         try:
-            client = self._create_client(session_string, proxy)
+            client = self._create_client(
+                session_string, proxy, api_id, api_hash, device_fingerprint, unique_id
+            )
             await client.connect()
 
             if not await client.is_user_authorized():
@@ -270,6 +337,10 @@ class TwoFactorManager:
         session_string: str,
         current_password: str,
         proxy: Optional[Dict] = None,
+        api_id: Optional[int] = None,
+        api_hash: Optional[str] = None,
+        device_fingerprint: Optional[Dict] = None,
+        unique_id: Optional[str] = None,
     ) -> TwoFactorSetResult:
         """
         Remove 2FA from account.
@@ -278,13 +349,19 @@ class TwoFactorManager:
             session_string: Telethon session string
             current_password: Current 2FA password to verify
             proxy: Optional proxy configuration
+            api_id: Optional API ID from account
+            api_hash: Optional API hash from account
+            device_fingerprint: Optional device fingerprint from account
+            unique_id: Optional unique ID for fingerprint generation
 
         Returns:
             TwoFactorSetResult with success status
         """
         client = None
         try:
-            client = self._create_client(session_string, proxy)
+            client = self._create_client(
+                session_string, proxy, api_id, api_hash, device_fingerprint, unique_id
+            )
             await client.connect()
 
             if not await client.is_user_authorized():

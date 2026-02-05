@@ -21,16 +21,24 @@ from telethon.errors import (
 
 from .session_manager import SessionManager
 from .exceptions import UnauthorizedError, SessionExpiredError, ProxyError
+from .device_generator import (
+    generate_device_fingerprint,
+    generate_fingerprint_for_api,
+    detect_platform_from_api_id,
+    OFFICIAL_APIS,
+)
 
 
 class BaseClient:
     """
     Base Telegram client wrapper.
     Provides unified interface for Telegram operations.
+    Uses device fingerprinting to emulate real devices.
     """
 
-    DEFAULT_API_ID = 2040
-    DEFAULT_API_HASH = "b18441a1ff607e10a989891a5462e627"
+    # Default to Android official API (most common)
+    DEFAULT_API_ID = OFFICIAL_APIS["android"]["api_id"]  # 6
+    DEFAULT_API_HASH = OFFICIAL_APIS["android"]["api_hash"]
 
     def __init__(
         self,
@@ -41,6 +49,13 @@ class BaseClient:
         connection_retries: int = 5,
         request_retries: int = 5,
         timeout: int = 10,
+        # Device fingerprint parameters
+        device_model: Optional[str] = None,
+        system_version: Optional[str] = None,
+        app_version: Optional[str] = None,
+        lang_code: Optional[str] = None,
+        system_lang_code: Optional[str] = None,
+        unique_id: Optional[str] = None,  # For consistent fingerprint generation
     ):
         self.session_string = session_string
         self.api_id = api_id or self.DEFAULT_API_ID
@@ -50,7 +65,57 @@ class BaseClient:
         self.request_retries = request_retries
         self.timeout = timeout
 
+        # Generate device fingerprint if not provided
+        self._setup_device_fingerprint(
+            device_model=device_model,
+            system_version=system_version,
+            app_version=app_version,
+            lang_code=lang_code,
+            system_lang_code=system_lang_code,
+            unique_id=unique_id,
+        )
+
         self._client: Optional[TelegramClient] = None
+
+    def _setup_device_fingerprint(
+        self,
+        device_model: Optional[str] = None,
+        system_version: Optional[str] = None,
+        app_version: Optional[str] = None,
+        lang_code: Optional[str] = None,
+        system_lang_code: Optional[str] = None,
+        unique_id: Optional[str] = None,
+    ):
+        """
+        Setup device fingerprint parameters.
+
+        If explicit params provided - use them.
+        Otherwise generate consistent fingerprint based on unique_id or session hash.
+        """
+        if all([device_model, system_version, app_version]):
+            # Use provided device params
+            self.device_model = device_model
+            self.system_version = system_version
+            self.app_version = app_version
+            self.lang_code = lang_code or "en"
+            self.system_lang_code = system_lang_code or "en"
+        else:
+            # Generate fingerprint based on unique_id or session
+            seed = unique_id or self.session_string[:32] if self.session_string else "default"
+
+            # Generate device params matching our api_id platform
+            fingerprint = generate_fingerprint_for_api(
+                unique_id=seed,
+                api_id=self.api_id,
+                lang_code=lang_code or "en",
+                system_lang_code=system_lang_code or "en",
+            )
+
+            self.device_model = fingerprint["device_model"]
+            self.system_version = fingerprint["system_version"]
+            self.app_version = fingerprint["app_version"]
+            self.lang_code = fingerprint["lang_code"]
+            self.system_lang_code = fingerprint["system_lang_code"]
 
     def _format_proxy(self, proxy: Dict) -> Tuple:
         """Format proxy dict to Telethon tuple format"""
@@ -77,7 +142,7 @@ class BaseClient:
         )
 
     def _create_client(self) -> TelegramClient:
-        """Create TelegramClient instance"""
+        """Create TelegramClient instance with device fingerprint"""
         session = SessionManager.create_memory_session(self.session_string)
 
         return TelegramClient(
@@ -88,6 +153,12 @@ class BaseClient:
             connection_retries=self.connection_retries,
             request_retries=self.request_retries,
             timeout=self.timeout,
+            # Device fingerprint parameters
+            device_model=self.device_model,
+            system_version=self.system_version,
+            app_version=self.app_version,
+            lang_code=self.lang_code,
+            system_lang_code=self.system_lang_code,
         )
 
     async def __aenter__(self):
@@ -158,6 +229,11 @@ async def validate_session(
     proxy: Optional[Dict] = None,
     api_id: Optional[int] = None,
     api_hash: Optional[str] = None,
+    unique_id: Optional[str] = None,
+    device_model: Optional[str] = None,
+    system_version: Optional[str] = None,
+    app_version: Optional[str] = None,
+    lang_code: Optional[str] = None,
 ) -> Tuple[bool, Optional[Dict], Optional[str]]:
     """
     Validate session string and get account info.
@@ -167,6 +243,11 @@ async def validate_session(
         proxy: Optional proxy config
         api_id: Optional API ID
         api_hash: Optional API Hash
+        unique_id: Unique ID for consistent device fingerprint (e.g. phone number)
+        device_model: Optional explicit device model
+        system_version: Optional explicit system version
+        app_version: Optional explicit app version
+        lang_code: Optional language code
 
     Returns:
         Tuple[is_valid, user_info, error_code]
@@ -180,6 +261,11 @@ async def validate_session(
             proxy=proxy,
             connection_retries=3,
             timeout=15,
+            unique_id=unique_id,
+            device_model=device_model,
+            system_version=system_version,
+            app_version=app_version,
+            lang_code=lang_code,
         )
 
         async with client:

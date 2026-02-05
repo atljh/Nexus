@@ -131,6 +131,13 @@ class Account(Base):
     # Session storage
     session_string: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # API credentials from JSON file
+    api_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    api_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    # Device fingerprint (device_model, system_version, app_version, lang_code, system_lang_code)
+    device_fingerprint: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
     # Extended metadata from JSON import
     extra_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     spamblock: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
@@ -187,6 +194,9 @@ class Account(Base):
             "spamblock": self.spamblock,
             "geo": self.geo,
             "register_time": self.register_time.isoformat() if self.register_time else None,
+            "api_id": self.api_id,
+            "api_hash": self.api_hash,
+            "device_fingerprint": self.device_fingerprint,
             "has_2fa": self.has_2fa,
             "password_hint": self.password_hint,
             "two_fa_set_at": self.two_fa_set_at.isoformat() if self.two_fa_set_at else None,

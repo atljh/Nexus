@@ -4,6 +4,8 @@ Implements phone -> SMS code -> 2FA password flow.
 
 Unlike web version (GramGPT), this desktop version uses in-memory
 session storage instead of Redis since we have a single process.
+
+SECURITY: All connections MUST use proxy to protect user's IP.
 """
 
 import uuid
@@ -25,6 +27,8 @@ from telethon.errors import (
     PasswordHashInvalidError,
     FloodWaitError,
 )
+
+from .device_generator import generate_device_fingerprint, OFFICIAL_APIS
 
 
 class AuthStep(str, Enum):
@@ -79,10 +83,13 @@ class AuthService:
     3. verify_code(session_id, code, password) -> Complete auth with 2FA
 
     Sessions are stored in memory with 10-minute TTL.
+
+    SECURITY: Proxy is REQUIRED for all operations to protect user's IP.
     """
 
-    DEFAULT_API_ID = 2040
-    DEFAULT_API_HASH = "b18441a1ff607e10a989891a5462e627"
+    # Use Android official API (most common, least suspicious)
+    DEFAULT_API_ID = OFFICIAL_APIS["android"]["api_id"]  # 6
+    DEFAULT_API_HASH = OFFICIAL_APIS["android"]["api_hash"]
     SESSION_TTL_MINUTES = 10
 
     def __init__(self):
@@ -140,11 +147,20 @@ class AuthService:
 
         Args:
             phone: Phone number with country code (e.g., +1234567890)
-            proxy: Proxy configuration (recommended for safety)
+            proxy: Proxy configuration (REQUIRED for safety)
 
         Returns:
             AuthStartResult with session_id for next step
+
+        SECURITY: Proxy is required to protect user's real IP from Telegram.
         """
+        # SECURITY: Require proxy for all auth operations
+        if not proxy:
+            return AuthStartResult(
+                success=False,
+                error="Proxy is required for authorization to protect your IP"
+            )
+
         self._cleanup_expired()
 
         phone = self._normalize_phone(phone)
@@ -153,12 +169,23 @@ class AuthService:
         try:
             proxy_tuple = self._format_proxy(proxy)
 
-            # Create new Telethon client with empty StringSession
+            # Generate device fingerprint based on phone number
+            fingerprint = generate_device_fingerprint(
+                unique_id=phone,
+                platform="android",
+            )
+
+            # Create new Telethon client with empty StringSession and device fingerprint
             client = TelegramClient(
                 StringSession(),
                 self.DEFAULT_API_ID,
                 self.DEFAULT_API_HASH,
                 proxy=proxy_tuple,
+                device_model=fingerprint["device_model"],
+                system_version=fingerprint["system_version"],
+                app_version=fingerprint["app_version"],
+                lang_code=fingerprint["lang_code"],
+                system_lang_code=fingerprint["system_lang_code"],
             )
 
             await client.connect()
@@ -245,12 +272,23 @@ class AuthService:
         try:
             proxy_tuple = self._format_proxy(auth_session.proxy)
 
-            # Recreate client from saved session string
+            # Generate consistent device fingerprint based on phone
+            fingerprint = generate_device_fingerprint(
+                unique_id=auth_session.phone,
+                platform="android",
+            )
+
+            # Recreate client from saved session string with device fingerprint
             client = TelegramClient(
                 StringSession(auth_session.session_string),
                 self.DEFAULT_API_ID,
                 self.DEFAULT_API_HASH,
                 proxy=proxy_tuple,
+                device_model=fingerprint["device_model"],
+                system_version=fingerprint["system_version"],
+                app_version=fingerprint["app_version"],
+                lang_code=fingerprint["lang_code"],
+                system_lang_code=fingerprint["system_lang_code"],
             )
 
             await client.connect()
@@ -371,11 +409,22 @@ class AuthService:
         try:
             proxy_tuple = self._format_proxy(auth_session.proxy)
 
+            # Generate consistent device fingerprint based on phone
+            fingerprint = generate_device_fingerprint(
+                unique_id=auth_session.phone,
+                platform="android",
+            )
+
             client = TelegramClient(
                 StringSession(auth_session.session_string),
                 self.DEFAULT_API_ID,
                 self.DEFAULT_API_HASH,
                 proxy=proxy_tuple,
+                device_model=fingerprint["device_model"],
+                system_version=fingerprint["system_version"],
+                app_version=fingerprint["app_version"],
+                lang_code=fingerprint["lang_code"],
+                system_lang_code=fingerprint["system_lang_code"],
             )
 
             await client.connect()

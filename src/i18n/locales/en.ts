@@ -238,6 +238,11 @@ export default {
       saveToApp: 'Save',
       clearAll: 'Clear all',
       noAccountsYet: 'No accounts yet',
+      addProxy: 'Add Proxy',
+      proxyString: 'Proxy String',
+      proxyStringPlaceholder: 'socks5://user:pass@host:port',
+      invalidProxyFormat: 'Invalid proxy format',
+      proxyAdded: 'Proxy added',
       status: {
         pending: 'pending',
         verifying: 'verifying...',

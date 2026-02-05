@@ -410,3 +410,47 @@ async def convert_tdata_to_session(
     """
     converter = TDataConverter()
     return await converter.convert_tdata(tdata_path, proxy, api_id, api_hash)
+
+
+async def parse_tdata_to_session(tdata_path: str) -> str:
+    """
+    Parse tdata folder and extract session string WITHOUT validation.
+    Use this for initial parsing when proxy is not yet assigned.
+
+    Args:
+        tdata_path: Path to tdata folder
+
+    Returns:
+        session_string (without connecting to Telegram)
+    """
+    converter = TDataConverter()
+
+    logger.info(f"Parsing tdata (no validation): {tdata_path}")
+
+    # Extract data using tdesktop-decrypter
+    tdata_info = await converter._extract_tdata_info(tdata_path)
+
+    if not tdata_info.get("accounts"):
+        raise TDataError(
+            "No accounts found in tdata. "
+            "Make sure Telegram Desktop is logged in and closed before export."
+        )
+
+    # Use first account
+    account_data = tdata_info["accounts"][0]
+    logger.info(f"Found account: user_id={account_data.get('user_id')}")
+
+    # Create session in temp file
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_session_path = Path(temp_dir) / "temp.session"
+
+        # Create SQLite session file
+        await converter._create_telethon_session(account_data, temp_session_path)
+
+        # Convert to string session (no validation)
+        session_string = converter._sqlite_to_string_session(temp_session_path)
+
+    logger.info(f"Session string extracted (length: {len(session_string)})")
+    return session_string
