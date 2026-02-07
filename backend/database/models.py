@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Table, Column, Text, JSON, Float, inspect
+from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Table, Column, Text, JSON, Float, Index, inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.database import Base
@@ -383,4 +383,157 @@ class TargetChannel(Base):
             "last_post_id": self.last_post_id,
             "comments_sent": self.comments_sent,
             "created_at": self.created_at.isoformat()
+        }
+
+
+class AccountBlacklist(Base):
+    """Per-account blacklist for channels where the account cannot operate."""
+    __tablename__ = "account_blacklist"
+    __table_args__ = (
+        Index("ix_blacklist_account_channel", "account_id", "channel_id"),
+        Index("ix_blacklist_account_username", "account_id", "channel_username"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    channel_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    channel_username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    channel_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    reason: Mapped[str] = mapped_column(String(50))  # banned, write_forbidden, no_access, restricted, kicked
+    module_name: Mapped[str] = mapped_column(String(50), default="comments")
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    @staticmethod
+    def is_blacklisted(db, account_id: int, channel_id: Optional[int] = None, channel_username: Optional[str] = None) -> bool:
+        """Check if account is blacklisted for a channel."""
+        query = db.query(AccountBlacklist).filter(AccountBlacklist.account_id == account_id)
+        if channel_id:
+            return query.filter(AccountBlacklist.channel_id == channel_id).first() is not None
+        if channel_username:
+            return query.filter(AccountBlacklist.channel_username == channel_username).first() is not None
+        return False
+
+    @staticmethod
+    def add_to_blacklist(
+        db, account_id: int, reason: str,
+        channel_id: Optional[int] = None, channel_username: Optional[str] = None,
+        channel_title: Optional[str] = None, module_name: str = "comments",
+        error_message: Optional[str] = None
+    ) -> "AccountBlacklist":
+        """Add account-channel pair to blacklist (idempotent)."""
+        existing = db.query(AccountBlacklist).filter(
+            AccountBlacklist.account_id == account_id
+        )
+        if channel_id:
+            existing = existing.filter(AccountBlacklist.channel_id == channel_id)
+        elif channel_username:
+            existing = existing.filter(AccountBlacklist.channel_username == channel_username)
+
+        entry = existing.first()
+        if entry:
+            entry.reason = reason
+            entry.error_message = error_message
+            db.commit()
+            return entry
+
+        entry = AccountBlacklist(
+            account_id=account_id,
+            channel_id=channel_id,
+            channel_username=channel_username,
+            channel_title=channel_title,
+            reason=reason,
+            module_name=module_name,
+            error_message=error_message,
+        )
+        db.add(entry)
+        db.commit()
+        return entry
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "account_id": self.account_id,
+            "channel_id": self.channel_id,
+            "channel_username": self.channel_username,
+            "channel_title": self.channel_title,
+            "reason": self.reason,
+            "module_name": self.module_name,
+            "error_message": self.error_message,
+            "created_at": self.created_at.isoformat(),
+        }
+
+
+class CommentHistory(Base):
+    """History of all comments sent by the system."""
+    __tablename__ = "comment_history"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    channel_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    channel_username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    channel_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    post_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    comment_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    comment_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    post_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    success: Mapped[bool] = mapped_column(Boolean, default=False)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    ai_generated: Mapped[bool] = mapped_column(Boolean, default=False)
+    ai_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    ai_prompt_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "account_id": self.account_id,
+            "task_id": self.task_id,
+            "channel_id": self.channel_id,
+            "channel_username": self.channel_username,
+            "channel_title": self.channel_title,
+            "post_id": self.post_id,
+            "comment_id": self.comment_id,
+            "comment_text": self.comment_text,
+            "post_text": self.post_text,
+            "success": self.success,
+            "error_message": self.error_message,
+            "ai_generated": self.ai_generated,
+            "ai_model": self.ai_model,
+            "ai_prompt_name": self.ai_prompt_name,
+            "created_at": self.created_at.isoformat(),
+        }
+
+
+class AIPromptTemplate(Base):
+    """AI prompt templates for comment generation."""
+    __tablename__ = "ai_prompt_templates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    prompt_template: Mapped[str] = mapped_column(Text)  # Uses {post_text}, {channel_title} placeholders
+    ai_model: Mapped[str] = mapped_column(String(100), default="gpt-4o-mini")
+    temperature: Mapped[float] = mapped_column(Float, default=0.7)
+    max_length: Mapped[int] = mapped_column(Integer, default=200)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "prompt_template": self.prompt_template,
+            "ai_model": self.ai_model,
+            "temperature": self.temperature,
+            "max_length": self.max_length,
+            "is_default": self.is_default,
+            "created_at": self.created_at.isoformat(),
         }

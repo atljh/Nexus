@@ -6,7 +6,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 
 from database.database import get_db
-from database.models import Task, TaskLog, Account, CommentTemplate, TargetChannel
+from database.models import (
+    Task, TaskLog, Account, CommentTemplate, TargetChannel,
+    AccountBlacklist, CommentHistory, AIPromptTemplate,
+)
 
 router = APIRouter()
 
@@ -38,6 +41,17 @@ class CommentsTaskConfig(BaseModel):
     rotation_mode: str = Field("random", description="random or round_robin")
     comments_per_account: int = Field(10, ge=1, le=100, description="Max comments per account")
     mode: str = Field("single", description="single or monitoring")
+    # Comment filtering
+    comment_mode: str = Field("all", description="all, random, or keywords")
+    comment_probability: float = Field(0.5, ge=0, le=1, description="Probability for random mode")
+    keywords: List[str] = Field(default=[], description="Keywords for keyword mode")
+    # AI settings
+    ai_enabled: bool = Field(False, description="Enable AI comment generation")
+    ai_api_key: Optional[str] = Field(None, description="OpenAI API key")
+    ai_model: str = Field("gpt-4o-mini", description="AI model name")
+    ai_base_url: str = Field("https://api.openai.com/v1", description="API base URL")
+    ai_prompt_id: Optional[int] = Field(None, description="AI prompt template ID")
+    ai_temperature: float = Field(0.7, ge=0, le=2, description="AI temperature")
 
 
 class CreateCommentsTaskRequest(BaseModel):
@@ -230,17 +244,31 @@ async def create_comments_task(request: CreateCommentsTaskRequest, db: Session =
             ch = "@" + ch
         channels.append(ch)
 
+    # Build config with AI settings
+    task_config = {
+        "channels": channels,
+        "templates": request.config.templates,
+        "rotation_mode": request.config.rotation_mode,
+        "comments_per_account": request.config.comments_per_account,
+        "mode": request.config.mode,
+        "comment_mode": request.config.comment_mode,
+        "comment_probability": request.config.comment_probability,
+        "keywords": request.config.keywords,
+        "ai_enabled": request.config.ai_enabled,
+        "ai_model": request.config.ai_model,
+        "ai_base_url": request.config.ai_base_url,
+        "ai_temperature": request.config.ai_temperature,
+    }
+    if request.config.ai_api_key:
+        task_config["ai_api_key"] = request.config.ai_api_key
+    if request.config.ai_prompt_id:
+        task_config["ai_prompt_id"] = request.config.ai_prompt_id
+
     # Create task
     task = Task(
         task_type="comments",
         status="pending",
-        config={
-            "channels": channels,
-            "templates": request.config.templates,
-            "rotation_mode": request.config.rotation_mode,
-            "comments_per_account": request.config.comments_per_account,
-            "mode": request.config.mode
-        },
+        config=task_config,
         total_actions=request.total_actions,
         min_delay=request.min_delay,
         max_delay=request.max_delay,
@@ -568,3 +596,159 @@ async def get_task_channels(task_id: int, db: Session = Depends(get_db)):
 
     channels = db.query(TargetChannel).filter(TargetChannel.task_id == task_id).all()
     return [ch.to_dict() for ch in channels]
+
+
+# ============ Comment History ============
+
+@router.get("/{task_id}/comment-history")
+async def get_task_comment_history(
+    task_id: int,
+    success: Optional[bool] = Query(None),
+    ai_only: bool = Query(False),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db)
+):
+    """Get comment history for a specific task."""
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    query = db.query(CommentHistory).filter(CommentHistory.task_id == task_id)
+    if success is not None:
+        query = query.filter(CommentHistory.success == success)
+    if ai_only:
+        query = query.filter(CommentHistory.ai_generated == True)
+
+    items = query.order_by(CommentHistory.created_at.desc()).offset(offset).limit(limit).all()
+    return [h.to_dict() for h in items]
+
+
+@router.get("/comment-history/by-account/{account_id}")
+async def get_account_comment_history(
+    account_id: int,
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db)
+):
+    """Get comment history for a specific account."""
+    items = db.query(CommentHistory).filter(
+        CommentHistory.account_id == account_id
+    ).order_by(CommentHistory.created_at.desc()).offset(offset).limit(limit).all()
+    return [h.to_dict() for h in items]
+
+
+# ============ Blacklist ============
+
+@router.get("/blacklist/{account_id}")
+async def get_account_blacklist(
+    account_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get blacklist entries for an account."""
+    items = db.query(AccountBlacklist).filter(
+        AccountBlacklist.account_id == account_id
+    ).order_by(AccountBlacklist.created_at.desc()).all()
+    return [b.to_dict() for b in items]
+
+
+@router.delete("/blacklist/{blacklist_id}")
+async def delete_blacklist_entry(
+    blacklist_id: int,
+    db: Session = Depends(get_db)
+):
+    """Remove an entry from the blacklist."""
+    entry = db.query(AccountBlacklist).filter(AccountBlacklist.id == blacklist_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Blacklist entry not found")
+
+    db.delete(entry)
+    db.commit()
+    return {"message": "Blacklist entry removed"}
+
+
+# ============ AI Prompt Templates ============
+
+class AIPromptRequest(BaseModel):
+    """Request to create/update an AI prompt template."""
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    prompt_template: str = Field(..., min_length=1)
+    ai_model: str = Field("gpt-4o-mini")
+    temperature: float = Field(0.7, ge=0, le=2)
+    max_length: int = Field(200, ge=10, le=2000)
+    is_default: bool = Field(False)
+
+
+@router.get("/ai-prompts", response_model=list)
+async def get_ai_prompts(db: Session = Depends(get_db)):
+    """Get all AI prompt templates."""
+    prompts = db.query(AIPromptTemplate).order_by(AIPromptTemplate.created_at.desc()).all()
+    return [p.to_dict() for p in prompts]
+
+
+@router.post("/ai-prompts")
+async def create_ai_prompt(request: AIPromptRequest, db: Session = Depends(get_db)):
+    """Create a new AI prompt template."""
+    # Validate template has required placeholders
+    if "{post_text}" not in request.prompt_template:
+        raise HTTPException(
+            status_code=400,
+            detail="Prompt template must contain {post_text} placeholder"
+        )
+
+    prompt = AIPromptTemplate(
+        name=request.name,
+        description=request.description,
+        prompt_template=request.prompt_template,
+        ai_model=request.ai_model,
+        temperature=request.temperature,
+        max_length=request.max_length,
+        is_default=request.is_default,
+    )
+    db.add(prompt)
+    db.commit()
+    db.refresh(prompt)
+    return prompt.to_dict()
+
+
+@router.put("/ai-prompts/{prompt_id}")
+async def update_ai_prompt(
+    prompt_id: int,
+    request: AIPromptRequest,
+    db: Session = Depends(get_db)
+):
+    """Update an AI prompt template."""
+    prompt = db.query(AIPromptTemplate).filter(AIPromptTemplate.id == prompt_id).first()
+    if not prompt:
+        raise HTTPException(status_code=404, detail="AI prompt not found")
+
+    if "{post_text}" not in request.prompt_template:
+        raise HTTPException(
+            status_code=400,
+            detail="Prompt template must contain {post_text} placeholder"
+        )
+
+    prompt.name = request.name
+    prompt.description = request.description
+    prompt.prompt_template = request.prompt_template
+    prompt.ai_model = request.ai_model
+    prompt.temperature = request.temperature
+    prompt.max_length = request.max_length
+    prompt.is_default = request.is_default
+
+    db.commit()
+    db.refresh(prompt)
+    return prompt.to_dict()
+
+
+@router.delete("/ai-prompts/{prompt_id}")
+async def delete_ai_prompt(prompt_id: int, db: Session = Depends(get_db)):
+    """Delete an AI prompt template."""
+    prompt = db.query(AIPromptTemplate).filter(AIPromptTemplate.id == prompt_id).first()
+    if not prompt:
+        raise HTTPException(status_code=404, detail="AI prompt not found")
+
+    db.delete(prompt)
+    db.commit()
+    return {"message": "AI prompt deleted"}
