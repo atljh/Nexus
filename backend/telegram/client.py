@@ -60,6 +60,7 @@ class BaseClient:
         self.session_string = session_string
         self.api_id = api_id or self.DEFAULT_API_ID
         self.api_hash = api_hash or self.DEFAULT_API_HASH
+        self.proxy_dict = proxy
         self.proxy = self._format_proxy(proxy) if proxy else None
         self.connection_retries = connection_retries
         self.request_retries = request_retries
@@ -160,6 +161,161 @@ class BaseClient:
             lang_code=self.lang_code,
             system_lang_code=self.system_lang_code,
         )
+
+    async def _test_proxy_connection(self) -> dict:
+        """
+        Test proxy connectivity before connecting to Telegram.
+
+        For SOCKS proxies: test via aiohttp_socks to api.telegram.org.
+        For HTTP proxies: test CONNECT tunnel to Telegram DC.
+
+        Returns:
+            Dict with test results: {"success": bool, "response_time": float, "error": str|None}
+        """
+        import time
+        import base64
+
+        if not self.proxy_dict:
+            return {"success": True, "response_time": 0, "error": None}
+
+        start = time.time()
+        proxy_type = (
+            self.proxy_dict.get("type")
+            or self.proxy_dict.get("proxy_type")
+            or "socks5"
+        )
+        addr = self.proxy_dict.get("host") or self.proxy_dict.get("addr")
+        port = int(self.proxy_dict.get("port", 1080))
+        username = self.proxy_dict.get("username")
+        password = self.proxy_dict.get("password")
+
+        try:
+            if proxy_type.lower().startswith("socks"):
+                try:
+                    from aiohttp_socks import ProxyConnector
+                    import aiohttp
+
+                    proxy_url = f"{proxy_type}://"
+                    if username and password:
+                        proxy_url += f"{username}:{password}@"
+                    proxy_url += f"{addr}:{port}"
+
+                    timeout = aiohttp.ClientTimeout(total=5)
+                    connector = ProxyConnector.from_url(proxy_url)
+
+                    async with aiohttp.ClientSession(
+                        connector=connector, timeout=timeout
+                    ) as session:
+                        async with session.get("https://api.telegram.org") as response:
+                            elapsed = time.time() - start
+                            return {
+                                "success": True,
+                                "response_time": elapsed,
+                                "error": None,
+                            }
+                except ImportError:
+                    return {"success": True, "response_time": 0, "error": None}
+                except Exception as e:
+                    elapsed = time.time() - start
+                    return {
+                        "success": False,
+                        "response_time": elapsed,
+                        "error": f"SOCKS proxy not working: {e}",
+                    }
+            else:
+                # HTTP proxy: test CONNECT to Telegram DC
+                telegram_dc = "149.154.167.50"
+                telegram_port = 443
+
+                try:
+                    reader, writer = await asyncio.wait_for(
+                        asyncio.open_connection(addr, port), timeout=5
+                    )
+                except Exception as e:
+                    elapsed = time.time() - start
+                    return {
+                        "success": False,
+                        "response_time": elapsed,
+                        "error": f"Cannot connect to proxy: {e}",
+                    }
+
+                try:
+                    connect_request = f"CONNECT {telegram_dc}:{telegram_port} HTTP/1.1\r\n"
+                    connect_request += f"Host: {telegram_dc}:{telegram_port}\r\n"
+
+                    if username and password:
+                        credentials = base64.b64encode(
+                            f"{username}:{password}".encode()
+                        ).decode()
+                        connect_request += f"Proxy-Authorization: Basic {credentials}\r\n"
+
+                    connect_request += "\r\n"
+
+                    writer.write(connect_request.encode())
+                    await writer.drain()
+
+                    response = await asyncio.wait_for(reader.readline(), timeout=5)
+                    response_str = response.decode().strip()
+
+                    writer.close()
+                    try:
+                        await writer.wait_closed()
+                    except Exception:
+                        pass
+
+                    elapsed = time.time() - start
+
+                    if "200" in response_str:
+                        return {"success": True, "response_time": elapsed, "error": None}
+                    elif "407" in response_str:
+                        return {
+                            "success": False,
+                            "response_time": elapsed,
+                            "error": "Invalid proxy username or password",
+                        }
+                    elif "403" in response_str:
+                        return {
+                            "success": False,
+                            "response_time": elapsed,
+                            "error": "Proxy blocked connection to Telegram",
+                        }
+                    else:
+                        return {
+                            "success": False,
+                            "response_time": elapsed,
+                            "error": "This proxy does not support Telegram connections",
+                        }
+
+                except asyncio.TimeoutError:
+                    try:
+                        writer.close()
+                    except Exception:
+                        pass
+                    elapsed = time.time() - start
+                    return {
+                        "success": False,
+                        "response_time": elapsed,
+                        "error": "Timeout testing CONNECT to Telegram",
+                    }
+                except Exception as e:
+                    try:
+                        writer.close()
+                    except Exception:
+                        pass
+                    elapsed = time.time() - start
+                    return {
+                        "success": False,
+                        "response_time": elapsed,
+                        "error": f"Error testing CONNECT: {e}",
+                    }
+
+        except Exception as e:
+            elapsed = time.time() - start
+            return {
+                "success": False,
+                "response_time": elapsed,
+                "error": str(e),
+            }
 
     async def __aenter__(self):
         """Async context manager entry"""

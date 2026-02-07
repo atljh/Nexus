@@ -13,7 +13,7 @@ from .exceptions import (
 )
 from .session_manager import SessionManager
 from .client import BaseClient, validate_session
-from .tdata_converter import TDataConverter, convert_tdata_to_session, parse_tdata_to_session
+from .tdata_converter import TDataConverter, SimpleTDataConverter, convert_tdata_to_session, parse_tdata_to_session
 from .account_checker import AccountChecker, AccountStatus, AccountCheckResult, account_checker
 from .two_factor import TwoFactorManager, TwoFactorStatus, TwoFactorCheckResult, TwoFactorSetResult, two_factor_manager
 from .auth_service import AuthService, AuthStep, AuthSession, AuthStartResult, AuthVerifyResult, auth_service
@@ -44,6 +44,7 @@ __all__ = [
     "validate_session",
     # TData
     "TDataConverter",
+    "SimpleTDataConverter",
     "convert_tdata_to_session",
     "parse_tdata_to_session",
     # Account Checker

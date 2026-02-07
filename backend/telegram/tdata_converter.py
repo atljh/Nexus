@@ -4,6 +4,7 @@ Converts Telegram Desktop tdata to Telethon session
 """
 
 import json
+import os
 import sqlite3
 import asyncio
 import shutil
@@ -72,8 +73,19 @@ class TDataConverter:
 
         if not tdata_info.get("accounts"):
             raise TDataError(
-                "No accounts found in tdata. "
-                "Make sure Telegram Desktop is logged in and closed before export."
+                "No accounts found in tdata.\n\n"
+                "Possible reasons:\n"
+                "1. Telegram Desktop is not logged in\n"
+                "2. TData folder is incomplete or corrupted\n"
+                "3. Wrong folder uploaded (should be 'tdata' folder)\n\n"
+                "How to fix:\n"
+                "1. Open Telegram Desktop and log in\n"
+                "2. Close Telegram Desktop completely\n"
+                "3. Export the tdata folder:\n"
+                "   - Windows: %APPDATA%\\Telegram Desktop\\tdata\n"
+                "   - macOS: ~/Library/Application Support/Telegram Desktop/tdata\n"
+                "   - Linux: ~/.local/share/TelegramDesktop/tdata\n"
+                "4. Upload the complete tdata folder"
             )
 
         # Use first account
@@ -151,13 +163,23 @@ class TDataConverter:
 
                 if "passcode" in error_msg.lower() or "password" in error_msg.lower():
                     raise TDataError(
-                        "TData is protected with local passcode. "
-                        "Please disable passcode in Telegram Desktop settings."
+                        "TData is protected with a local passcode.\n\n"
+                        "How to fix:\n"
+                        "1. Open Telegram Desktop\n"
+                        "2. Go to Settings -> Privacy & Security\n"
+                        "3. Find 'Local Passcode' and turn it off\n"
+                        "4. Restart Telegram Desktop\n"
+                        "5. Close Telegram Desktop completely\n"
+                        "6. Export the tdata folder again"
                     )
-                elif "not found" in error_msg.lower():
+                elif "not found" in error_msg.lower() or "no such file" in error_msg.lower():
                     raise TDataError(
-                        "Required files missing in tdata folder. "
-                        "Make sure to export complete tdata folder."
+                        "Required files missing in tdata folder.\n\n"
+                        "The folder should contain:\n"
+                        "  - key_data or key_datas file\n"
+                        "  - D877xxxxx folders\n\n"
+                        "Make sure to export the complete tdata folder.\n"
+                        "Close Telegram Desktop before copying."
                     )
                 else:
                     raise TDataError(f"tdesktop-decrypter failed: {error_msg}")
@@ -171,7 +193,13 @@ class TDataConverter:
                 raise TDataError(f"Failed to parse tdesktop-decrypter output: {e}")
 
         except asyncio.TimeoutError:
-            raise TDataError("TData extraction timed out (60 seconds)")
+            raise TDataError(
+                "TData extraction timed out (60 seconds).\n\n"
+                "This can happen when:\n"
+                "- TData folder is very large\n"
+                "- System is under heavy load\n\n"
+                "Try again in a few minutes."
+            )
         except FileNotFoundError:
             raise TDataError(
                 "tdesktop-decrypter not found. Install it with:\n"
@@ -358,6 +386,25 @@ class TDataConverter:
             timeout=10,
         )
 
+        # Test proxy before connecting to Telegram
+        if proxy:
+            logger.info("Testing proxy before Telegram connection...")
+            proxy_test = await client._test_proxy_connection()
+            if not proxy_test.get("success"):
+                error_msg = proxy_test.get("error", "Unknown error")
+                proxy_type = proxy.get("type") or proxy.get("proxy_type") or "unknown"
+                proxy_addr = proxy.get("host") or proxy.get("addr") or "unknown"
+                proxy_port = proxy.get("port", "")
+                raise TDataError(
+                    f"Proxy is not working: {error_msg}\n\n"
+                    f"Proxy: {proxy_type}://{proxy_addr}:{proxy_port}\n\n"
+                    "Please check:\n"
+                    "1. Proxy is online and accessible\n"
+                    "2. Username and password are correct\n"
+                    "3. Proxy supports Telegram connections (CONNECT for HTTP)"
+                )
+            logger.info(f"Proxy test passed ({proxy_test.get('response_time', 0):.2f}s)")
+
         try:
             async with client:
                 await client.check_auth()
@@ -368,26 +415,152 @@ class TDataConverter:
 
                 logger.info(f"User: {me.id} (@{me.username})")
 
+                # Get bio via GetFullUserRequest
+                user_bio = ""
+                try:
+                    from telethon.tl.functions.users import GetFullUserRequest
+                    from telethon.tl.types import InputUserSelf
+
+                    full_user_result = await client.client(
+                        GetFullUserRequest(InputUserSelf())
+                    )
+                    if full_user_result and full_user_result.full_user:
+                        user_bio = getattr(full_user_result.full_user, "about", None) or ""
+                        logger.info(f"Bio retrieved: {len(user_bio)} chars")
+                except Exception as bio_err:
+                    logger.warning(f"Could not retrieve bio: {bio_err}")
+
                 return {
                     "telegram_id": me.id,
                     "username": me.username,
                     "first_name": me.first_name,
                     "last_name": me.last_name,
                     "phone": me.phone,
+                    "bio": user_bio,
+                    "is_bot": getattr(me, "bot", False),
+                    "is_verified": getattr(me, "verified", False),
                     "is_premium": getattr(me, "premium", False),
                     "session_string": session_string,
                     "source": "tdata",
+                    "converter_version": "tdesktop-decrypter",
                 }
 
         except (UnauthorizedError, SessionExpiredError) as e:
             raise TDataError(
-                f"TData converted but account is invalid: {e}. "
-                "The account may be logged out or deactivated."
+                f"TData converted successfully, but the account is invalid.\n\n"
+                f"Error: {e}\n\n"
+                "This means:\n"
+                "- The TData is old or the account was logged out\n"
+                "- You need to re-authorize in Telegram Desktop\n"
+                "- Or use a different, active TData folder"
             )
+        except TDataError:
+            raise
         except Exception as e:
             if "proxy" in str(e).lower() or "connection" in str(e).lower():
-                raise TDataError(f"Connection error: {e}. Check your proxy settings.")
+                raise TDataError(
+                    f"Connection error during validation.\n\n"
+                    "Possible causes:\n"
+                    "- Proxy is not working or offline\n"
+                    "- Proxy is blocked or doesn't support Telegram\n"
+                    "- Invalid proxy credentials\n\n"
+                    "Try using a SOCKS5 proxy instead of HTTP."
+                )
             raise
+
+
+    async def convert_and_save(
+        self,
+        tdata_path: str,
+        output_dir: str,
+        proxy: Optional[Dict] = None,
+        api_id: Optional[int] = None,
+        api_hash: Optional[str] = None,
+    ) -> Tuple[str, str]:
+        """
+        Convert tdata and save session + JSON to files.
+
+        Args:
+            tdata_path: Path to tdata folder
+            output_dir: Directory for saving output files
+            proxy: Proxy config
+            api_id: API ID
+            api_hash: API Hash
+
+        Returns:
+            Tuple[session_file_path, json_file_path]
+        """
+        session_string, metadata = await self.convert_tdata(
+            tdata_path, proxy, api_id, api_hash
+        )
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        phone = metadata.get("phone", "unknown")
+        session_file = os.path.join(output_dir, f"{phone}.session")
+        json_file = os.path.join(output_dir, f"{phone}.json")
+
+        with open(session_file, "w") as f:
+            f.write(session_string)
+
+        with open(json_file, "w") as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+        logger.info(f"Files saved: {session_file}, {json_file}")
+        return session_file, json_file
+
+
+class SimpleTDataConverter:
+    """
+    Simplified tdata validator for quick structure checks.
+    No network operations — only validates local file structure.
+    """
+
+    @staticmethod
+    async def extract_session_from_tdata(
+        tdata_path: str, phone_number: str
+    ) -> Optional[Dict]:
+        """
+        Validate tdata structure and return basic info.
+
+        Args:
+            tdata_path: Path to tdata folder
+            phone_number: Phone number of the account
+
+        Returns:
+            Dict with validation info, or None if invalid
+        """
+        tdata_dir = Path(tdata_path)
+
+        if not tdata_dir.exists():
+            return None
+
+        # Look for key_data or key_datas
+        has_key_file = False
+        for key_file in ["key_data", "key_datas"]:
+            if (tdata_dir / key_file).exists():
+                has_key_file = True
+                break
+
+        if not has_key_file:
+            # Check nested tdata subfolder
+            tdata_subdir = tdata_dir / "tdata"
+            if tdata_subdir.exists():
+                for key_file in ["key_data", "key_datas"]:
+                    if (tdata_subdir / key_file).exists():
+                        has_key_file = True
+                        break
+
+        if not has_key_file:
+            return None
+
+        return {
+            "tdata_path": str(tdata_path),
+            "phone_number": phone_number,
+            "has_key_file": True,
+            "requires_conversion": True,
+            "message": "TData found but needs full conversion with tdesktop-decrypter",
+        }
 
 
 async def convert_tdata_to_session(

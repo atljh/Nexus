@@ -3,13 +3,22 @@ Proxy checker with parallel execution and GEO detection.
 Based on GramGPT implementation.
 """
 import asyncio
+import base64
 import time
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
+from urllib.parse import urlparse
 
 import aiohttp
 from aiohttp_socks import ProxyConnector
+
+
+# Telegram MTProto DC servers for connectivity test
+TELEGRAM_DC_SERVERS = [
+    ("149.154.167.50", 443),  # DC2
+    ("149.154.175.53", 443),  # DC1
+]
 
 
 class ProxyStatus(str, Enum):
@@ -73,6 +82,24 @@ class ProxyChecker:
             status=ProxyStatus.NOT_WORKING
         )
 
+        # Test Telegram DC reachability first
+        parsed = urlparse(proxy_url)
+        if parsed.scheme and parsed.scheme.startswith("socks"):
+            telegram_test = await self._test_socks_proxy_telegram(proxy_url)
+            if not telegram_test["success"]:
+                result.error = telegram_test["error"]
+                return result
+        elif parsed.scheme in ("http", "https"):
+            telegram_test = await self._test_http_proxy_connect(
+                proxy_host=parsed.hostname,
+                proxy_port=parsed.port,
+                username=parsed.username,
+                password=parsed.password,
+            )
+            if not telegram_test["success"]:
+                result.error = telegram_test["error"]
+                return result
+
         for attempt in range(self.max_retries):
             for test_url in self.TEST_URLS:
                 try:
@@ -117,6 +144,110 @@ class ProxyChecker:
                     result.error = str(e)
 
         return result
+
+    async def _test_socks_proxy_telegram(self, proxy_url: str) -> Dict[str, Any]:
+        """
+        Test SOCKS proxy connectivity to Telegram DC servers.
+        Makes a TCP connection through the SOCKS proxy to DC servers.
+        """
+        try:
+            from python_socks.async_.asyncio import Proxy
+        except ImportError:
+            # If python-socks not installed, skip the check
+            return {"success": True, "error": None}
+
+        for dc_host, dc_port in TELEGRAM_DC_SERVERS:
+            try:
+                proxy = Proxy.from_url(proxy_url)
+                sock = await asyncio.wait_for(
+                    proxy.connect(dest_host=dc_host, dest_port=dc_port),
+                    timeout=10,
+                )
+                sock.close()
+                return {"success": True, "error": None}
+            except asyncio.TimeoutError:
+                continue
+            except Exception:
+                continue
+
+        return {
+            "success": False,
+            "error": "Proxy cannot connect to Telegram servers. Telegram may be blocked on this proxy.",
+        }
+
+    async def _test_http_proxy_connect(
+        self,
+        proxy_host: str,
+        proxy_port: int,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Test HTTP proxy CONNECT method to Telegram DC servers.
+        Many HTTP proxies work for regular traffic but don't support CONNECT tunneling
+        needed for Telegram MTProto.
+        """
+        for dc_host, dc_port in TELEGRAM_DC_SERVERS:
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(proxy_host, proxy_port), timeout=5
+                )
+            except Exception:
+                continue
+
+            try:
+                connect_request = f"CONNECT {dc_host}:{dc_port} HTTP/1.1\r\n"
+                connect_request += f"Host: {dc_host}:{dc_port}\r\n"
+
+                if username and password:
+                    credentials = base64.b64encode(
+                        f"{username}:{password}".encode()
+                    ).decode()
+                    connect_request += f"Proxy-Authorization: Basic {credentials}\r\n"
+
+                connect_request += "\r\n"
+
+                writer.write(connect_request.encode())
+                await writer.drain()
+
+                response = await asyncio.wait_for(reader.readline(), timeout=5)
+                response_str = response.decode().strip()
+
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+
+                if "200" in response_str:
+                    return {"success": True, "error": None}
+                elif "407" in response_str:
+                    return {"success": False, "error": "Invalid proxy username or password"}
+                elif "403" in response_str:
+                    return {"success": False, "error": "Proxy blocked connection to Telegram"}
+                else:
+                    return {
+                        "success": False,
+                        "error": "This proxy does not support Telegram connections (no CONNECT support)",
+                    }
+
+            except asyncio.TimeoutError:
+                try:
+                    writer.close()
+                except Exception:
+                    pass
+                continue
+            except Exception:
+                try:
+                    writer.close()
+                except Exception:
+                    pass
+                continue
+
+        return {
+            "success": False,
+            "error": "Could not connect to Telegram servers through this proxy",
+        }
 
     async def check_batch(
         self,
