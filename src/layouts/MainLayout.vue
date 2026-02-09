@@ -40,7 +40,6 @@ function toggleTheme() {
           <div class="logo-icon">
             <i class="pi pi-bolt"></i>
           </div>
-          <span class="logo-text">Nexus</span>
         </div>
       </div>
 
@@ -59,10 +58,6 @@ function toggleTheme() {
 
       <div class="sidebar-footer">
         <div class="footer-row">
-          <div class="backend-status">
-            <span class="status-dot connected"></span>
-            <span class="status-text">{{ t('sidebar.backendConnected') }}</span>
-          </div>
           <button class="theme-toggle" @click="toggleTheme" :title="themeStore.resolvedTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'">
             <i :class="['pi', themeIcon]"></i>
           </button>

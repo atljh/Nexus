@@ -264,9 +264,9 @@ async def update_account(
         raise HTTPException(status_code=404, detail="Account not found")
 
     if data.proxy_id is not None:
-        account.proxy_id = data.proxy_id
+        account.proxy_id = data.proxy_id if data.proxy_id != 0 else None
     if data.group_id is not None:
-        account.group_id = data.group_id
+        account.group_id = data.group_id if data.group_id != 0 else None
     if data.tag_ids is not None:
         tags_result = await session.execute(
             select(AccountTag).where(AccountTag.id.in_(data.tag_ids))
@@ -274,7 +274,15 @@ async def update_account(
         account.tags = list(tags_result.scalars().all())
 
     await session.commit()
-    await session.refresh(account)
+
+    # Re-fetch with all relations loaded
+    fresh_query = select(Account).options(
+        selectinload(Account.proxy),
+        selectinload(Account.group),
+        selectinload(Account.tags)
+    ).where(Account.id == account_id)
+    fresh_result = await session.execute(fresh_query)
+    account = fresh_result.scalar_one()
 
     return account.to_dict()
 
@@ -1720,6 +1728,30 @@ async def parse_tdata_folder(
                 if tdata_root not in tdata_groups:
                     tdata_groups[tdata_root] = []
                 tdata_groups[tdata_root].append((file, rel_path))
+
+        # Fallback: selected folder IS a tdata folder (not named "tdata")
+        # Detect by presence of key_data/key_datas among uploaded files
+        if not tdata_groups:
+            has_key_data = any(
+                (f.filename or "").replace('\\', '/').split('/')[-1] in ("key_data", "key_datas")
+                for f in tdata_files
+            )
+            if has_key_data:
+                # Determine root folder name from first file
+                root_folder = None
+                for f in tdata_files:
+                    normalized = (f.filename or "").replace('\\', '/')
+                    parts = normalized.split('/')
+                    if len(parts) >= 2:
+                        root_folder = parts[0]
+                        break
+                if root_folder:
+                    for f in tdata_files:
+                        normalized = (f.filename or "").replace('\\', '/')
+                        prefix = root_folder + '/'
+                        if normalized.startswith(prefix):
+                            rel_path = normalized[len(prefix):]
+                            tdata_groups.setdefault(root_folder, []).append((f, rel_path))
 
         if not tdata_groups:
             return {

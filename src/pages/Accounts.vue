@@ -17,6 +17,7 @@ import Column from 'primevue/column'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Dropdown from 'primevue/dropdown'
+import MultiSelect from 'primevue/multiselect'
 import Tag from 'primevue/tag'
 import ProgressBar from 'primevue/progressbar'
 import Checkbox from 'primevue/checkbox'
@@ -268,14 +269,30 @@ function handleFolderSelect(event: Event) {
   if (input.files && input.files.length > 0) {
     // Filter tdata-relevant files from selected folder (can contain multiple tdata folders)
     const files = Array.from(input.files)
-    const tdataRelevant = files.filter(f => {
+
+    // Strategy 1: path contains /tdata/ subfolder
+    let tdataRelevant = files.filter(f => {
       const path = (f.webkitRelativePath || f.name).replace(/\\/g, '/')
-      // Check if path contains tdata folder (either at start or as subfolder)
       const hasTdata = path.startsWith('tdata/') || path.includes('/tdata/')
-      // Include key_data, key_datas, and tdata session files (D877F783D5D3EF8C pattern or 16 hex chars)
       const isRelevantFile = path.includes('key_data') || /[0-9A-F]{16}/.test(path)
       return hasTdata && isRelevantFile
     })
+
+    // Strategy 2: selected folder IS a tdata folder (named differently, e.g. tdata_unauth)
+    // Detect by presence of key_data/key_datas at root level
+    if (tdataRelevant.length === 0) {
+      const hasKeyData = files.some(f => {
+        const path = (f.webkitRelativePath || f.name).replace(/\\/g, '/')
+        const parts = path.split('/')
+        return parts.length === 2 && (parts[1] === 'key_data' || parts[1] === 'key_datas')
+      })
+      if (hasKeyData) {
+        tdataRelevant = files.filter(f => {
+          const path = (f.webkitRelativePath || f.name).replace(/\\/g, '/')
+          return path.includes('key_data') || /[0-9A-F]{16}/.test(path)
+        })
+      }
+    }
 
     if (tdataRelevant.length > 0) {
       // Count unique tdata folders found
@@ -1099,6 +1116,22 @@ function selectGroup(groupId: number | null) {
   accountStore.setFilter('group_id', groupId || undefined)
 }
 
+async function onGroupChange(accountId: number, groupId: number | null) {
+  try {
+    await accountStore.updateAccount(accountId, { group_id: groupId ?? 0 })
+  } catch (e: any) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: e.message, life: 3000 })
+  }
+}
+
+async function onTagsChange(accountId: number, tagIds: number[]) {
+  try {
+    await accountStore.updateAccount(accountId, { tag_ids: tagIds })
+  } catch (e: any) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: e.message, life: 3000 })
+  }
+}
+
 function setStatusFilter(status: AccountStatus | null) {
   accountStore.setFilter('status', status || undefined)
 }
@@ -1352,19 +1385,10 @@ function onRowUnselect(event: any) {
           <div class="page-header">
             <h1 class="page-title">{{ t('accounts.title') }}</h1>
             <div class="header-actions">
-              <Button
-                :label="t('accounts.addAccount')"
-                icon="pi pi-plus"
-                size="small"
-                @click="showAddAccountDialog = true"
-              />
-              <Button
-                :label="t('accounts.import')"
-                icon="pi pi-upload"
-                severity="secondary"
-                size="small"
-                @click="showImportDialog = true"
-              />
+              <button class="import-btn" @click="showImportDialog = true">
+                <i class="pi pi-upload"></i>
+                {{ t('accounts.import') }}
+              </button>
               <Button
                 :label="t('accounts.checkAll')"
                 icon="pi pi-refresh"
@@ -1485,23 +1509,40 @@ function onRowUnselect(event: any) {
                 </template>
               </Column>
 
-              <Column :header="t('accounts.group')" style="width: 120px">
+              <Column :header="t('accounts.group')" style="width: 140px">
                 <template #body="{ data }">
-                  <span v-if="data.group" class="group-text">{{ data.group.name }}</span>
-                  <span v-else class="no-data">—</span>
+                  <Dropdown
+                    :model-value="data.group_id"
+                    :options="groupStore.groups"
+                    optionLabel="name"
+                    optionValue="id"
+                    :placeholder="'—'"
+                    showClear
+                    class="inline-dropdown"
+                    @update:model-value="onGroupChange(data.id, $event)"
+                  />
                 </template>
               </Column>
 
-              <Column :header="t('accounts.tags')" style="width: 140px">
+              <Column :header="t('accounts.tags')" style="width: 180px">
                 <template #body="{ data }">
-                  <div class="tags-cell">
-                    <Tag
-                      v-for="tag in data.tags"
-                      :key="tag.id"
-                      :value="tag.name"
-                      :style="{ backgroundColor: tag.color }"
-                    />
-                  </div>
+                  <MultiSelect
+                    :model-value="data.tags?.map((t: any) => t.id) ?? []"
+                    :options="tagStore.tags"
+                    optionLabel="name"
+                    optionValue="id"
+                    :placeholder="'—'"
+                    :maxSelectedLabels="2"
+                    class="inline-multiselect"
+                    @update:model-value="onTagsChange(data.id, $event)"
+                  >
+                    <template #option="{ option }">
+                      <div class="tag-option">
+                        <span class="tag-dot" :style="{ backgroundColor: option.color }"></span>
+                        {{ option.name }}
+                      </div>
+                    </template>
+                  </MultiSelect>
                 </template>
               </Column>
 
@@ -1562,7 +1603,7 @@ function onRowUnselect(event: any) {
         v-model:visible="showImportDialog"
         :header="t('accounts.importDialog.title')"
         modal
-        :style="{ width: '1000px' }"
+        :style="{ width: '1200px' }"
         :closable="!parsing && !verifying && !saving"
         class="custom-dialog import-dialog-unified"
         @hide="resetImportDialog"
@@ -2230,6 +2271,30 @@ function onRowUnselect(event: any) {
 .header-actions {
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+
+.import-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 1.1rem;
+  padding: 0.7rem 1.8rem;
+  background: linear-gradient(135deg, #9333ea, #a855f7, #c084fc);
+  border: 2px solid rgba(168, 85, 247, 0.6);
+  border-radius: 10px;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 0 16px rgba(168, 85, 247, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+  letter-spacing: 0.3px;
+}
+.import-btn:hover {
+  background: linear-gradient(135deg, #a855f7, #c084fc, #d8b4fe);
+  border-color: rgba(192, 132, 252, 0.8);
+  box-shadow: 0 0 28px rgba(168, 85, 247, 0.7), 0 6px 16px rgba(0, 0, 0, 0.3);
+  transform: translateY(-1px);
 }
 
 /* Filters Bar */
@@ -2351,23 +2416,67 @@ function onRowUnselect(event: any) {
   display: block;
 }
 
-.group-text {
+.inline-dropdown,
+.inline-multiselect {
+  width: 100%;
+}
+
+:deep(.inline-dropdown .p-dropdown),
+:deep(.inline-multiselect .p-multiselect) {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  min-height: 28px;
+  font-size: 12px;
+  transition: border-color 0.15s;
+}
+
+:deep(.inline-dropdown .p-dropdown:hover),
+:deep(.inline-multiselect .p-multiselect:hover) {
+  border-color: #374151;
+}
+
+:deep(.inline-dropdown .p-dropdown:focus),
+:deep(.inline-multiselect .p-multiselect:focus),
+:deep(.inline-dropdown .p-dropdown.p-focus),
+:deep(.inline-multiselect .p-multiselect.p-focus) {
+  border-color: #6366f1;
+  box-shadow: none;
+}
+
+:deep(.inline-dropdown .p-dropdown-label),
+:deep(.inline-multiselect .p-multiselect-label) {
+  padding: 2px 8px;
   font-size: 12px;
   color: #9ca3af;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+:deep(.inline-dropdown .p-dropdown-trigger),
+:deep(.inline-multiselect .p-multiselect-trigger) {
+  width: 24px;
+}
+
+:deep(.inline-dropdown .p-dropdown-clear-icon) {
+  font-size: 10px;
+}
+
+.tag-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.tag-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .no-data {
   color: #4b5563;
   font-size: 12px;
-}
-
-.tags-cell {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
 }
 
 .actions-cell {
