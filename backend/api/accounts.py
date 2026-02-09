@@ -1119,6 +1119,13 @@ class TwoFARemoveRequest(BaseModel):
     current_password: str
 
 
+class TwoFABulkSetRequest(BaseModel):
+    account_ids: List[int]
+    password: str
+    hint: Optional[str] = ""
+    max_concurrent: int = 3
+
+
 @router.get("/{account_id}/2fa/status")
 async def get_2fa_status(
     account_id: int,
@@ -1342,6 +1349,83 @@ async def remove_2fa(
     await session.commit()
 
     return {"success": True, "message": "2FA removed successfully"}
+
+
+@router.post("/2fa/bulk-set")
+async def bulk_set_2fa(
+    data: TwoFABulkSetRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    """Set 2FA password on multiple accounts in parallel."""
+    import asyncio
+
+    query = select(Account).options(
+        selectinload(Account.proxy)
+    ).where(Account.id.in_(data.account_ids))
+
+    result = await session.execute(query)
+    accounts = list(result.scalars().all())
+
+    if not accounts:
+        return {"success": False, "results": [], "error": "No accounts found"}
+
+    semaphore = asyncio.Semaphore(data.max_concurrent)
+    results = []
+
+    async def set_2fa_for_account(account):
+        async with semaphore:
+            if not account.session_string:
+                return {"id": account.id, "success": False, "error": "No session string"}
+
+            if account.has_2fa:
+                return {"id": account.id, "success": False, "error": "2FA already enabled"}
+
+            proxy_config = None
+            if account.proxy:
+                proxy_config = {
+                    "type": account.proxy.type,
+                    "host": account.proxy.host,
+                    "port": account.proxy.port,
+                    "username": account.proxy.username,
+                    "password": account.proxy.password,
+                }
+
+            try:
+                set_result = await two_factor_manager.set_2fa(
+                    account.session_string,
+                    new_password=data.password,
+                    hint=data.hint or "",
+                    proxy=proxy_config,
+                    api_id=account.api_id,
+                    api_hash=account.api_hash,
+                    device_fingerprint=account.device_fingerprint,
+                    unique_id=account.phone or str(account.telegram_id),
+                )
+
+                if set_result.success:
+                    account.has_2fa = True
+                    account.password_hint = data.hint
+                    account.two_fa_password = encryption_service.encrypt(data.password)
+                    account.two_fa_set_at = datetime.utcnow()
+                    return {"id": account.id, "success": True}
+                else:
+                    return {"id": account.id, "success": False, "error": set_result.error}
+            except Exception as e:
+                return {"id": account.id, "success": False, "error": str(e)}
+
+    tasks = [set_2fa_for_account(acc) for acc in accounts]
+    results = await asyncio.gather(*tasks)
+
+    await session.commit()
+
+    success_count = sum(1 for r in results if r["success"])
+    return {
+        "success": True,
+        "results": results,
+        "total": len(accounts),
+        "succeeded": success_count,
+        "failed": len(accounts) - success_count,
+    }
 
 
 # ============================================================

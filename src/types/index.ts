@@ -12,6 +12,7 @@ export interface Account {
   register_time: string | null
   has_2fa: boolean
   password_hint: string | null
+  two_fa_password: string | null
   two_fa_set_at: string | null
   metadata: Record<string, unknown> | null
   proxy: Proxy | null
@@ -32,6 +33,7 @@ export type AccountStatus =
   | 'banned'
   | 'muted'
   | 'spamblock'
+  | 'frozen'
   | 'session_expired'
   | 'deactivated'
   | 'needs_reauth'
@@ -96,6 +98,7 @@ export interface AccountFilters {
   status?: AccountStatus | null
   group_id?: number | null
   tag_id?: number | null
+  proxy_id?: number | null
   search?: string
 }
 

@@ -85,6 +85,14 @@ const folderInput = ref<HTMLInputElement | null>(null)
 // Batch check options
 const batchCheckSpamblock = ref(false)
 const batchCheckMaxConcurrent = ref(3)
+// Bulk 2FA state
+const showBulk2FADialog = ref(false)
+const bulk2FAPassword = ref('')
+const bulk2FAHint = ref('')
+const bulk2FALoading = ref(false)
+// Bulk proxy check state
+const bulkProxyChecking = ref(false)
+const checkingProxyIds = ref<Set<number>>(new Set())
 
 // New Import Flow State
 const importStep = ref<'upload' | 'preview'>('upload')
@@ -121,6 +129,14 @@ function addImportLog(type: 'info' | 'success' | 'error' | 'warn', message: stri
 }
 
 // Computed
+// Bridge: DataTable expects array of row objects, store holds array of IDs
+const selectedRows = computed({
+  get: () => accountStore.filteredAccounts.filter(a => accountStore.selectedIds.includes(a.id)),
+  set: (rows: Account[]) => {
+    accountStore.selectedIds = rows.map(r => r.id)
+  }
+})
+
 const selectedIds = computed({
   get: () => accountStore.selectedIds,
   set: (val) => {
@@ -129,6 +145,10 @@ const selectedIds = computed({
 })
 
 const hasSelection = computed(() => selectedIds.value.length > 0)
+const allSelected = computed(() =>
+  accountStore.filteredAccounts.length > 0 &&
+  selectedIds.value.length === accountStore.filteredAccounts.length
+)
 
 // Import flow computed
 const allParsedHaveProxy = computed(() =>
@@ -175,6 +195,13 @@ const accountsWithProxy = computed(() =>
 )
 
 
+const proxyFilterOptions = computed(() =>
+  proxyStore.proxies.map(p => ({
+    label: `${p.host}:${p.port}`,
+    value: p.id
+  }))
+)
+
 const statusOptions = computed(() => [
   { label: t('accounts.allStatuses'), value: null },
   { label: t('accounts.status.valid'), value: 'valid' },
@@ -182,6 +209,7 @@ const statusOptions = computed(() => [
   { label: t('accounts.status.banned'), value: 'banned' },
   { label: t('accounts.status.muted'), value: 'muted' },
   { label: t('accounts.status.spamblock'), value: 'spamblock' },
+  { label: t('accounts.status.frozen'), value: 'frozen' },
   { label: t('accounts.status.session_expired'), value: 'session_expired' },
   { label: t('accounts.status.deactivated'), value: 'deactivated' },
   { label: t('accounts.status.needs_reauth'), value: 'needs_reauth' },
@@ -189,11 +217,6 @@ const statusOptions = computed(() => [
 ])
 
 const bulkMenuItems = computed(() => [
-  {
-    label: t('accounts.bulk.check'),
-    icon: 'pi pi-refresh',
-    command: () => showBatchCheckDialog.value = true
-  },
   {
     label: t('accounts.bulk.setProxy'),
     icon: 'pi pi-globe',
@@ -215,13 +238,6 @@ const bulkMenuItems = computed(() => [
         command: () => handleBulkAction('set_group', g.id)
       }))
     ]
-  },
-  { separator: true },
-  {
-    label: t('accounts.bulk.delete'),
-    icon: 'pi pi-trash',
-    class: 'text-red-500',
-    command: () => confirmBulkDelete()
   }
 ])
 
@@ -1110,6 +1126,65 @@ async function checkBatchSelected() {
   }
 }
 
+async function checkBulkProxies() {
+  const proxyIds = [...new Set(
+    accountStore.filteredAccounts
+      .filter(a => selectedIds.value.includes(a.id) && a.proxy_id)
+      .map(a => a.proxy_id!)
+  )]
+
+  if (proxyIds.length === 0) {
+    toast.add({ severity: 'warn', summary: t('common.warning'), detail: t('accounts.messages.noProxiesToCheck'), life: 3000 })
+    return
+  }
+
+  bulkProxyChecking.value = true
+  checkingProxyIds.value = new Set(proxyIds)
+  try {
+    const result = await proxyStore.checkBatchProxies(proxyIds)
+    const working = result.results.filter(r => r.status === 'working' || r.status === 'slow').length
+    toast.add({
+      severity: 'success',
+      summary: t('common.success'),
+      detail: t('accounts.messages.proxyCheckComplete', { working, total: result.results.length }),
+      life: 5000
+    })
+  } catch (error: any) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: error.message, life: 5000 })
+  } finally {
+    bulkProxyChecking.value = false
+    checkingProxyIds.value = new Set()
+  }
+}
+
+async function handleBulk2FASet() {
+  if (!bulk2FAPassword.value.trim()) return
+
+  bulk2FALoading.value = true
+  try {
+    const result = await accountStore.bulkSet2FA(
+      selectedIds.value,
+      bulk2FAPassword.value.trim(),
+      bulk2FAHint.value.trim() || undefined
+    )
+
+    toast.add({
+      severity: result.succeeded > 0 ? 'success' : 'error',
+      summary: result.succeeded > 0 ? t('common.success') : t('common.error'),
+      detail: t('accounts.messages.bulk2FAComplete', { succeeded: result.succeeded, failed: result.failed }),
+      life: 5000
+    })
+
+    showBulk2FADialog.value = false
+    bulk2FAPassword.value = ''
+    bulk2FAHint.value = ''
+  } catch (error: any) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: error.message, life: 5000 })
+  } finally {
+    bulk2FALoading.value = false
+  }
+}
+
 
 function selectGroup(groupId: number | null) {
   groupStore.selectGroup(groupId)
@@ -1234,6 +1309,7 @@ function getStatusSeverity(status: string): "success" | "info" | "warn" | "dange
     case 'deactivated': return 'danger'
     case 'muted': return 'warn'
     case 'spamblock': return 'warn'
+    case 'frozen': return 'info'
     case 'session_expired': return 'warn'
     case 'needs_reauth': return 'warn'
     case 'connection_failed': return 'warn'
@@ -1270,13 +1346,7 @@ function handleAccountAdded() {
   })
 }
 
-function onRowSelect(event: any) {
-  accountStore.toggleSelection(event.data.id)
-}
-
-function onRowUnselect(event: any) {
-  accountStore.toggleSelection(event.data.id)
-}
+// Row select/unselect handled by v-model:selection bridge (selectedRows)
 </script>
 
 <template>
@@ -1389,14 +1459,14 @@ function onRowUnselect(event: any) {
                 <i class="pi pi-upload"></i>
                 {{ t('accounts.import') }}
               </button>
-              <Button
-                :label="t('accounts.checkAll')"
-                icon="pi pi-refresh"
-                severity="secondary"
-                size="small"
-                @click="checkAllAccounts"
+              <button
+                class="import-btn"
                 :disabled="accountStore.accounts.length === 0"
-              />
+                @click="checkAllAccounts"
+              >
+                <i class="pi pi-refresh"></i>
+                {{ t('accounts.checkAll') }}
+              </button>
             </div>
           </div>
 
@@ -1424,43 +1494,32 @@ function onRowUnselect(event: any) {
               showClear
             />
 
-            <div v-if="hasSelection" class="bulk-actions">
-              <span class="selection-count">
-                {{ t('accounts.selected', { count: selectedIds.length }) }}
-              </span>
-              <Button
-                :label="t('accounts.bulk.actions')"
-                icon="pi pi-chevron-down"
-                iconPos="right"
-                severity="secondary"
-                @click="toggleBulkMenu"
-              />
-              <Menu ref="bulkMenu" :model="bulkMenuItems" :popup="true" />
-              <Button
-                icon="pi pi-times"
-                severity="secondary"
-                text
-                rounded
-                :aria-label="t('accounts.bulk.clearSelection')"
-                v-tooltip.top="t('accounts.bulk.clearSelection')"
-                @click="accountStore.clearSelection"
-              />
-            </div>
+            <Dropdown
+              :model-value="accountStore.filters.proxy_id"
+              :options="proxyFilterOptions"
+              optionLabel="label"
+              optionValue="value"
+              :placeholder="t('accounts.filterByProxy')"
+              @update:model-value="(val: number | null) => accountStore.setFilter('proxy_id', val || undefined)"
+              class="proxy-filter"
+              showClear
+              filter
+              :filterPlaceholder="t('accounts.searchProxy')"
+            />
+
+            <Menu ref="bulkMenu" :model="bulkMenuItems" :popup="true" />
           </div>
 
           <!-- Accounts Table -->
           <div class="table-card">
             <DataTable
-              v-model:selection="selectedIds"
+              v-model:selection="selectedRows"
               :value="accountStore.filteredAccounts"
               :loading="accountStore.loading"
               paginator
               :rows="20"
               dataKey="id"
               class="custom-table"
-              selectionMode="multiple"
-              @row-select="onRowSelect"
-              @row-unselect="onRowUnselect"
             >
               <template #empty>
                 <div class="empty-state">
@@ -1496,15 +1555,25 @@ function onRowUnselect(event: any) {
 
               <Column field="status" :header="t('common.status')" sortable style="width: 110px">
                 <template #body="{ data }">
-                  <Tag :value="t(`accounts.status.${data.status}`)" :severity="getStatusSeverity(data.status)" />
+                  <div v-if="data.status === 'checking'" class="checking-status">
+                    <i class="pi pi-spin pi-spinner"></i>
+                    <span>{{ t('accounts.status.checking') }}</span>
+                  </div>
+                  <Tag v-else :value="t(`accounts.status.${data.status}`)" :severity="getStatusSeverity(data.status)" />
                 </template>
               </Column>
 
-              <Column :header="t('accounts.proxy')" style="width: 140px">
+              <Column :header="t('accounts.proxy')" style="width: 150px">
                 <template #body="{ data }">
-                  <span v-if="data.proxy" class="proxy-text">
-                    {{ data.proxy.host }}:{{ data.proxy.port }}
-                  </span>
+                  <div v-if="data.proxy" class="proxy-cell">
+                    <i v-if="checkingProxyIds.has(data.proxy_id)" class="pi pi-spin pi-spinner proxy-spinner"></i>
+                    <span
+                      class="proxy-text"
+                      :class="{ 'proxy-working': data.proxy.status === 'working', 'proxy-bad': data.proxy.status === 'not_working' || data.proxy.status === 'timeout' }"
+                    >
+                      {{ data.proxy.host }}:{{ data.proxy.port }}
+                    </span>
+                  </div>
                   <span v-else class="no-data">{{ t('accounts.noProxy') }}</span>
                 </template>
               </Column>
@@ -1543,6 +1612,21 @@ function onRowUnselect(event: any) {
                       </div>
                     </template>
                   </MultiSelect>
+                </template>
+              </Column>
+
+              <Column header="2FA" style="width: 120px">
+                <template #body="{ data }">
+                  <div v-if="data.has_2fa" class="twofa-cell">
+                    <i class="pi pi-lock twofa-icon"></i>
+                    <span
+                      v-if="data.two_fa_password"
+                      class="twofa-password"
+                      v-tooltip.top="data.two_fa_password"
+                    >{{ data.two_fa_password }}</span>
+                    <span v-else class="twofa-set">{{ t('accounts.twoFA.enabled') }}</span>
+                  </div>
+                  <span v-else class="no-data">—</span>
                 </template>
               </Column>
 
@@ -2061,6 +2145,50 @@ function onRowUnselect(event: any) {
         </template>
       </Dialog>
 
+      <!-- Bulk 2FA Dialog -->
+      <Dialog
+        v-model:visible="showBulk2FADialog"
+        :header="t('accounts.bulk.set2FATitle')"
+        modal
+        :style="{ width: '420px' }"
+        class="custom-dialog"
+      >
+        <div class="form-field">
+          <p class="description">{{ t('accounts.bulk.set2FADescription', { count: selectedIds.length }) }}</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label">{{ t('accounts.twoFA.password') }}</label>
+          <InputText
+            v-model="bulk2FAPassword"
+            :placeholder="t('accounts.twoFA.enterPassword')"
+            class="w-full"
+          />
+        </div>
+        <div class="form-field">
+          <label class="form-label">{{ t('accounts.twoFA.passwordHint') }}</label>
+          <InputText
+            v-model="bulk2FAHint"
+            :placeholder="t('accounts.twoFA.hintPlaceholder')"
+            class="w-full"
+          />
+        </div>
+        <div class="hint-box">
+          <i class="pi pi-info-circle"></i>
+          <span>{{ t('accounts.bulk.set2FANote') }}</span>
+        </div>
+
+        <template #footer>
+          <Button :label="t('common.cancel')" severity="secondary" @click="showBulk2FADialog = false" />
+          <Button
+            :label="t('accounts.bulk.set2FA')"
+            icon="pi pi-lock"
+            :loading="bulk2FALoading"
+            :disabled="!bulk2FAPassword.trim()"
+            @click="handleBulk2FASet"
+          />
+        </template>
+      </Dialog>
+
       <!-- Add Account Dialog -->
       <AddAccountDialog
         v-model:visible="showAddAccountDialog"
@@ -2081,6 +2209,75 @@ function onRowUnselect(event: any) {
         @close="showWebViewer = false"
       />
     </div>
+
+    <!-- Floating Selection Bar -->
+    <Transition name="slide-up">
+      <div v-if="hasSelection" class="selection-bar">
+        <div class="selection-bar-inner">
+          <div class="selection-info">
+            <Checkbox
+              :model-value="allSelected"
+              binary
+              @update:model-value="allSelected ? accountStore.clearSelection() : accountStore.selectAll()"
+            />
+            <span class="selection-count">
+              {{ t('accounts.selected', { count: selectedIds.length }) }}
+            </span>
+          </div>
+          <div class="selection-actions">
+            <Button
+              :label="t('accounts.bulk.checkAccounts')"
+              icon="pi pi-user-edit"
+              severity="secondary"
+              size="small"
+              :loading="batchChecking"
+              @click="showBatchCheckDialog = true"
+            />
+            <Button
+              :label="t('accounts.bulk.checkProxies')"
+              icon="pi pi-globe"
+              severity="secondary"
+              size="small"
+              :loading="bulkProxyChecking"
+              @click="checkBulkProxies"
+            />
+            <Button
+              :label="t('accounts.bulk.set2FA')"
+              icon="pi pi-lock"
+              severity="secondary"
+              size="small"
+              @click="showBulk2FADialog = true"
+            />
+            <Button
+              :label="t('accounts.bulk.actions')"
+              icon="pi pi-chevron-down"
+              iconPos="right"
+              severity="secondary"
+              size="small"
+              @click="toggleBulkMenu"
+            />
+            <Button
+              icon="pi pi-trash"
+              severity="danger"
+              size="small"
+              rounded
+              text
+              v-tooltip.top="t('accounts.bulk.delete')"
+              @click="confirmBulkDelete"
+            />
+          </div>
+          <Button
+            icon="pi pi-times"
+            severity="secondary"
+            text
+            rounded
+            size="small"
+            v-tooltip.top="t('accounts.bulk.clearSelection')"
+            @click="accountStore.clearSelection"
+          />
+        </div>
+      </div>
+    </Transition>
   </MainLayout>
 </template>
 
@@ -2290,11 +2487,16 @@ function onRowUnselect(event: any) {
   transition: all 0.2s ease;
   letter-spacing: 0.3px;
 }
-.import-btn:hover {
+.import-btn:hover:not(:disabled) {
   background: linear-gradient(135deg, #a855f7, #c084fc, #d8b4fe);
   border-color: rgba(192, 132, 252, 0.8);
   box-shadow: 0 0 28px rgba(168, 85, 247, 0.7), 0 6px 16px rgba(0, 0, 0, 0.3);
   transform: translateY(-1px);
+}
+
+.import-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* Filters Bar */
@@ -2313,19 +2515,62 @@ function onRowUnselect(event: any) {
   width: 160px;
 }
 
-.bulk-actions {
+.proxy-filter {
+  width: 180px;
+}
+
+/* Floating Selection Bar */
+.selection-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+}
+
+.selection-bar-inner {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-left: auto;
-  padding-left: 16px;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  gap: 16px;
+  background: linear-gradient(145deg, #1e1e2e 0%, #181825 100%);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  border-radius: 14px;
+  padding: 10px 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(168, 85, 247, 0.1);
+  backdrop-filter: blur(12px);
+}
+
+.selection-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-right: 16px;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .selection-count {
   font-size: 13px;
   color: #a855f7;
-  font-weight: 500;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Slide-up transition */
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: all 0.25s ease;
+}
+
+.slide-up-enter-from,
+.slide-up-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(20px);
 }
 
 /* Table */
@@ -2406,6 +2651,12 @@ function onRowUnselect(event: any) {
   color: #6b7280;
 }
 
+.proxy-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .proxy-text {
   font-size: 12px;
   color: #9ca3af;
@@ -2413,7 +2664,32 @@ function onRowUnselect(event: any) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  display: block;
+}
+
+.proxy-working {
+  color: #22c55e;
+}
+
+.proxy-bad {
+  color: #ef4444;
+}
+
+.proxy-spinner {
+  color: #a855f7;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.checking-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #60a5fa;
+}
+
+.checking-status i {
+  font-size: 14px;
 }
 
 .inline-dropdown,
@@ -2479,9 +2755,56 @@ function onRowUnselect(event: any) {
   font-size: 12px;
 }
 
-.actions-cell {
+.twofa-cell {
   display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.twofa-icon {
+  color: #22c55e;
+  font-size: 12px;
+}
+
+.twofa-password {
+  font-size: 11px;
+  color: #9ca3af;
+  font-family: monospace;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.twofa-set {
+  font-size: 11px;
+  color: #22c55e;
+}
+
+.hint-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(168, 85, 247, 0.08);
+  border: 1px solid rgba(168, 85, 247, 0.2);
+  border-radius: 8px;
+  font-size: 12px;
+  color: #9ca3af;
+  margin-top: 4px;
+}
+
+.hint-box i {
+  color: #a855f7;
+  margin-top: 1px;
+}
+
+.actions-cell {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
   gap: 2px;
+  justify-content: start;
 }
 
 /* Dialogs */
@@ -2593,6 +2916,15 @@ function onRowUnselect(event: any) {
   background: rgba(168, 85, 247, 0.1);
 }
 
+:deep(.custom-table .p-datatable-tbody > tr.p-highlight > td) {
+  border-color: rgba(168, 85, 247, 0.15);
+}
+
+:deep(.custom-table .p-datatable-thead > tr > th .p-checkbox .p-checkbox-box.p-highlight) {
+  background: #a855f7;
+  border-color: #a855f7;
+}
+
 :deep(.custom-dialog .p-dialog-header) {
   background: #161616;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -2629,13 +2961,17 @@ function onRowUnselect(event: any) {
 }
 
 :deep(.p-checkbox .p-checkbox-box) {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 :deep(.p-checkbox .p-checkbox-box.p-highlight) {
   background: #a855f7;
   border-color: #a855f7;
+}
+
+:deep(.p-checkbox .p-checkbox-box .p-checkbox-icon) {
+  color: #fff;
 }
 
 /* Drop Zone */

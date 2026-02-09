@@ -74,13 +74,18 @@ export const useAccountStore = defineStore('accounts', () => {
       result = result.filter(a => a.tags.some(t => t.id === filters.value.tag_id))
     }
 
+    if (filters.value.proxy_id) {
+      result = result.filter(a => a.proxy_id === filters.value.proxy_id)
+    }
+
     if (filters.value.search) {
       const search = filters.value.search.toLowerCase()
       result = result.filter(a =>
         a.username?.toLowerCase().includes(search) ||
         a.phone?.includes(search) ||
         a.first_name?.toLowerCase().includes(search) ||
-        a.telegram_id?.toString().includes(search)
+        a.telegram_id?.toString().includes(search) ||
+        (a.proxy && `${a.proxy.host}:${a.proxy.port}`.includes(search))
       )
     }
 
@@ -475,6 +480,30 @@ export const useAccountStore = defineStore('accounts', () => {
     return result
   }
 
+  async function bulkSet2FA(accountIds: number[], password: string, hint?: string, maxConcurrent: number = 3) {
+    const result = await window.api.post('/api/accounts/2fa/bulk-set', {
+      account_ids: accountIds,
+      password,
+      hint: hint || '',
+      max_concurrent: maxConcurrent,
+    }) as { success: boolean; results: { id: number; success: boolean; error?: string }[]; succeeded: number; failed: number }
+
+    // Update local accounts
+    for (const r of result.results) {
+      if (r.success) {
+        const account = accounts.value.find(a => a.id === r.id)
+        if (account) {
+          account.has_2fa = true
+          account.password_hint = hint || null
+          account.two_fa_password = password
+          account.two_fa_set_at = new Date().toISOString()
+        }
+      }
+    }
+
+    return result
+  }
+
   // ============================================================
   // Account Authorization Methods
   // ============================================================
@@ -626,6 +655,7 @@ export const useAccountStore = defineStore('accounts', () => {
     set2FA,
     change2FA,
     remove2FA,
+    bulkSet2FA,
     // Auth
     startAuth,
     verifyAuthCode,

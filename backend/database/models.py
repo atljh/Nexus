@@ -199,6 +199,7 @@ class Account(Base):
             "device_fingerprint": self.device_fingerprint,
             "has_2fa": self.has_2fa,
             "password_hint": self.password_hint,
+            "two_fa_password": self._decrypt_2fa_password(),
             "two_fa_set_at": self.two_fa_set_at.isoformat() if self.two_fa_set_at else None,
             "metadata": self.extra_data,
             "proxy": proxy_dict,
@@ -210,6 +211,15 @@ class Account(Base):
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
             "created_at": self.created_at.isoformat()
         }
+
+    def _decrypt_2fa_password(self) -> Optional[str]:
+        if not self.two_fa_password:
+            return None
+        try:
+            from utils.encryption import encryption_service
+            return encryption_service.decrypt_safe(self.two_fa_password)
+        except Exception:
+            return None
 
 
 # Many-to-many relationship table for tasks and accounts
