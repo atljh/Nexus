@@ -30,7 +30,7 @@ onMounted(async () => {
     stats.value.accounts.total = accounts.length
     stats.value.accounts.active = accounts.filter((a: Account) => a.status === 'valid').length
     stats.value.proxies.total = proxies.length
-    stats.value.proxies.working = proxies.filter((p: ProxyItem) => p.status === 'valid').length
+    stats.value.proxies.working = proxies.filter((p: ProxyItem) => p.status === 'working').length
   } catch (error) {
     console.error('Failed to load stats:', error)
   }
@@ -40,81 +40,99 @@ onMounted(async () => {
 <template>
   <MainLayout>
     <div class="dashboard">
-      <h1 class="page-title">{{ t('dashboard.title') }}</h1>
-
-      <!-- Stats cards -->
-      <div class="stats-grid">
+      <!-- Stats Row -->
+      <div class="stats-row">
         <div class="stat-card">
-          <div class="stat-header">
-            <div class="stat-icon stat-icon-purple">
-              <i class="pi pi-users"></i>
-            </div>
-            <span class="stat-label">{{ t('dashboard.accounts') }}</span>
+          <div class="stat-icon-wrap stat-icon-purple">
+            <i class="pi pi-users"></i>
           </div>
-          <div class="stat-value">{{ stats.accounts.total }}</div>
-          <div class="stat-sub">{{ t('dashboard.accountsActive', { count: stats.accounts.active }) }}</div>
+          <div class="stat-content">
+            <div class="stat-value">{{ stats.accounts.total }}</div>
+            <div class="stat-label">{{ t('dashboard.accounts') }}</div>
+            <div class="stat-sub">{{ t('dashboard.accountsActive', { count: stats.accounts.active }) }}</div>
+          </div>
         </div>
 
         <div class="stat-card">
-          <div class="stat-header">
-            <div class="stat-icon stat-icon-blue">
-              <i class="pi pi-globe"></i>
-            </div>
-            <span class="stat-label">{{ t('dashboard.proxies') }}</span>
+          <div class="stat-icon-wrap stat-icon-blue">
+            <i class="pi pi-globe"></i>
           </div>
-          <div class="stat-value">{{ stats.proxies.total }}</div>
-          <div class="stat-sub">{{ t('dashboard.proxiesWorking', { count: stats.proxies.working }) }}</div>
+          <div class="stat-content">
+            <div class="stat-value">{{ stats.proxies.total }}</div>
+            <div class="stat-label">{{ t('dashboard.proxies') }}</div>
+            <div class="stat-sub">{{ t('dashboard.proxiesWorking', { count: stats.proxies.working }) }}</div>
+          </div>
         </div>
 
         <div class="stat-card">
-          <div class="stat-header">
-            <div class="stat-icon stat-icon-green">
-              <i class="pi pi-heart"></i>
-            </div>
-            <span class="stat-label">{{ t('dashboard.likesToday') }}</span>
+          <div class="stat-icon-wrap stat-icon-green">
+            <i class="pi pi-heart"></i>
           </div>
-          <div class="stat-value">{{ stats.likes.today }}</div>
-          <div class="stat-sub">{{ t('dashboard.tasksCount', { count: stats.likes.tasks }) }}</div>
+          <div class="stat-content">
+            <div class="stat-value">{{ stats.likes.today }}</div>
+            <div class="stat-label">{{ t('dashboard.likesToday') }}</div>
+            <div class="stat-sub">{{ t('dashboard.tasksCount', { count: stats.likes.tasks }) }}</div>
+          </div>
         </div>
 
         <div class="stat-card">
-          <div class="stat-header">
-            <div class="stat-icon stat-icon-orange">
-              <i class="pi pi-comments"></i>
-            </div>
-            <span class="stat-label">{{ t('dashboard.commentsToday') }}</span>
+          <div class="stat-icon-wrap stat-icon-orange">
+            <i class="pi pi-comments"></i>
           </div>
-          <div class="stat-value">{{ stats.comments.today }}</div>
-          <div class="stat-sub">{{ t('dashboard.tasksCount', { count: stats.comments.tasks }) }}</div>
+          <div class="stat-content">
+            <div class="stat-value">{{ stats.comments.today }}</div>
+            <div class="stat-label">{{ t('dashboard.commentsToday') }}</div>
+            <div class="stat-sub">{{ t('dashboard.tasksCount', { count: stats.comments.tasks }) }}</div>
+          </div>
         </div>
       </div>
 
-      <!-- Quick actions -->
+      <!-- Quick Actions -->
       <div class="section-card">
         <div class="section-header">
-          <div class="section-icon">
-            <i class="pi pi-bolt"></i>
-          </div>
+          <i class="pi pi-bolt section-icon"></i>
           <h2 class="section-title">{{ t('dashboard.quickActions') }}</h2>
         </div>
         <div class="actions-grid">
           <router-link to="/accounts" class="action-card">
             <div class="action-icon">
-              <i class="pi pi-plus"></i>
+              <i class="pi pi-users"></i>
             </div>
-            <span class="action-label">{{ t('dashboard.addAccount') }}</span>
+            <div class="action-text">
+              <span class="action-label">{{ t('dashboard.addAccount') }}</span>
+              <span class="action-hint">{{ t('dashboard.accounts') }}</span>
+            </div>
+            <i class="pi pi-chevron-right action-arrow"></i>
           </router-link>
           <router-link to="/proxy" class="action-card">
             <div class="action-icon action-icon-blue">
               <i class="pi pi-globe"></i>
             </div>
-            <span class="action-label">{{ t('dashboard.addProxy') }}</span>
+            <div class="action-text">
+              <span class="action-label">{{ t('dashboard.addProxy') }}</span>
+              <span class="action-hint">{{ t('dashboard.proxies') }}</span>
+            </div>
+            <i class="pi pi-chevron-right action-arrow"></i>
           </router-link>
           <router-link to="/autolikes" class="action-card">
             <div class="action-icon action-icon-pink">
               <i class="pi pi-heart"></i>
             </div>
-            <span class="action-label">{{ t('dashboard.newLikeTask') }}</span>
+            <div class="action-text">
+              <span class="action-label">{{ t('dashboard.newLikeTask') }}</span>
+              <span class="action-hint">Autolikes</span>
+            </div>
+            <i class="pi pi-chevron-right action-arrow"></i>
+          </router-link>
+          <router-link to="/autocomments" class="action-card">
+            <div class="action-icon action-icon-orange">
+              <i class="pi pi-comments"></i>
+            </div>
+            <div class="action-text">
+              <span class="action-label">{{ t('dashboard.commentsToday') }}</span>
+              <span class="action-hint">Autocomments</span>
+            </div>
+            <i class="pi pi-chevron-right action-arrow"></i>
           </router-link>
         </div>
       </div>
@@ -124,209 +142,196 @@ onMounted(async () => {
 
 <style scoped>
 .dashboard {
-  max-width: 1400px;
-}
-
-.page-title {
-  font-size: 28px;
-  font-weight: 700;
-  color: #f3f4f6;
-  margin-bottom: 28px;
-  letter-spacing: -0.5px;
-}
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 20px;
-  margin-bottom: 32px;
+}
+
+/* Stats Row */
+.stats-row {
+  display: flex;
+  gap: 12px;
 }
 
 .stat-card {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
   background: linear-gradient(145deg, #161616 0%, #111111 100%);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 16px;
-  padding: 24px;
-  transition: all 0.3s ease;
+  border-radius: 12px;
+  padding: 20px;
+  transition: all 0.2s;
 }
 
 .stat-card:hover {
-  border-color: rgba(168, 85, 247, 0.3);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
-.stat-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.stat-icon {
-  width: 44px;
-  height: 44px;
+.stat-icon-wrap {
+  width: 48px;
+  height: 48px;
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 20px;
   color: white;
+  flex-shrink: 0;
 }
 
 .stat-icon-purple {
   background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
-  box-shadow: 0 4px 16px rgba(168, 85, 247, 0.35);
 }
 
 .stat-icon-blue {
   background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.35);
 }
 
 .stat-icon-green {
   background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.35);
 }
 
 .stat-icon-orange {
   background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.35);
 }
 
-.stat-label {
-  font-size: 13px;
-  color: #6b7280;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+.stat-content {
+  min-width: 0;
 }
 
 .stat-value {
-  font-size: 36px;
+  font-size: 28px;
   font-weight: 700;
   color: #f9fafb;
-  line-height: 1;
-  margin-bottom: 6px;
+  line-height: 1.2;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+  margin-top: 2px;
 }
 
 .stat-sub {
-  font-size: 13px;
+  font-size: 12px;
   color: #4b5563;
+  margin-top: 2px;
 }
 
+/* Section Card */
 .section-card {
   background: linear-gradient(145deg, #161616 0%, #111111 100%);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 16px;
+  border-radius: 12px;
   overflow: hidden;
 }
 
 .section-header {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 20px 24px;
+  gap: 10px;
+  padding: 16px 20px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .section-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
-  box-shadow: 0 4px 16px rgba(168, 85, 247, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
+  color: #a855f7;
   font-size: 16px;
 }
 
 .section-title {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   color: #e5e7eb;
 }
 
+/* Actions Grid */
 .actions-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-  padding: 24px;
+  display: flex;
+  flex-direction: column;
 }
 
 .action-card {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 32px 24px;
-  border: 1px dashed rgba(107, 114, 128, 0.3);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.02);
+  gap: 14px;
+  padding: 14px 20px;
   text-decoration: none;
-  transition: all 0.3s ease;
+  transition: all 0.15s;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.action-card:last-child {
+  border-bottom: none;
 }
 
 .action-card:hover {
-  border-color: rgba(168, 85, 247, 0.5);
-  border-style: solid;
-  background: rgba(168, 85, 247, 0.08);
-  transform: translateY(-2px);
-}
-
-.action-card:hover .action-icon {
-  transform: scale(1.1);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .action-icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, rgba(168, 85, 247, 0.2) 0%, rgba(124, 58, 237, 0.15) 100%);
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(168, 85, 247, 0.12);
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 14px;
-  transition: all 0.3s ease;
   color: #a855f7;
-  font-size: 20px;
+  font-size: 16px;
+  flex-shrink: 0;
+  transition: all 0.2s;
 }
 
 .action-icon-blue {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(37, 99, 235, 0.15) 100%);
+  background: rgba(59, 130, 246, 0.12);
   color: #3b82f6;
 }
 
 .action-icon-pink {
-  background: linear-gradient(135deg, rgba(236, 72, 153, 0.2) 0%, rgba(219, 39, 119, 0.15) 100%);
+  background: rgba(236, 72, 153, 0.12);
   color: #ec4899;
 }
 
+.action-icon-orange {
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+}
+
+.action-text {
+  flex: 1;
+  min-width: 0;
+}
+
 .action-label {
+  display: block;
   font-size: 14px;
-  color: #9ca3af;
+  color: #e5e7eb;
   font-weight: 500;
 }
 
-.action-card:hover .action-label {
-  color: #e5e7eb;
+.action-hint {
+  display: block;
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 1px;
 }
 
-@media (max-width: 1200px) {
-  .stats-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
+.action-arrow {
+  color: #4b5563;
+  font-size: 12px;
+  transition: all 0.2s;
 }
 
-@media (max-width: 768px) {
-  .stats-grid {
-    grid-template-columns: 1fr;
-  }
+.action-card:hover .action-arrow {
+  color: #9ca3af;
+  transform: translateX(2px);
+}
 
-  .actions-grid {
-    grid-template-columns: 1fr;
-  }
+.action-card:hover .action-icon {
+  transform: scale(1.05);
 }
 </style>

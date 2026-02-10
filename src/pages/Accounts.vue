@@ -17,7 +17,6 @@ import Column from 'primevue/column'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Dropdown from 'primevue/dropdown'
-import MultiSelect from 'primevue/multiselect'
 import Tag from 'primevue/tag'
 import ProgressBar from 'primevue/progressbar'
 import Checkbox from 'primevue/checkbox'
@@ -1186,27 +1185,6 @@ async function handleBulk2FASet() {
 }
 
 
-function selectGroup(groupId: number | null) {
-  groupStore.selectGroup(groupId)
-  accountStore.setFilter('group_id', groupId || undefined)
-}
-
-async function onGroupChange(accountId: number, groupId: number | null) {
-  try {
-    await accountStore.updateAccount(accountId, { group_id: groupId ?? 0 })
-  } catch (e: any) {
-    toast.add({ severity: 'error', summary: t('common.error'), detail: e.message, life: 3000 })
-  }
-}
-
-async function onTagsChange(accountId: number, tagIds: number[]) {
-  try {
-    await accountStore.updateAccount(accountId, { tag_ids: tagIds })
-  } catch (e: any) {
-    toast.add({ severity: 'error', summary: t('common.error'), detail: e.message, life: 3000 })
-  }
-}
-
 function setStatusFilter(status: AccountStatus | null) {
   accountStore.setFilter('status', status || undefined)
 }
@@ -1225,25 +1203,6 @@ async function createGroup() {
       severity: 'success',
       summary: t('common.success'),
       detail: t('groups.created'),
-      life: 3000
-    })
-  } catch (error: any) {
-    toast.add({
-      severity: 'error',
-      summary: t('common.error'),
-      detail: error.message,
-      life: 3000
-    })
-  }
-}
-
-async function deleteGroup(id: number) {
-  try {
-    await groupStore.deleteGroup(id)
-    toast.add({
-      severity: 'success',
-      summary: t('common.success'),
-      detail: t('groups.deleted'),
       life: 3000
     })
   } catch (error: any) {
@@ -1282,25 +1241,6 @@ async function createTag() {
   }
 }
 
-async function deleteTag(id: number) {
-  try {
-    await tagStore.deleteTag(id)
-    toast.add({
-      severity: 'success',
-      summary: t('common.success'),
-      detail: t('tags.deleted'),
-      life: 3000
-    })
-  } catch (error: any) {
-    toast.add({
-      severity: 'error',
-      summary: t('common.error'),
-      detail: error.message,
-      life: 3000
-    })
-  }
-}
-
 function getStatusSeverity(status: string): "success" | "info" | "warn" | "danger" | "secondary" | "contrast" | undefined {
   switch (status) {
     case 'valid': return 'success'
@@ -1316,14 +1256,6 @@ function getStatusSeverity(status: string): "success" | "info" | "warn" | "dange
     case 'checking': return 'info'
     default: return 'secondary'
   }
-}
-
-function getDisplayName(account: Account): string {
-  if (account.username) return `@${account.username}`
-  if (account.first_name) return account.first_name
-  if (account.telegram_id) return `ID: ${account.telegram_id}`
-  if (account.phone) return account.phone
-  return 'Unknown'
 }
 
 function openTwoFADialog(account: Account) {
@@ -1347,6 +1279,68 @@ function handleAccountAdded() {
 }
 
 // Row select/unselect handled by v-model:selection bridge (selectedRows)
+
+// Helper: country code to flag emoji
+function countryFlag(code: string | null): string {
+  if (!code) return ''
+  return code.toUpperCase().replace(/./g, c => String.fromCodePoint(c.charCodeAt(0) + 0x1F1A5))
+}
+
+// Helper: format aging time since registration
+function formatAging(registerTime: string | null): string {
+  if (!registerTime) return '—'
+  const now = new Date()
+  const reg = new Date(registerTime)
+  const diffMs = now.getTime() - reg.getTime()
+  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+  if (days < 1) return 'Сегодня'
+  if (days < 30) return `${days} дн`
+
+  const months = Math.floor(days / 30)
+  const remainDays = days % 30
+
+  if (months < 12) {
+    return remainDays > 0 ? `${months} мес ${remainDays} дн` : `${months} мес`
+  }
+
+  const years = Math.floor(months / 12)
+  const remainMonths = months % 12
+  return remainMonths > 0 ? `${years} г ${remainMonths} мес` : `${years} г`
+}
+
+// Helper: format last used time
+function formatLastUsed(lastUsedAt: string | null): string {
+  if (!lastUsedAt) return '—'
+  const date = new Date(lastUsedAt)
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const yesterday = new Date(today.getTime() - 86400000)
+  const dateDay = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+
+  const time = date.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
+
+  if (dateDay.getTime() === today.getTime()) return `Сегодня, ${time}`
+  if (dateDay.getTime() === yesterday.getTime()) return `Вчера, ${time}`
+
+  return date.toLocaleDateString('ru', { day: '2-digit', month: '2-digit', year: '2-digit' })
+}
+
+// Helper: full name
+function getFullName(account: Account): string {
+  const parts = []
+  if (account.first_name) parts.push(account.first_name)
+  if (account.last_name) parts.push(account.last_name)
+  return parts.join(' ') || account.username || '—'
+}
+
+// Stats computed
+const totalAccounts = computed(() => accountStore.accounts.length)
+const validAccounts = computed(() => accountStore.accounts.filter(a => a.status === 'valid').length)
+const bannedAccounts = computed(() => accountStore.accounts.filter(a => ['banned', 'deactivated'].includes(a.status)).length)
+const noRestrictionsAccounts = computed(() => accountStore.accounts.filter(a => a.status === 'valid' && !a.spamblock).length)
+const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.spamblock === true).length)
+
 </script>
 
 <template>
@@ -1355,331 +1349,236 @@ function handleAccountAdded() {
     <ConfirmDialog />
 
     <div class="accounts-page">
-      <div class="accounts-layout">
-        <!-- Sidebar with Groups -->
-        <div class="groups-sidebar">
-          <div class="sidebar-header">
-            <h3 class="sidebar-title">{{ t('groups.title') }}</h3>
-            <Button
-              icon="pi pi-plus"
-              severity="secondary"
-              text
-              rounded
-              size="small"
-              @click="showGroupDialog = true"
-            />
-          </div>
+      <!-- Stats Cards -->
+      <div class="stats-row">
+        <div class="stat-card" :class="{ active: !accountStore.filters.status }" @click="setStatusFilter(null)">
+          <div class="stat-value accent">{{ totalAccounts }}</div>
+          <div class="stat-label">Все аккаунты</div>
+        </div>
+        <div class="stat-card" @click="setStatusFilter('valid')">
+          <div class="stat-value">{{ validAccounts }}</div>
+          <div class="stat-label">Валидные</div>
+        </div>
+        <div class="stat-card" @click="setStatusFilter('banned')">
+          <div class="stat-value">{{ bannedAccounts }}</div>
+          <div class="stat-label">Забанены</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{{ noRestrictionsAccounts }}</div>
+          <div class="stat-label">Без ограничений</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{{ restrictedAccounts }}</div>
+          <div class="stat-label">С ограничениями</div>
+        </div>
+      </div>
 
-          <div class="groups-list">
-            <div
-              class="group-item"
-              :class="{ active: groupStore.selectedGroupId === null }"
-              @click="selectGroup(null)"
-            >
-              <div class="group-icon" style="background: #6366f1">
+      <!-- Toolbar -->
+      <div class="toolbar-row">
+        <div class="toolbar-actions">
+          <button class="toolbar-btn" @click="showAddAccountDialog = true" v-tooltip.top="'Добавить аккаунт'">
+            <i class="pi pi-plus"></i>
+          </button>
+          <button class="toolbar-btn" @click="showImportDialog = true" v-tooltip.top="t('accounts.import')">
+            <i class="pi pi-folder-open"></i>
+          </button>
+          <button class="toolbar-btn" :disabled="accountStore.accounts.length === 0" @click="checkAllAccounts" v-tooltip.top="t('accounts.checkAll')">
+            <i class="pi pi-refresh"></i>
+          </button>
+          <button class="toolbar-btn" :disabled="!hasSelection" @click="showBatchCheckDialog = true" v-tooltip.top="'Проверить выбранные'">
+            <i class="pi pi-check"></i>
+          </button>
+          <button class="toolbar-btn" :disabled="!hasSelection" @click="checkBulkProxies" v-tooltip.top="'Проверить прокси'">
+            <i class="pi pi-check-circle"></i>
+          </button>
+          <div class="toolbar-divider"></div>
+          <button class="toolbar-btn" @click="showGroupDialog = true" v-tooltip.top="'Создать группу'">
+            <i class="pi pi-folder"></i>
+          </button>
+          <button class="toolbar-btn" @click="showTagDialog = true" v-tooltip.top="'Создать тег'">
+            <i class="pi pi-tag"></i>
+          </button>
+        </div>
+        <span class="shown-count">
+          Показано аккаунтов: {{ accountStore.filteredAccounts.length }} / {{ accountStore.accounts.length }}
+        </span>
+      </div>
+
+      <!-- Filters + Search -->
+      <div class="filters-row">
+        <div class="filter-chips">
+          <Dropdown
+            :model-value="accountStore.filters.group_id"
+            :options="[{ label: 'Все', value: null }, ...groupStore.groups.map(g => ({ label: g.name, value: g.id }))]"
+            optionLabel="label"
+            optionValue="value"
+            placeholder="Роль"
+            @update:model-value="(val: number | null) => accountStore.setFilter('group_id', val || undefined)"
+            class="filter-chip"
+            showClear
+          />
+          <Dropdown
+            :model-value="accountStore.filters.status"
+            :options="statusOptions"
+            optionLabel="label"
+            optionValue="value"
+            :placeholder="t('common.status')"
+            @update:model-value="setStatusFilter"
+            class="filter-chip"
+            showClear
+          />
+          <Dropdown
+            :model-value="accountStore.filters.proxy_id"
+            :options="proxyFilterOptions"
+            optionLabel="label"
+            optionValue="value"
+            :placeholder="t('accounts.proxy')"
+            @update:model-value="(val: number | null) => accountStore.setFilter('proxy_id', val || undefined)"
+            class="filter-chip"
+            showClear
+            filter
+          />
+          <Dropdown
+            :model-value="accountStore.filters.tag_id"
+            :options="[...tagStore.tags.map(tg => ({ label: tg.name, value: tg.id }))]"
+            optionLabel="label"
+            optionValue="value"
+            placeholder="Тег"
+            @update:model-value="(val: number | null) => accountStore.setFilter('tag_id', val || undefined)"
+            class="filter-chip"
+            showClear
+          />
+        </div>
+        <div class="search-box">
+          <InputGroup>
+            <InputGroupAddon>
+              <i class="pi pi-search"></i>
+            </InputGroupAddon>
+            <InputText
+              v-model="searchQuery"
+              :placeholder="t('accounts.searchPlaceholder')"
+              class="search-input"
+            />
+          </InputGroup>
+        </div>
+        <Menu ref="bulkMenu" :model="bulkMenuItems" :popup="true" />
+      </div>
+
+      <!-- Accounts Table -->
+      <div class="table-card">
+        <DataTable
+          v-model:selection="selectedRows"
+          :value="accountStore.filteredAccounts"
+          :loading="accountStore.loading"
+          paginator
+          :rows="50"
+          dataKey="id"
+          class="custom-table"
+          scrollable
+          scrollHeight="flex"
+        >
+          <template #empty>
+            <div class="empty-state">
+              <div class="empty-icon">
                 <i class="pi pi-users"></i>
               </div>
-              <div class="group-info">
-                <span class="group-name">{{ t('groups.allAccounts') }}</span>
-                <span class="group-count">{{ accountStore.accounts.length }}</span>
-              </div>
-            </div>
-
-            <div
-              v-for="group in groupStore.groups"
-              :key="group.id"
-              class="group-item"
-              :class="{ active: groupStore.selectedGroupId === group.id }"
-              @click="selectGroup(group.id)"
-            >
-              <div class="group-icon" :style="{ background: group.color || '#a855f7' }">
-                <i class="pi pi-folder"></i>
-              </div>
-              <div class="group-info">
-                <span class="group-name">{{ group.name }}</span>
-                <span class="group-count">{{ group.accounts_count }}</span>
-              </div>
+              <p class="empty-text">{{ t('accounts.noAccounts') }}</p>
               <Button
-                icon="pi pi-trash"
-                severity="danger"
-                text
-                rounded
-                size="small"
-                class="delete-btn"
-                @click.stop="deleteGroup(group.id)"
+                :label="t('accounts.importAccounts')"
+                icon="pi pi-upload"
+                @click="showImportDialog = true"
               />
             </div>
-          </div>
+          </template>
 
-          <!-- Tags Section -->
-          <div class="sidebar-section">
-            <div class="sidebar-header">
-              <h3 class="sidebar-title">{{ t('tags.title') }}</h3>
-              <Button
-                icon="pi pi-plus"
-                severity="secondary"
-                text
-                rounded
-                size="small"
-                @click="showTagDialog = true"
-              />
-            </div>
+          <Column selectionMode="multiple" headerStyle="width: 3rem"></Column>
 
-            <div class="tags-list">
-              <div
-                v-for="tag in tagStore.tags"
-                :key="tag.id"
-                class="tag-item"
-                :class="{ active: accountStore.filters.tag_id === tag.id }"
-                @click="accountStore.setFilter('tag_id', accountStore.filters.tag_id === tag.id ? undefined : tag.id)"
-              >
-                <span class="tag-dot" :style="{ background: tag.color }"></span>
-                <span class="tag-name">{{ tag.name }}</span>
-                <Button
-                  icon="pi pi-times"
-                  severity="danger"
-                  text
-                  rounded
-                  size="small"
-                  class="delete-btn"
-                  :aria-label="t('common.delete') + ' ' + tag.name"
-                  @click.stop="deleteTag(tag.id)"
-                />
+          <Column header="#" style="width: 50px">
+            <template #body="{ index }">
+              <span class="row-index">{{ index + 1 }}</span>
+            </template>
+          </Column>
+
+          <Column header="" style="width: 44px">
+            <template #body="{ data }">
+              <div class="account-avatar">
+                {{ (data.first_name || data.username || '?')[0].toUpperCase() }}
               </div>
-            </div>
-          </div>
-        </div>
+            </template>
+          </Column>
 
-        <!-- Main Content -->
-        <div class="main-content">
-          <div class="page-header">
-            <h1 class="page-title">{{ t('accounts.title') }}</h1>
-            <div class="header-actions">
-              <button class="import-btn" @click="showImportDialog = true">
-                <i class="pi pi-upload"></i>
-                {{ t('accounts.import') }}
-              </button>
-              <button
-                class="import-btn"
-                :disabled="accountStore.accounts.length === 0"
-                @click="checkAllAccounts"
-              >
-                <i class="pi pi-refresh"></i>
-                {{ t('accounts.checkAll') }}
-              </button>
-            </div>
-          </div>
+          <Column header="Телефон" sortable field="phone" style="min-width: 130px">
+            <template #body="{ data }">
+              <span class="phone-text">{{ data.phone || '—' }}</span>
+            </template>
+          </Column>
 
-          <!-- Filters Bar -->
-          <div class="filters-bar">
-            <InputGroup>
-              <InputGroupAddon>
-                <i class="pi pi-search"></i>
-              </InputGroupAddon>
-              <InputText
-                v-model="searchQuery"
-                :placeholder="t('accounts.searchPlaceholder')"
-                class="search-input"
-              />
-            </InputGroup>
+          <Column header="Гео" style="width: 70px" sortable field="geo">
+            <template #body="{ data }">
+              <div v-if="data.geo" class="geo-cell">
+                <span class="geo-flag">{{ countryFlag(data.geo) }}</span>
+                <span class="geo-code">{{ data.geo?.toUpperCase() }}</span>
+              </div>
+              <span v-else class="no-data">—</span>
+            </template>
+          </Column>
 
-            <Dropdown
-              :model-value="accountStore.filters.status"
-              :options="statusOptions"
-              optionLabel="label"
-              optionValue="value"
-              :placeholder="t('accounts.filterByStatus')"
-              @update:model-value="setStatusFilter"
-              class="status-filter"
-              showClear
-            />
+          <Column field="status" :header="t('common.status')" sortable style="min-width: 140px">
+            <template #body="{ data }">
+              <div v-if="data.status === 'checking'" class="checking-status">
+                <i class="pi pi-spin pi-spinner"></i>
+                <span>{{ t('accounts.status.checking') }}</span>
+              </div>
+              <Tag v-else :value="t(`accounts.status.${data.status}`)" :severity="getStatusSeverity(data.status)" class="status-pill" />
+            </template>
+          </Column>
 
-            <Dropdown
-              :model-value="accountStore.filters.proxy_id"
-              :options="proxyFilterOptions"
-              optionLabel="label"
-              optionValue="value"
-              :placeholder="t('accounts.filterByProxy')"
-              @update:model-value="(val: number | null) => accountStore.setFilter('proxy_id', val || undefined)"
-              class="proxy-filter"
-              showClear
-              filter
-              :filterPlaceholder="t('accounts.searchProxy')"
-            />
+          <Column header="Отлежка" style="min-width: 100px" sortable field="register_time">
+            <template #body="{ data }">
+              <span class="aging-text">{{ formatAging(data.register_time) }}</span>
+            </template>
+          </Column>
 
-            <Menu ref="bulkMenu" :model="bulkMenuItems" :popup="true" />
-          </div>
+          <Column header="Роль" style="min-width: 120px">
+            <template #body="{ data }">
+              <span class="role-text">{{ data.group?.name || '—' }}</span>
+            </template>
+          </Column>
 
-          <!-- Accounts Table -->
-          <div class="table-card">
-            <DataTable
-              v-model:selection="selectedRows"
-              :value="accountStore.filteredAccounts"
-              :loading="accountStore.loading"
-              paginator
-              :rows="20"
-              dataKey="id"
-              class="custom-table"
-            >
-              <template #empty>
-                <div class="empty-state">
-                  <div class="empty-icon">
-                    <i class="pi pi-users"></i>
-                  </div>
-                  <p class="empty-text">{{ t('accounts.noAccounts') }}</p>
-                  <Button
-                    :label="t('accounts.importAccounts')"
-                    icon="pi pi-upload"
-                    @click="showImportDialog = true"
-                  />
-                </div>
-              </template>
+          <Column header="Использован" style="min-width: 130px" sortable field="last_used_at">
+            <template #body="{ data }">
+              <span class="last-used-text">{{ formatLastUsed(data.last_used_at) }}</span>
+            </template>
+          </Column>
 
-              <Column selectionMode="multiple" headerStyle="width: 3rem"></Column>
+          <Column header="Имя" style="min-width: 140px" sortable field="first_name">
+            <template #body="{ data }">
+              <span class="name-text" :title="getFullName(data)">{{ getFullName(data) }}</span>
+            </template>
+          </Column>
 
-              <Column field="id" header="ID" sortable style="width: 60px" />
-
-              <Column :header="t('accounts.account')" sortable>
-                <template #body="{ data }">
-                  <div class="account-cell">
-                    <div class="account-avatar">
-                      {{ (data.first_name || data.username || '?')[0].toUpperCase() }}
-                    </div>
-                    <div class="account-info">
-                      <div class="account-name">{{ getDisplayName(data) }}</div>
-                      <div v-if="data.phone" class="account-phone">{{ data.phone }}</div>
-                    </div>
-                  </div>
-                </template>
-              </Column>
-
-              <Column field="status" :header="t('common.status')" sortable style="width: 110px">
-                <template #body="{ data }">
-                  <div v-if="data.status === 'checking'" class="checking-status">
-                    <i class="pi pi-spin pi-spinner"></i>
-                    <span>{{ t('accounts.status.checking') }}</span>
-                  </div>
-                  <Tag v-else :value="t(`accounts.status.${data.status}`)" :severity="getStatusSeverity(data.status)" />
-                </template>
-              </Column>
-
-              <Column :header="t('accounts.proxy')" style="width: 150px">
-                <template #body="{ data }">
-                  <div v-if="data.proxy" class="proxy-cell">
-                    <i v-if="checkingProxyIds.has(data.proxy_id)" class="pi pi-spin pi-spinner proxy-spinner"></i>
-                    <span
-                      class="proxy-text"
-                      :class="{ 'proxy-working': data.proxy.status === 'working', 'proxy-bad': data.proxy.status === 'not_working' || data.proxy.status === 'timeout' }"
-                    >
-                      {{ data.proxy.host }}:{{ data.proxy.port }}
-                    </span>
-                  </div>
-                  <span v-else class="no-data">{{ t('accounts.noProxy') }}</span>
-                </template>
-              </Column>
-
-              <Column :header="t('accounts.group')" style="width: 140px">
-                <template #body="{ data }">
-                  <Dropdown
-                    :model-value="data.group_id"
-                    :options="groupStore.groups"
-                    optionLabel="name"
-                    optionValue="id"
-                    :placeholder="'—'"
-                    showClear
-                    class="inline-dropdown"
-                    @update:model-value="onGroupChange(data.id, $event)"
-                  />
-                </template>
-              </Column>
-
-              <Column :header="t('accounts.tags')" style="width: 180px">
-                <template #body="{ data }">
-                  <MultiSelect
-                    :model-value="data.tags?.map((t: any) => t.id) ?? []"
-                    :options="tagStore.tags"
-                    optionLabel="name"
-                    optionValue="id"
-                    :placeholder="'—'"
-                    :maxSelectedLabels="2"
-                    class="inline-multiselect"
-                    @update:model-value="onTagsChange(data.id, $event)"
-                  >
-                    <template #option="{ option }">
-                      <div class="tag-option">
-                        <span class="tag-dot" :style="{ backgroundColor: option.color }"></span>
-                        {{ option.name }}
-                      </div>
-                    </template>
-                  </MultiSelect>
-                </template>
-              </Column>
-
-              <Column header="2FA" style="width: 120px">
-                <template #body="{ data }">
-                  <div v-if="data.has_2fa" class="twofa-cell">
-                    <i class="pi pi-lock twofa-icon"></i>
-                    <span
-                      v-if="data.two_fa_password"
-                      class="twofa-password"
-                      v-tooltip.top="data.two_fa_password"
-                    >{{ data.two_fa_password }}</span>
-                    <span v-else class="twofa-set">{{ t('accounts.twoFA.enabled') }}</span>
-                  </div>
-                  <span v-else class="no-data">—</span>
-                </template>
-              </Column>
-
-              <Column :header="t('common.actions')" style="width: 140px">
-                <template #body="{ data }">
-                  <div class="actions-cell">
-                    <Button
-                      icon="pi pi-refresh"
-                      severity="secondary"
-                      text
-                      rounded
-                      size="small"
-                      v-tooltip.top="t('common.check')"
-                      :aria-label="t('common.check')"
-                      @click="checkAccount(data)"
-                    />
-                    <Button
-                      icon="pi pi-external-link"
-                      severity="info"
-                      text
-                      rounded
-                      size="small"
-                      v-tooltip.top="t('webviewer.openInWebK')"
-                      :aria-label="t('webviewer.openInWebK')"
-                      :disabled="data.status !== 'valid' || !data.proxy || !data.telegram_id"
-                      @click="openWebViewer(data)"
-                    />
-                    <Button
-                      :icon="data.has_2fa ? 'pi pi-lock' : 'pi pi-lock-open'"
-                      :severity="data.has_2fa ? 'success' : 'secondary'"
-                      text
-                      rounded
-                      size="small"
-                      v-tooltip.top="t('accounts.twoFA.title')"
-                      :aria-label="t('accounts.twoFA.title')"
-                      @click="openTwoFADialog(data)"
-                    />
-                    <Button
-                      icon="pi pi-trash"
-                      severity="danger"
-                      text
-                      rounded
-                      size="small"
-                      v-tooltip.top="t('common.delete')"
-                      :aria-label="t('common.delete')"
-                      @click="confirmDelete(data)"
-                    />
-                  </div>
-                </template>
-              </Column>
-            </DataTable>
-          </div>
-        </div>
+          <Column header="Разное" style="width: 150px">
+            <template #body="{ data }">
+              <div class="actions-cell">
+                <button class="action-icon" @click="checkAccount(data)" v-tooltip.top="t('common.check')">
+                  <i class="pi pi-refresh"></i>
+                </button>
+                <button class="action-icon" @click="openWebViewer(data)" :disabled="data.status !== 'valid' || !data.proxy || !data.telegram_id" v-tooltip.top="'WebK'">
+                  <i class="pi pi-external-link"></i>
+                </button>
+                <button class="action-icon" @click="openTwoFADialog(data)" v-tooltip.top="'2FA'">
+                  <i :class="data.has_2fa ? 'pi pi-lock' : 'pi pi-lock-open'"></i>
+                </button>
+                <button class="action-icon" v-tooltip.top="'Инфо'">
+                  <i class="pi pi-info-circle"></i>
+                </button>
+                <button class="action-icon delete" @click="confirmDelete(data)" v-tooltip.top="t('common.delete')">
+                  <i class="pi pi-trash"></i>
+                </button>
+              </div>
+            </template>
+          </Column>
+        </DataTable>
       </div>
 
       <!-- Import Dialog -->
@@ -2284,239 +2183,328 @@ function handleAccountAdded() {
 <style scoped>
 .accounts-page {
   height: 100%;
-}
-
-.accounts-layout {
   display: flex;
+  flex-direction: column;
   gap: 16px;
-  height: 100%;
 }
 
-/* Sidebar */
-.groups-sidebar {
-  width: 200px;
-  flex-shrink: 0;
+/* Stats Cards */
+.stats-row {
+  display: flex;
+  gap: 12px;
+}
+
+.stat-card {
+  flex: 1;
   background: linear-gradient(145deg, #161616 0%, #111111 100%);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 12px;
-  padding: 12px;
-  overflow-y: auto;
-}
-
-.sidebar-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.sidebar-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: #6b7280;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.sidebar-section {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.groups-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.group-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 16px 20px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
-.group-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+.stat-card:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: linear-gradient(145deg, #1a1a1a 0%, #141414 100%);
 }
 
-.group-item.active {
-  background: rgba(168, 85, 247, 0.15);
+.stat-card.active {
+  border-color: rgba(99, 102, 241, 0.4);
+  background: linear-gradient(145deg, #1a1a2e 0%, #141428 100%);
 }
 
-.group-item .delete-btn {
-  opacity: 0;
-  transition: opacity 0.2s;
+.stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #e5e7eb;
+  line-height: 1.2;
 }
 
-.group-item:hover .delete-btn {
-  opacity: 1;
+.stat-value.accent {
+  color: #6366f1;
 }
 
-.group-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+.stat-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 4px;
+}
+
+/* Toolbar */
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.toolbar-btn {
+  width: 38px;
+  height: 38px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
-  font-size: 12px;
+  background: linear-gradient(145deg, #161616 0%, #111111 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: #9ca3af;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+}
+
+.toolbar-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e5e7eb;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
+}
+
+.shown-count {
+  font-size: 13px;
+  color: #6b7280;
+}
+
+/* Filters Row */
+.filters-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.filter-chips {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+}
+
+.search-box {
+  width: 240px;
   flex-shrink: 0;
 }
 
-.group-info {
+.search-input {
+  width: 100%;
+}
+
+:deep(.filter-chip) {
+  min-width: 100px;
+}
+
+:deep(.filter-chip .p-dropdown) {
+  background: linear-gradient(145deg, #161616 0%, #111111 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  min-height: 34px;
+}
+
+:deep(.filter-chip .p-dropdown:hover) {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+:deep(.filter-chip .p-dropdown .p-dropdown-label) {
+  padding: 5px 12px;
+  font-size: 13px;
+  color: #d1d5db;
+}
+
+:deep(.filter-chip .p-dropdown .p-dropdown-trigger) {
+  width: 28px;
+}
+
+/* Table */
+.table-card {
   flex: 1;
-  min-width: 0;
+  background: linear-gradient(145deg, #161616 0%, #111111 100%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 0;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.empty-state {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 24px;
+}
+
+.empty-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.15) 0%, rgba(124, 58, 237, 0.1) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.empty-icon i {
+  font-size: 32px;
+  color: #a855f7;
+}
+
+.empty-text {
+  color: #6b7280;
+  margin-bottom: 20px;
+  font-size: 15px;
+}
+
+/* Row index */
+.row-index {
+  font-size: 13px;
+  color: #6b7280;
+}
+
+/* Avatar */
+.account-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: white;
+  flex-shrink: 0;
+}
+
+/* Phone */
+.phone-text {
+  font-size: 13px;
+  color: #e5e7eb;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Geo */
+.geo-cell {
+  display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.group-name {
-  font-size: 13px;
+.geo-flag {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.geo-code {
+  font-size: 12px;
+  color: #9ca3af;
   font-weight: 500;
+}
+
+/* Status */
+:deep(.status-pill) {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+.checking-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #60a5fa;
+}
+
+.checking-status i {
+  font-size: 14px;
+}
+
+/* Aging */
+.aging-text {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+/* Role */
+.role-text {
+  font-size: 13px;
+  color: #d1d5db;
+}
+
+/* Last used */
+.last-used-text {
+  font-size: 12px;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+/* Name */
+.name-text {
+  font-size: 13px;
   color: #e5e7eb;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 140px;
+  display: block;
 }
 
-.group-count {
-  font-size: 11px;
-  color: #6b7280;
-  background: rgba(255, 255, 255, 0.05);
-  padding: 2px 6px;
-  border-radius: 8px;
-  flex-shrink: 0;
-}
-
-/* Tags */
-.tags-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.tag-item {
+/* Actions */
+.actions-cell {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: 2px;
+}
+
+.action-icon {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
   border-radius: 6px;
+  color: #6b7280;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s;
+  font-size: 13px;
+  padding: 0;
 }
 
-.tag-item:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.tag-item.active {
-  background: rgba(168, 85, 247, 0.15);
-}
-
-.tag-item .delete-btn {
-  opacity: 0;
-  margin-left: auto;
-}
-
-.tag-item:hover .delete-btn {
-  opacity: 1;
-}
-
-.tag-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.tag-name {
-  font-size: 12px;
+.action-icon:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
   color: #d1d5db;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-/* Main Content */
-.main-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 700;
-  color: #f3f4f6;
-  letter-spacing: -0.5px;
-}
-
-.header-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.import-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 700;
-  font-size: 1.1rem;
-  padding: 0.7rem 1.8rem;
-  background: linear-gradient(135deg, #9333ea, #a855f7, #c084fc);
-  border: 2px solid rgba(168, 85, 247, 0.6);
-  border-radius: 10px;
-  color: #fff;
-  cursor: pointer;
-  box-shadow: 0 0 16px rgba(168, 85, 247, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
-  transition: all 0.2s ease;
-  letter-spacing: 0.3px;
-}
-.import-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #a855f7, #c084fc, #d8b4fe);
-  border-color: rgba(192, 132, 252, 0.8);
-  box-shadow: 0 0 28px rgba(168, 85, 247, 0.7), 0 6px 16px rgba(0, 0, 0, 0.3);
-  transform: translateY(-1px);
-}
-
-.import-btn:disabled {
-  opacity: 0.4;
+.action-icon:disabled {
+  opacity: 0.3;
   cursor: not-allowed;
 }
 
-/* Filters Bar */
-.filters-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
+.action-icon.delete:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
 }
 
-.search-input {
-  width: 220px;
-}
-
-.status-filter {
-  width: 160px;
-}
-
-.proxy-filter {
-  width: 180px;
+.no-data {
+  color: #4b5563;
+  font-size: 12px;
 }
 
 /* Floating Selection Bar */
@@ -2573,213 +2561,105 @@ function handleAccountAdded() {
   transform: translateX(-50%) translateY(20px);
 }
 
-/* Table */
-.table-card {
-  background: linear-gradient(145deg, #161616 0%, #111111 100%);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  padding: 12px;
-  overflow-x: auto;
+/* Table styles */
+:deep(.custom-table .p-datatable) {
+  background: transparent;
 }
 
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 48px 24px;
-}
-
-.empty-icon {
-  width: 72px;
-  height: 72px;
-  border-radius: 20px;
-  background: linear-gradient(135deg, rgba(168, 85, 247, 0.15) 0%, rgba(124, 58, 237, 0.1) 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 20px;
-}
-
-.empty-icon i {
-  font-size: 32px;
-  color: #a855f7;
-}
-
-.empty-text {
+:deep(.custom-table .p-datatable-thead > tr > th) {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.06);
   color: #6b7280;
-  margin-bottom: 20px;
-  font-size: 15px;
-}
-
-.account-cell {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.account-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
   font-weight: 600;
-  color: white;
-  flex-shrink: 0;
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  padding: 10px 12px;
 }
 
-.account-info {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
+:deep(.custom-table .p-datatable-tbody > tr) {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.04);
+  transition: all 0.15s;
 }
 
-.account-name {
+:deep(.custom-table .p-datatable-tbody > tr:hover) {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+:deep(.custom-table .p-datatable-tbody > tr > td) {
+  border-color: rgba(255, 255, 255, 0.04);
+  padding: 8px 12px;
+}
+
+:deep(.custom-table .p-datatable-tbody > tr.p-highlight) {
+  background: rgba(168, 85, 247, 0.08);
+}
+
+:deep(.custom-table .p-datatable-tbody > tr.p-highlight > td) {
+  border-color: rgba(168, 85, 247, 0.12);
+}
+
+:deep(.custom-table .p-datatable-thead > tr > th .p-checkbox .p-checkbox-box.p-highlight) {
+  background: #a855f7;
+  border-color: #a855f7;
+}
+
+:deep(.p-checkbox .p-checkbox-box) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+:deep(.p-checkbox .p-checkbox-box.p-highlight) {
+  background: #a855f7;
+  border-color: #a855f7;
+}
+
+:deep(.p-checkbox .p-checkbox-box .p-checkbox-icon) {
+  color: #fff;
+}
+
+/* Dialog styles */
+:deep(.custom-dialog .p-dialog-header) {
+  background: #161616;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+:deep(.custom-dialog .p-dialog-content) {
+  background: #161616;
+}
+
+:deep(.custom-dialog .p-dialog-footer) {
+  background: #161616;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Form fields */
+.form-field {
+  margin-bottom: 16px;
+}
+
+.form-label {
+  display: block;
   font-size: 13px;
+  color: #9ca3af;
+  margin-bottom: 8px;
   font-weight: 500;
-  color: #e5e7eb;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.account-phone {
-  font-size: 11px;
+.placeholder-text {
   color: #6b7280;
 }
 
-.proxy-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.proxy-text {
-  font-size: 12px;
+.description {
   color: #9ca3af;
-  font-family: monospace;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.proxy-working {
-  color: #22c55e;
-}
-
-.proxy-bad {
-  color: #ef4444;
-}
-
-.proxy-spinner {
-  color: #a855f7;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
-.checking-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #60a5fa;
-}
-
-.checking-status i {
+  margin-bottom: 16px;
   font-size: 14px;
 }
 
-.inline-dropdown,
-.inline-multiselect {
-  width: 100%;
-}
-
-:deep(.inline-dropdown .p-dropdown),
-:deep(.inline-multiselect .p-multiselect) {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  min-height: 28px;
+.hint-text {
   font-size: 12px;
-  transition: border-color 0.15s;
-}
-
-:deep(.inline-dropdown .p-dropdown:hover),
-:deep(.inline-multiselect .p-multiselect:hover) {
-  border-color: #374151;
-}
-
-:deep(.inline-dropdown .p-dropdown:focus),
-:deep(.inline-multiselect .p-multiselect:focus),
-:deep(.inline-dropdown .p-dropdown.p-focus),
-:deep(.inline-multiselect .p-multiselect.p-focus) {
-  border-color: #6366f1;
-  box-shadow: none;
-}
-
-:deep(.inline-dropdown .p-dropdown-label),
-:deep(.inline-multiselect .p-multiselect-label) {
-  padding: 2px 8px;
-  font-size: 12px;
-  color: #9ca3af;
-}
-
-:deep(.inline-dropdown .p-dropdown-trigger),
-:deep(.inline-multiselect .p-multiselect-trigger) {
-  width: 24px;
-}
-
-:deep(.inline-dropdown .p-dropdown-clear-icon) {
-  font-size: 10px;
-}
-
-.tag-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
-
-.tag-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.no-data {
-  color: #4b5563;
-  font-size: 12px;
-}
-
-.twofa-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.twofa-icon {
-  color: #22c55e;
-  font-size: 12px;
-}
-
-.twofa-password {
-  font-size: 11px;
-  color: #9ca3af;
-  font-family: monospace;
-  max-width: 80px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.twofa-set {
-  font-size: 11px;
-  color: #22c55e;
+  color: #f59e0b;
+  margin-top: 4px;
 }
 
 .hint-box {
@@ -2798,64 +2678,6 @@ function handleAccountAdded() {
 .hint-box i {
   color: #a855f7;
   margin-top: 1px;
-}
-
-.actions-cell {
-  display: grid;
-  grid-template-columns: repeat(2, auto);
-  gap: 2px;
-  justify-content: start;
-}
-
-/* Dialogs */
-.form-field {
-  margin-bottom: 16px;
-}
-
-.form-label {
-  display: block;
-  font-size: 13px;
-  color: #9ca3af;
-  margin-bottom: 8px;
-  font-weight: 500;
-}
-
-.placeholder-text {
-  color: #6b7280;
-}
-
-.tab-content {
-  padding: 20px 0;
-}
-
-.description {
-  color: #9ca3af;
-  margin-bottom: 16px;
-  font-size: 14px;
-}
-
-.steps-list {
-  font-size: 13px;
-  color: #6b7280;
-  margin-bottom: 20px;
-  padding-left: 20px;
-}
-
-.steps-list li {
-  margin-bottom: 8px;
-}
-
-.format-hint {
-  font-size: 13px;
-  color: #6b7280;
-  margin-bottom: 16px;
-}
-
-.format-hint code {
-  background: rgba(0, 0, 0, 0.3);
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-family: monospace;
 }
 
 /* Color Picker */
@@ -2881,64 +2703,22 @@ function handleAccountAdded() {
   box-shadow: 0 0 0 2px #161616, 0 0 0 4px white;
 }
 
-/* Table styles */
-:deep(.custom-table .p-datatable) {
-  background: transparent;
+/* Checkbox */
+.checkbox-field {
+  display: flex;
+  align-items: center;
 }
 
-:deep(.custom-table .p-datatable-thead > tr > th) {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.06);
-  color: #6b7280;
-  font-weight: 600;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 10px 12px;
-}
-
-:deep(.custom-table .p-datatable-tbody > tr) {
-  background: transparent;
-  border-color: rgba(255, 255, 255, 0.04);
-  transition: all 0.2s;
-}
-
-:deep(.custom-table .p-datatable-tbody > tr:hover) {
-  background: rgba(255, 255, 255, 0.03);
-}
-
-:deep(.custom-table .p-datatable-tbody > tr > td) {
-  border-color: rgba(255, 255, 255, 0.04);
-  padding: 10px 12px;
-}
-
-:deep(.custom-table .p-datatable-tbody > tr.p-highlight) {
-  background: rgba(168, 85, 247, 0.1);
-}
-
-:deep(.custom-table .p-datatable-tbody > tr.p-highlight > td) {
-  border-color: rgba(168, 85, 247, 0.15);
-}
-
-:deep(.custom-table .p-datatable-thead > tr > th .p-checkbox .p-checkbox-box.p-highlight) {
+:deep(.p-slider .p-slider-handle) {
   background: #a855f7;
   border-color: #a855f7;
 }
 
-:deep(.custom-dialog .p-dialog-header) {
-  background: #161616;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+:deep(.p-slider .p-slider-range) {
+  background: #a855f7;
 }
 
-:deep(.custom-dialog .p-dialog-content) {
-  background: #161616;
-}
-
-:deep(.custom-dialog .p-dialog-footer) {
-  background: #161616;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
+/* TabView */
 :deep(.p-tabview .p-tabview-nav) {
   background: transparent;
   border-color: rgba(255, 255, 255, 0.06);
@@ -2960,416 +2740,7 @@ function handleAccountAdded() {
   background: transparent;
 }
 
-:deep(.p-checkbox .p-checkbox-box) {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-:deep(.p-checkbox .p-checkbox-box.p-highlight) {
-  background: #a855f7;
-  border-color: #a855f7;
-}
-
-:deep(.p-checkbox .p-checkbox-box .p-checkbox-icon) {
-  color: #fff;
-}
-
-/* Drop Zone */
-.drop-zone {
-  border: 2px dashed rgba(168, 85, 247, 0.3);
-  border-radius: 16px;
-  padding: 32px;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.2s;
-  background: rgba(168, 85, 247, 0.03);
-  margin-bottom: 16px;
-}
-
-.drop-zone:hover {
-  border-color: rgba(168, 85, 247, 0.5);
-  background: rgba(168, 85, 247, 0.06);
-}
-
-.drop-zone-active {
-  border-color: #a855f7;
-  background: rgba(168, 85, 247, 0.1);
-}
-
-.drop-zone-disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.drop-zone-content {
-  pointer-events: none;
-}
-
-.drop-zone-icon {
-  font-size: 40px;
-  color: #a855f7;
-  margin-bottom: 12px;
-}
-
-.drop-zone-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #e5e7eb;
-  margin-bottom: 4px;
-}
-
-.drop-zone-hint {
-  font-size: 13px;
-  color: #6b7280;
-  margin-bottom: 12px;
-}
-
-.drop-zone-buttons {
-  display: flex;
-  gap: 16px;
-  justify-content: center;
-  flex-wrap: wrap;
-  margin-top: 16px;
-  pointer-events: auto;
-}
-
-.drop-zone-buttons :deep(.p-button) {
-  padding: 12px 24px;
-}
-
-.hidden-input {
-  display: none;
-}
-
-/* Pending Files */
-.pending-files {
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 12px;
-  padding: 12px;
-  margin-bottom: 16px;
-}
-
-.pending-files-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-  font-size: 13px;
-  color: #9ca3af;
-}
-
-.pending-files-list {
-  max-height: 150px;
-  overflow-y: auto;
-}
-
-.pending-file {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  margin-bottom: 4px;
-}
-
-.pending-file i {
-  color: #a855f7;
-  font-size: 14px;
-}
-
-.pending-file .file-name {
-  flex: 1;
-  font-size: 13px;
-  color: #e5e7eb;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pending-file .file-size {
-  font-size: 11px;
-  color: #6b7280;
-}
-
-/* Session String Section */
-.session-string-section {
-  margin-top: 8px;
-}
-
-.divider-text {
-  text-align: center;
-  font-size: 12px;
-  color: #6b7280;
-  margin-bottom: 12px;
-  position: relative;
-}
-
-.divider-text::before,
-.divider-text::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  width: 35%;
-  height: 1px;
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.divider-text::before {
-  left: 0;
-}
-
-.divider-text::after {
-  right: 0;
-}
-
-/* Batch Check Dialog */
-.checkbox-field {
-  display: flex;
-  align-items: center;
-}
-
-.hint-text {
-  font-size: 12px;
-  color: #f59e0b;
-  margin-top: 4px;
-}
-
-:deep(.p-slider .p-slider-handle) {
-  background: #a855f7;
-  border-color: #a855f7;
-}
-
-:deep(.p-slider .p-slider-range) {
-  background: #a855f7;
-}
-
-/* Required label */
-.required-label::after {
-  content: '';
-  color: #ef4444;
-}
-
-/* Proxy required hint */
-.proxy-required-hint {
-  display: block;
-  color: #f59e0b;
-  font-size: 12px;
-  margin-top: 8px;
-}
-
-.no-proxy-warning {
-  display: block;
-  color: #ef4444;
-  font-size: 12px;
-  margin-top: 4px;
-}
-
-/* Proxy option in dropdown */
-.proxy-option {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-}
-
-.proxy-type {
-  font-size: 11px;
-  color: #6b7280;
-  background: rgba(255, 255, 255, 0.05);
-  padding: 2px 8px;
-  border-radius: 4px;
-  text-transform: uppercase;
-}
-
-/* Inline Proxy Form */
-.proxy-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.proxy-header .form-label {
-  margin-bottom: 0;
-}
-
-.inline-proxy-form {
-  background: rgba(168, 85, 247, 0.05);
-  border: 1px solid rgba(168, 85, 247, 0.15);
-  border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 12px;
-}
-
-.proxy-form-row {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.proxy-form-row:last-of-type {
-  margin-bottom: 0;
-}
-
-.proxy-form-field {
-  flex: 1;
-}
-
-.proxy-form-field.type-field {
-  flex: 0.8;
-}
-
-.proxy-form-field.host-field {
-  flex: 1.5;
-}
-
-.proxy-form-field.port-field {
-  flex: 0.7;
-}
-
-.form-label-small {
-  display: block;
-  font-size: 11px;
-  color: #9ca3af;
-  margin-bottom: 4px;
-  font-weight: 500;
-}
-
-.proxy-mode-toggle {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.proxy-mode-toggle :deep(.p-button) {
-  flex: 1;
-}
-
-.proxy-string-input {
-  display: flex;
-  flex-direction: column;
-}
-
-.proxy-format-hint {
-  color: #6b7280;
-  font-size: 11px;
-  margin-top: 4px;
-}
-
-/* Import Preview Styles */
-.import-preview-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.import-stats {
-  display: flex;
-  gap: 16px;
-}
-
-.stat-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: #9ca3af;
-}
-
-.stat-item i {
-  font-size: 14px;
-}
-
-.stat-valid {
-  color: #22c55e;
-}
-
-.stat-invalid {
-  color: #ef4444;
-}
-
-.stat-pending {
-  color: #6b7280;
-}
-
-.bulk-proxy-section {
-  margin-bottom: 16px;
-  padding: 12px;
-  background: rgba(168, 85, 247, 0.05);
-  border: 1px solid rgba(168, 85, 247, 0.15);
-  border-radius: 12px;
-}
-
-.bulk-proxy-section .form-label {
-  margin-bottom: 8px;
-}
-
-.bulk-proxy-row {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.parsed-accounts-table {
-  margin-bottom: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.import-table {
-  font-size: 13px;
-}
-
-:deep(.import-table .p-datatable-tbody > tr > td) {
-  padding: 10px 12px;
-}
-
-.import-proxy-dropdown {
-  min-width: 160px;
-}
-
-:deep(.import-proxy-dropdown .p-dropdown-label) {
-  font-size: 12px;
-  padding: 6px 10px;
-}
-
-.source-file {
-  font-size: 12px;
-  color: #6b7280;
-  font-family: monospace;
-}
-
-.account-preview {
-  font-size: 13px;
-  color: #e5e7eb;
-}
-
-.proxy-text-small {
-  font-size: 12px;
-  font-family: monospace;
-}
-
-.error-text {
-  font-size: 12px;
-  color: #ef4444;
-  cursor: help;
-}
-
-.import-actions {
-  display: flex;
-  gap: 12px;
-}
-
-.import-actions .p-button {
-  justify-content: center;
-}
-
-/* Unified Import Dialog Styles - base styles in main.css */
+/* Import Dialog Unified */
 .upload-cards {
   display: flex;
   align-items: center;
@@ -3399,6 +2770,39 @@ function handleAccountAdded() {
   color: #a855f7;
 }
 
+.import-stats-bar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.stat-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #9ca3af;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 4px 10px;
+  border-radius: 8px;
+}
+
+.stat-badge i {
+  font-size: 12px;
+}
+
+.stat-proxy {
+  color: #a855f7;
+}
+
+.stat-verified {
+  color: #22c55e;
+}
+
+.import-table-container {
+  margin-bottom: 12px;
+}
+
 :deep(.import-table-unified .p-datatable-tbody > tr > td) {
   padding: 10px 12px;
 }
@@ -3425,6 +2829,14 @@ function handleAccountAdded() {
   color: #6b7280;
 }
 
+.account-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #d1d5db;
+}
+
 .format-cell {
   display: flex;
   align-items: center;
@@ -3435,6 +2847,21 @@ function handleAccountAdded() {
 
 .format-cell i {
   color: #6b7280;
+}
+
+.empty-table-message {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.empty-table-message i {
+  font-size: 28px;
+  color: #4b5563;
 }
 
 .import-action-buttons {
@@ -3452,12 +2879,25 @@ function handleAccountAdded() {
   background: var(--color-bg-elevated, #18181b) !important;
 }
 
-:deep(.light .import-dialog-unified .p-dialog-content),
-:deep(.light .import-dialog-unified .p-dialog-header) {
-  background: #ffffff !important;
+/* Proxy option in dropdown */
+.proxy-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
 }
 
-/* Logs Toggle Row */
+.proxy-status-tag {
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+/* Drop Zone */
+.hidden-input {
+  display: none;
+}
+
+/* Logs */
 .logs-toggle-row {
   display: flex;
   align-items: center;
@@ -3465,7 +2905,6 @@ function handleAccountAdded() {
   margin-bottom: 12px;
 }
 
-/* Import Logs Panel */
 .import-logs-panel {
   margin-bottom: 16px;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -3519,25 +2958,6 @@ function handleAccountAdded() {
   color: #f59e0b;
 }
 
-/* Light theme logs */
-.light .import-logs-panel {
-  background: rgba(0, 0, 0, 0.02);
-  border-color: rgba(0, 0, 0, 0.1);
-}
-
-.light .logs-header {
-  background: rgba(0, 0, 0, 0.02);
-  border-color: rgba(0, 0, 0, 0.06);
-}
-
-.light .log-entry:hover {
-  background: rgba(0, 0, 0, 0.03);
-}
-
-.light .logs-toggle-row {
-  border-color: rgba(0, 0, 0, 0.1);
-}
-
 /* Quick Proxy Dialog */
 .quick-proxy-content {
   display: flex;
@@ -3570,13 +2990,28 @@ function handleAccountAdded() {
   font-size: 13px;
 }
 
-.proxy-status-tag {
-  font-size: 10px;
-  padding: 2px 6px;
+.format-hint {
+  font-size: 13px;
+  color: #6b7280;
 }
 
-.light .quick-proxy-result {
-  background: rgba(0, 0, 0, 0.02);
-  border-color: rgba(0, 0, 0, 0.06);
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.tag-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.tag-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 </style>

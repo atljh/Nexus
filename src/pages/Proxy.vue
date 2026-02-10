@@ -53,6 +53,11 @@ const loading = ref(false)
 const checking = ref(false)
 const selectedProxies = ref<Proxy[]>([])
 
+// Filters
+const statusFilter = ref<string | null>(null)
+const typeFilter = ref<string | null>(null)
+const searchQuery = ref('')
+
 // Preview state
 const proxyPreviews = ref<ProxyPreview[]>([])
 const isCheckingPreviews = ref(false)
@@ -60,6 +65,22 @@ const checkProgress = ref(0)
 const showPreview = ref(false)
 
 const proxyTypes = [
+  { label: 'SOCKS5', value: 'socks5' },
+  { label: 'SOCKS4', value: 'socks4' },
+  { label: 'HTTP', value: 'http' },
+  { label: 'HTTPS', value: 'https' }
+]
+
+const statusOptions = [
+  { label: 'Working', value: 'working' },
+  { label: 'Slow', value: 'slow' },
+  { label: 'Very Slow', value: 'very_slow' },
+  { label: 'Not Working', value: 'not_working' },
+  { label: 'Timeout', value: 'timeout' },
+  { label: 'Unchecked', value: 'unchecked' }
+]
+
+const typeFilterOptions = [
   { label: 'SOCKS5', value: 'socks5' },
   { label: 'SOCKS4', value: 'socks4' },
   { label: 'HTTP', value: 'http' },
@@ -84,6 +105,39 @@ const editInputMode = ref<'form' | 'string'>('form')
 const editProxyString = ref('')
 const editCheckStatus = ref<'idle' | 'checking' | 'success' | 'error'>('idle')
 const editCheckResult = ref<{ status: string; ping_ms?: number; geo?: string } | null>(null)
+
+// Stats
+const totalProxies = computed(() => proxies.value.length)
+const workingProxies = computed(() => proxies.value.filter(p => p.status === 'working').length)
+const slowProxies = computed(() => proxies.value.filter(p => ['slow', 'very_slow'].includes(p.status)).length)
+const notWorkingProxies = computed(() => proxies.value.filter(p => ['not_working', 'timeout'].includes(p.status)).length)
+const uncheckedProxies = computed(() => proxies.value.filter(p => p.status === 'unchecked').length)
+
+// Filtered proxies
+const filteredProxies = computed(() => {
+  let result = proxies.value
+
+  if (statusFilter.value) {
+    result = result.filter(p => p.status === statusFilter.value)
+  }
+
+  if (typeFilter.value) {
+    result = result.filter(p => p.type === typeFilter.value)
+  }
+
+  if (searchQuery.value.trim()) {
+    const q = searchQuery.value.toLowerCase()
+    result = result.filter(p =>
+      `${p.host}:${p.port}`.toLowerCase().includes(q) ||
+      (p.external_ip && p.external_ip.toLowerCase().includes(q)) ||
+      (p.geo && p.geo.toLowerCase().includes(q))
+    )
+  }
+
+  return result
+})
+
+const hasSelection = computed(() => selectedProxies.value.length > 0)
 
 // Computed
 const workingPreviews = computed(() =>
@@ -127,6 +181,31 @@ function getStatusSeverity(status: string): "success" | "danger" | "warn" | "sec
     case 'timeout': return 'danger'
     default: return 'secondary'
   }
+}
+
+function countryFlag(code: string | null): string {
+  if (!code) return ''
+  return code.toUpperCase().replace(/./g, c => String.fromCodePoint(c.charCodeAt(0) + 0x1F1A5))
+}
+
+function formatLastChecked(dateStr: string | null): string {
+  if (!dateStr) return '—'
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMin = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+
+  if (diffMin < 1) return 'Только что'
+  if (diffMin < 60) return `${diffMin} мин назад`
+  if (diffHours < 24) return `${diffHours} ч назад`
+  if (diffDays < 7) return `${diffDays} дн назад`
+  return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })
+}
+
+function setStatusFilter(val: string | null) {
+  statusFilter.value = val
 }
 
 function parseProxyString(str: string): { type: 'socks5' | 'socks4' | 'http' | 'https'; host: string; port: number; username?: string; password?: string } | null {
@@ -585,6 +664,34 @@ async function deleteProxy(proxy: Proxy) {
   }
 }
 
+async function deleteSelectedProxies() {
+  if (selectedProxies.value.length === 0) return
+  if (!confirm(`Удалить ${selectedProxies.value.length} прокси?`)) return
+
+  try {
+    for (const proxy of selectedProxies.value) {
+      await window.api.delete(`/api/proxy/${proxy.id}`)
+    }
+
+    toast.add({
+      severity: 'success',
+      summary: t('common.success'),
+      detail: `Удалено ${selectedProxies.value.length} прокси`,
+      life: 3000
+    })
+
+    selectedProxies.value = []
+    loadProxies()
+  } catch (error: any) {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: error.message || t('proxy.messages.deleteFailed'),
+      life: 3000
+    })
+  }
+}
+
 function resetForm() {
   newProxy.value = {
     type: 'socks5',
@@ -615,48 +722,104 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
     default: return 'secondary'
   }
 }
-
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return t('common.never')
-  return new Date(dateStr).toLocaleString()
-}
 </script>
 
 <template>
   <MainLayout>
     <Toast />
     <div class="proxy-page">
-      <div class="page-header">
-        <h1 class="page-title">{{ t('proxy.title') }}</h1>
-        <div class="header-actions">
-          <Button
-            :label="t('proxy.addProxy')"
-            icon="pi pi-plus"
-            @click="showAddDialog = true"
-          />
-          <Button
-            :label="t('proxy.checkAll')"
-            icon="pi pi-refresh"
-            severity="secondary"
-            :loading="checking"
-            @click="checkAllProxies"
-            :disabled="proxies.length === 0"
-          />
+      <!-- Stats Cards -->
+      <div class="stats-row">
+        <div class="stat-card" :class="{ active: !statusFilter }" @click="setStatusFilter(null)">
+          <div class="stat-value accent">{{ totalProxies }}</div>
+          <div class="stat-label">Все прокси</div>
+        </div>
+        <div class="stat-card" :class="{ active: statusFilter === 'working' }" @click="setStatusFilter('working')">
+          <div class="stat-value">{{ workingProxies }}</div>
+          <div class="stat-label">Рабочие</div>
+        </div>
+        <div class="stat-card" :class="{ active: statusFilter === 'slow' }" @click="setStatusFilter('slow')">
+          <div class="stat-value">{{ slowProxies }}</div>
+          <div class="stat-label">Медленные</div>
+        </div>
+        <div class="stat-card" :class="{ active: statusFilter === 'not_working' }" @click="setStatusFilter('not_working')">
+          <div class="stat-value">{{ notWorkingProxies }}</div>
+          <div class="stat-label">Нерабочие</div>
+        </div>
+        <div class="stat-card" :class="{ active: statusFilter === 'unchecked' }" @click="setStatusFilter('unchecked')">
+          <div class="stat-value">{{ uncheckedProxies }}</div>
+          <div class="stat-label">Не проверены</div>
         </div>
       </div>
 
-      <ProgressBar v-if="checking" mode="indeterminate" style="height: 4px" class="mb-4" />
+      <!-- Toolbar -->
+      <div class="toolbar-row">
+        <div class="toolbar-actions">
+          <button class="toolbar-btn" @click="showAddDialog = true" v-tooltip.top="t('proxy.addProxy')">
+            <i class="pi pi-plus"></i>
+          </button>
+          <button class="toolbar-btn" :disabled="proxies.length === 0" @click="checkAllProxies" v-tooltip.top="t('proxy.checkAll')">
+            <i class="pi pi-refresh"></i>
+          </button>
+          <button class="toolbar-btn" :disabled="!hasSelection" @click="deleteSelectedProxies" v-tooltip.top="'Удалить выбранные'">
+            <i class="pi pi-trash"></i>
+          </button>
+        </div>
+        <span class="shown-count">
+          Показано: {{ filteredProxies.length }} / {{ proxies.length }}
+        </span>
+      </div>
 
-      <!-- Proxy table -->
+      <ProgressBar v-if="checking" mode="indeterminate" style="height: 4px" class="check-progress" />
+
+      <!-- Filters + Search -->
+      <div class="filters-row">
+        <div class="filter-chips">
+          <Dropdown
+            :model-value="statusFilter"
+            :options="statusOptions"
+            optionLabel="label"
+            optionValue="value"
+            :placeholder="t('common.status')"
+            @update:model-value="setStatusFilter"
+            class="filter-chip"
+            showClear
+          />
+          <Dropdown
+            :model-value="typeFilter"
+            :options="typeFilterOptions"
+            optionLabel="label"
+            optionValue="value"
+            placeholder="Тип"
+            @update:model-value="(val: string | null) => typeFilter = val"
+            class="filter-chip"
+            showClear
+          />
+        </div>
+        <div class="search-box">
+          <div class="search-wrap">
+            <i class="pi pi-search search-icon"></i>
+            <InputText
+              v-model="searchQuery"
+              placeholder="Поиск по IP, хосту, гео..."
+              class="search-input"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- Proxy Table -->
       <div class="table-card">
         <DataTable
           v-model:selection="selectedProxies"
-          :value="proxies"
+          :value="filteredProxies"
           :loading="loading"
           paginator
-          :rows="20"
+          :rows="50"
           dataKey="id"
           class="custom-table"
+          scrollable
+          scrollHeight="flex"
         >
           <template #empty>
             <div class="empty-state">
@@ -672,65 +835,81 @@ function formatDate(dateStr: string | null): string {
             </div>
           </template>
 
-          <Column field="id" header="ID" sortable style="width: 80px" />
-          <Column :header="t('proxy.title')" sortable>
+          <Column selectionMode="multiple" headerStyle="width: 3rem"></Column>
+
+          <Column header="#" style="width: 50px">
+            <template #body="{ index }">
+              <span class="row-index">{{ index + 1 }}</span>
+            </template>
+          </Column>
+
+          <Column header="Прокси" sortable field="host" style="min-width: 200px">
             <template #body="{ data }">
               <div class="proxy-cell">
                 <span class="proxy-address">{{ data.host }}:{{ data.port }}</span>
-                <Tag :value="data.type.toUpperCase()" severity="secondary" class="proxy-type" />
+                <span class="proxy-type-badge">{{ data.type.toUpperCase() }}</span>
               </div>
             </template>
           </Column>
-          <Column :header="t('proxy.auth')" style="width: 100px">
+
+          <Column header="Гео" style="width: 90px" sortable field="geo">
             <template #body="{ data }">
-              <Tag
-                :value="data.username ? t('common.yes') : t('common.no')"
-                :severity="data.username ? 'success' : 'secondary'"
-              />
+              <div v-if="data.geo" class="geo-cell">
+                <span class="geo-flag">{{ countryFlag(data.geo) }}</span>
+                <span class="geo-code">{{ data.geo?.toUpperCase() }}</span>
+              </div>
+              <span v-else class="no-data">—</span>
             </template>
           </Column>
-          <Column field="status" :header="t('common.status')" sortable style="width: 120px">
+
+          <Column field="status" :header="t('common.status')" sortable style="min-width: 120px">
             <template #body="{ data }">
-              <Tag :value="t(`proxy.status.${data.status}`)" :severity="getStatusSeverity(data.status)" />
+              <div v-if="data.status === 'checking'" class="checking-status">
+                <i class="pi pi-spin pi-spinner"></i>
+                <span>Проверка...</span>
+              </div>
+              <Tag v-else :value="t(`proxy.status.${data.status}`)" :severity="getStatusSeverity(data.status)" class="status-pill" />
             </template>
           </Column>
-          <Column :header="t('proxy.accounts')" style="width: 100px">
+
+          <Column header="Ping" style="width: 80px" sortable field="ping_ms">
+            <template #body="{ data }">
+              <span v-if="data.ping_ms" class="ping-text" :class="{ 'ping-good': data.ping_ms < 500, 'ping-slow': data.ping_ms >= 500 && data.ping_ms < 2000, 'ping-bad': data.ping_ms >= 2000 }">{{ data.ping_ms }}ms</span>
+              <span v-else class="no-data">—</span>
+            </template>
+          </Column>
+
+          <Column header="Акк." style="width: 70px" sortable field="accounts_count">
             <template #body="{ data }">
               <span class="accounts-count">{{ data.accounts_count }}</span>
             </template>
           </Column>
-          <Column :header="t('proxy.lastCheck')" style="width: 180px">
+
+          <Column header="Внешний IP" style="min-width: 130px">
             <template #body="{ data }">
-              <span class="last-check">{{ formatDate(data.last_checked_at) }}</span>
+              <span v-if="data.external_ip" class="ip-text">{{ data.external_ip }}</span>
+              <span v-else class="no-data">—</span>
             </template>
           </Column>
-          <Column :header="t('common.actions')" style="width: 150px">
+
+          <Column header="Проверка" style="min-width: 120px" sortable field="last_checked_at">
+            <template #body="{ data }">
+              <span class="last-check-text">{{ formatLastChecked(data.last_checked_at) }}</span>
+            </template>
+          </Column>
+
+          <Column header="Действия" style="width: 120px">
             <template #body="{ data }">
               <div class="actions-cell">
-                <Button
-                  icon="pi pi-refresh"
-                  severity="secondary"
-                  text
-                  rounded
-                  v-tooltip.top="t('common.check')"
-                  @click="checkProxy(data)"
-                />
-                <Button
-                  icon="pi pi-pencil"
-                  severity="secondary"
-                  text
-                  rounded
-                  v-tooltip.top="t('common.edit')"
-                  @click="openEditDialog(data)"
-                />
-                <Button
-                  icon="pi pi-trash"
-                  severity="danger"
-                  text
-                  rounded
-                  v-tooltip.top="t('common.delete')"
-                  @click="deleteProxy(data)"
-                />
+                <button class="action-icon" @click="checkProxy(data)" v-tooltip.top="t('common.check')">
+                  <i class="pi pi-refresh"></i>
+                </button>
+                <button class="action-icon" @click="openEditDialog(data)" v-tooltip.top="t('common.edit')">
+                  <i class="pi pi-pencil"></i>
+                </button>
+                <button class="action-icon delete" @click="deleteProxy(data)" v-tooltip.top="t('common.delete')">
+                  <i class="pi pi-trash"></i>
+                </button>
               </div>
             </template>
           </Column>
@@ -1030,33 +1209,168 @@ function formatDate(dateStr: string | null): string {
 
 <style scoped>
 .proxy-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   max-width: 1400px;
 }
 
-.page-header {
+/* Stats Row */
+.stats-row {
+  display: flex;
+  gap: 8px;
+}
+
+.stat-card {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+}
+
+.stat-card:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.stat-card.active {
+  border-color: rgba(168, 85, 247, 0.4);
+  background: rgba(168, 85, 247, 0.08);
+}
+
+.stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #e5e7eb;
+  line-height: 1.2;
+}
+
+.stat-value.accent {
+  color: #a855f7;
+}
+
+.stat-label {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+/* Toolbar */
+.toolbar-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 24px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
 }
 
-.page-title {
-  font-size: 28px;
-  font-weight: 700;
-  color: #f3f4f6;
-  letter-spacing: -0.5px;
-}
-
-.header-actions {
+.toolbar-actions {
   display: flex;
+  gap: 4px;
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: #9ca3af;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 14px;
+}
+
+.toolbar-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e5e7eb;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.shown-count {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.check-progress {
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+/* Filters */
+.filters-row {
+  display: flex;
+  align-items: center;
   gap: 12px;
 }
 
+.filter-chips {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+}
+
+.filter-chip {
+  min-width: 140px;
+}
+
+:deep(.filter-chip .p-dropdown) {
+  border-radius: 20px;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 13px;
+  height: 34px;
+}
+
+.search-box {
+  flex-shrink: 0;
+}
+
+.search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-icon {
+  position: absolute;
+  left: 12px;
+  color: #6b7280;
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.search-input {
+  padding-left: 34px;
+  width: 240px;
+  height: 34px;
+  font-size: 13px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* Table */
 .table-card {
   background: linear-gradient(145deg, #161616 0%, #111111 100%);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 16px;
-  padding: 16px;
+  border-radius: 12px;
+  padding: 0;
   overflow: hidden;
 }
 
@@ -1089,33 +1403,181 @@ function formatDate(dateStr: string | null): string {
   font-size: 15px;
 }
 
+.row-index {
+  font-size: 12px;
+  color: #6b7280;
+}
+
 .proxy-cell {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .proxy-address {
-  font-family: monospace;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 13px;
   color: #e5e7eb;
 }
 
-.proxy-type {
+.proxy-type-badge {
   font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(168, 85, 247, 0.12);
+  color: #a855f7;
+  letter-spacing: 0.3px;
+}
+
+.geo-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.geo-flag {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.geo-code {
+  font-size: 11px;
+  color: #9ca3af;
+  font-weight: 600;
+}
+
+.no-data {
+  color: #4b5563;
+}
+
+.checking-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #60a5fa;
+  font-size: 13px;
+}
+
+:deep(.status-pill) {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+
+.ping-text {
+  font-size: 12px;
+  font-weight: 500;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.ping-good {
+  color: #10b981;
+}
+
+.ping-slow {
+  color: #f59e0b;
+}
+
+.ping-bad {
+  color: #ef4444;
 }
 
 .accounts-count {
   color: #9ca3af;
+  font-size: 13px;
 }
 
-.last-check {
-  font-size: 13px;
+.ip-text {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.last-check-text {
+  font-size: 12px;
   color: #6b7280;
 }
 
 .actions-cell {
   display: flex;
-  gap: 4px;
+  gap: 2px;
+}
+
+.action-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 13px;
+}
+
+.action-icon:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e5e7eb;
+}
+
+.action-icon.delete:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+/* DataTable overrides */
+:deep(.custom-table .p-datatable) {
+  background: transparent;
+}
+
+:deep(.custom-table .p-datatable-thead > tr > th) {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.06);
+  color: #6b7280;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 10px 12px;
+}
+
+:deep(.custom-table .p-datatable-tbody > tr) {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.04);
+  transition: all 0.15s;
+}
+
+:deep(.custom-table .p-datatable-tbody > tr:hover) {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+:deep(.custom-table .p-datatable-tbody > tr > td) {
+  border-color: rgba(255, 255, 255, 0.04);
+  padding: 10px 12px;
+}
+
+:deep(.custom-table .p-datatable-tbody > tr.p-highlight) {
+  background: rgba(168, 85, 247, 0.08);
+}
+
+:deep(.custom-table .p-datatable-tbody > tr.p-highlight > td) {
+  border-color: rgba(168, 85, 247, 0.1);
+}
+
+/* Dialog styles */
+:deep(.custom-dialog .p-dialog-header) {
+  background: #161616;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+:deep(.custom-dialog .p-dialog-content) {
+  background: #161616;
+  padding: 24px;
 }
 
 .dialog-content {
@@ -1166,45 +1628,6 @@ function formatDate(dateStr: string | null): string {
   justify-content: flex-end;
   gap: 12px;
   margin-top: 8px;
-}
-
-:deep(.custom-table .p-datatable) {
-  background: transparent;
-}
-
-:deep(.custom-table .p-datatable-thead > tr > th) {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.06);
-  color: #6b7280;
-  font-weight: 600;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-:deep(.custom-table .p-datatable-tbody > tr) {
-  background: transparent;
-  border-color: rgba(255, 255, 255, 0.04);
-  transition: all 0.2s;
-}
-
-:deep(.custom-table .p-datatable-tbody > tr:hover) {
-  background: rgba(255, 255, 255, 0.03);
-}
-
-:deep(.custom-table .p-datatable-tbody > tr > td) {
-  border-color: rgba(255, 255, 255, 0.04);
-  padding: 16px;
-}
-
-:deep(.custom-dialog .p-dialog-header) {
-  background: #161616;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-:deep(.custom-dialog .p-dialog-content) {
-  background: #161616;
-  padding: 24px;
 }
 
 .mode-toggle {
