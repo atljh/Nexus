@@ -68,12 +68,20 @@ export function useWebKSession(accountRef: Ref<Account | null>) {
   }
 
   /**
-   * Initialize webview session with proxy
+   * Initialize webview session with proxy.
+   * Accepts proxy config with credentials (from webk-session response),
+   * because the accounts API does not return the proxy password.
    */
-  async function initializeWebView(): Promise<boolean> {
+  async function initializeWebView(proxyWithCredentials?: { type: string; host: string; port: number; username?: string | null; password?: string | null }): Promise<boolean> {
     const acc = account.value
-    if (!acc || !acc.proxy) {
-      state.value.error = 'Account or proxy not available'
+    if (!acc) {
+      state.value.error = 'Account not available'
+      return false
+    }
+
+    const proxy = proxyWithCredentials || acc.proxy
+    if (!proxy) {
+      state.value.error = 'No proxy available'
       return false
     }
 
@@ -84,13 +92,13 @@ export function useWebKSession(accountRef: Ref<Account | null>) {
       // Get preload path
       preloadPath.value = await window.api.webview.getPreloadPath()
 
-      // Prepare proxy config
+      // Prepare proxy config with credentials
       const proxyConfig: WebViewProxyConfig = {
-        type: acc.proxy.type,
-        host: acc.proxy.host,
-        port: acc.proxy.port,
-        username: acc.proxy.username ?? undefined,
-        password: acc.proxy.password ?? undefined,
+        type: proxy.type,
+        host: proxy.host,
+        port: proxy.port,
+        username: proxy.username ?? undefined,
+        password: proxy.password ?? undefined,
       }
 
       // Get device fingerprint from account metadata

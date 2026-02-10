@@ -21,9 +21,9 @@ const { t } = useI18n()
 
 // Refs
 const accountRef = ref<Account | null>(null)
-const webviewRef = ref<HTMLWebViewElement | null>(null)
 const webviewReady = ref(false)
-const injecting = ref(false)
+const loadCount = ref(0)
+let webviewEl: any = null // Direct DOM reference, not Vue ref
 
 // Watch account prop
 watch(
@@ -38,7 +38,6 @@ watch(
 const {
   state,
   sessionData,
-  preloadPath,
   canOpen,
   webkUrl,
   fetchSessionData,
@@ -80,26 +79,35 @@ async function startViewer() {
 
   state.value.loading = true
   state.value.error = null
+  state.value.sessionInjected = false
   webviewReady.value = false
+  loadCount.value = 0
 
   try {
-    // Initialize webview session with proxy
-    const initialized = await initializeWebView()
-    if (!initialized) {
-      return
-    }
-
-    // Fetch session data from backend
+    // Fetch session data from backend FIRST
+    // (the webk-session response includes proxy with password,
+    //  which the accounts API does not return)
     const response = await fetchSessionData()
     if (!response) {
       return
     }
 
-    // Wait for webview to be ready
-    await nextTick()
+    console.log('[WebViewer] Session data fetched, initializing webview with proxy credentials...')
+
+    // Initialize webview session using proxy from webk-session response (has password)
+    const initialized = await initializeWebView(response.proxy)
+    if (!initialized) {
+      return
+    }
 
     // Set webview ready for rendering
     webviewReady.value = true
+
+    // Wait for Vue to render the webview element
+    await nextTick()
+
+    // Get webview element directly from DOM (Vue ref may not work for custom elements)
+    await waitForWebviewAndAttach()
   } catch (error) {
     state.value.error = error instanceof Error ? error.message : 'Unknown error'
     console.error('[WebViewer] Start failed:', error)
@@ -108,8 +116,38 @@ async function startViewer() {
   }
 }
 
+/**
+ * Poll for the webview element in DOM and attach event listeners.
+ * Vue's template ref may not reliably trigger for Electron's <webview> custom element.
+ */
+async function waitForWebviewAndAttach(): Promise<void> {
+  for (let i = 0; i < 20; i++) {
+    const el = document.querySelector('.webviewer-webview') as any
+    if (el) {
+      webviewEl = el
+      console.log('[WebViewer] Found webview element in DOM, attaching listeners')
+      el.addEventListener('dom-ready', onDomReady)
+      el.addEventListener('did-finish-load', onDidFinishLoad)
+      el.addEventListener('did-fail-load', onDidFailLoad)
+      el.addEventListener('console-message', onConsoleMessage)
+      return
+    }
+    await new Promise(r => setTimeout(r, 100))
+  }
+  console.error('[WebViewer] Webview element not found in DOM after polling')
+  state.value.error = 'Webview element not found'
+}
+
 function stopViewer() {
+  if (webviewEl) {
+    webviewEl.removeEventListener('dom-ready', onDomReady)
+    webviewEl.removeEventListener('did-finish-load', onDidFinishLoad)
+    webviewEl.removeEventListener('did-fail-load', onDidFailLoad)
+    webviewEl.removeEventListener('console-message', onConsoleMessage)
+    webviewEl = null
+  }
   webviewReady.value = false
+  loadCount.value = 0
   cleanup()
 }
 
@@ -120,18 +158,20 @@ function handleClose() {
 }
 
 async function handleReload() {
-  if (webviewRef.value) {
-    webviewRef.value.reload()
+  if (webviewEl) {
+    state.value.sessionInjected = false
+    loadCount.value = 0
+    webviewEl.reload()
   }
 }
 
-async function injectSessionToWebview(data: WebKSessionData) {
-  if (!webviewRef.value) return
-
-  injecting.value = true
+async function injectSessionToWebview(data: WebKSessionData): Promise<boolean> {
+  if (!webviewEl) {
+    console.error('[WebViewer] No webview element for injection')
+    return false
+  }
 
   try {
-    // Execute injection script in webview
     const script = `
       (function() {
         try {
@@ -139,7 +179,7 @@ async function injectSessionToWebview(data: WebKSessionData) {
           const keysToRemove = [];
           for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
-            if (key && (key.startsWith('dc') || key.startsWith('user_auth') || key.startsWith('account'))) {
+            if (key && (key.startsWith('dc') || key.startsWith('user_auth') || key.startsWith('account') || key === 'auth_key_fingerprint')) {
               keysToRemove.push(key);
             }
           }
@@ -157,8 +197,15 @@ async function injectSessionToWebview(data: WebKSessionData) {
             }
           }
 
-          console.log('[Nexus] Session injected successfully');
-          return { success: true };
+          // Verify injection
+          const dc = localStorage.getItem('dc');
+          const userAuth = localStorage.getItem('user_auth');
+          const allKeys = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            allKeys.push(localStorage.key(i));
+          }
+          console.log('[Nexus] Session injected OK: dc=' + dc + ', keys=' + allKeys.join(','));
+          return { success: true, dc: dc, userAuth: userAuth, keys: allKeys };
         } catch (error) {
           console.error('[Nexus] Session injection failed:', error);
           return { success: false, error: error.message };
@@ -166,43 +213,66 @@ async function injectSessionToWebview(data: WebKSessionData) {
       })();
     `
 
-    await webviewRef.value.executeJavaScript(script)
+    const result = await webviewEl.executeJavaScript(script)
+    console.log('[WebViewer] Injection result:', JSON.stringify(result))
     state.value.sessionInjected = true
+    return true
   } catch (error) {
-    console.error('[WebViewer] Injection failed:', error)
-    state.value.error = 'Session injection failed'
-  } finally {
-    injecting.value = false
+    console.error('[WebViewer] executeJavaScript failed:', error)
+    state.value.error = `Injection failed: ${error instanceof Error ? error.message : error}`
+    return false
   }
 }
 
-// Webview event handlers
-function onWebviewDidFinishLoad() {
-  console.log('[WebViewer] Webview loaded')
+// Native webview event handlers
 
-  // Inject session after page loads
-  if (sessionData.value && !state.value.sessionInjected) {
-    injectSessionToWebview(sessionData.value).then(() => {
-      // Reload after injection
-      if (webviewRef.value) {
-        webviewRef.value.reload()
+function onDomReady() {
+  loadCount.value++
+  console.log(`[WebViewer] dom-ready (load #${loadCount.value})`)
+
+  if (loadCount.value === 1 && sessionData.value && !state.value.sessionInjected) {
+    console.log('[WebViewer] First load — injecting session...')
+    injectSessionToWebview(sessionData.value).then((success) => {
+      if (success && webviewEl) {
+        console.log('[WebViewer] Injection done, reloading...')
+        webviewEl.reload()
       }
     })
+  } else if (loadCount.value === 2) {
+    // Verify session persisted after reload
+    webviewEl?.executeJavaScript(`
+      (function() {
+        const dc = localStorage.getItem('dc');
+        const ua = localStorage.getItem('user_auth');
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+        console.log('[Nexus] After reload: dc=' + dc + ', user_auth=' + ua + ', keys=' + keys.join(','));
+        return { dc, ua, keys };
+      })();
+    `).then((r: any) => console.log('[WebViewer] Post-reload localStorage:', JSON.stringify(r)))
+      .catch((e: any) => console.error('[WebViewer] Post-reload check failed:', e))
   }
 }
 
-function onWebviewDidFailLoad(event: Event) {
-  const e = event as unknown as { errorCode: number; errorDescription: string }
-  console.error('[WebViewer] Load failed:', e.errorCode, e.errorDescription)
-  // Ignore -3 (aborted) errors
-  if (e.errorCode !== -3) {
-    state.value.error = `Load failed: ${e.errorDescription}`
+function onDidFinishLoad() {
+  console.log(`[WebViewer] did-finish-load (load #${loadCount.value})`)
+}
+
+function onDidFailLoad(event: any) {
+  const errorCode = event?.errorCode ?? 'unknown'
+  const errorDesc = event?.errorDescription ?? 'unknown'
+  console.error(`[WebViewer] did-fail-load: code=${errorCode} desc=${errorDesc}`)
+  // Ignore -3 (aborted/cancelled) — happens during reload
+  if (errorCode !== -3) {
+    state.value.error = `Load failed: ${errorDesc} (code: ${errorCode})`
   }
 }
 
-function onWebviewConsoleMessage(event: Event) {
-  const e = event as unknown as { message: string; level: number }
-  console.log('[WebK]', e.message)
+function onConsoleMessage(event: any) {
+  const msg = event?.message ?? ''
+  const level = event?.level ?? 0
+  const prefix = level === 2 ? 'ERROR' : level === 1 ? 'WARN' : 'LOG'
+  console.log(`[WebK:${prefix}] ${msg}`)
 }
 
 // Cleanup
@@ -269,15 +339,10 @@ onUnmounted(() => {
             <!-- Webview -->
             <webview
               v-else-if="webviewReady && state.partition"
-              ref="webviewRef"
               :src="webkUrl"
               :partition="state.partition"
-              :preload="preloadPath || undefined"
               class="webviewer-webview"
               allowpopups
-              @did-finish-load="onWebviewDidFinishLoad"
-              @did-fail-load="onWebviewDidFailLoad"
-              @console-message="onWebviewConsoleMessage"
             />
           </div>
         </div>
@@ -302,9 +367,9 @@ onUnmounted(() => {
 }
 
 .webviewer-popup {
-  width: 420px;
-  height: 680px;
-  max-height: 90vh;
+  width: 90vw;
+  max-width: 1200px;
+  height: 85vh;
   background: var(--surface-ground);
   border-radius: 12px;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);

@@ -229,29 +229,26 @@ class StringSessionToWebKConverter:
 
             # Convert proxy format for Telethon
             telethon_proxy = None
-            skip_connection = False
 
             if proxy:
+                import socks
                 proxy_type = proxy.get("type", "socks5").lower()
-                if proxy_type in ("socks5", "socks4"):
-                    import socks
+                proxy_type_map = {
+                    "socks5": socks.SOCKS5,
+                    "socks4": socks.SOCKS4,
+                    "http": socks.HTTP,
+                    "https": socks.HTTP,
+                }
+                socks_type = proxy_type_map.get(proxy_type)
+                if socks_type is not None:
                     telethon_proxy = (
-                        socks.SOCKS5 if proxy_type == "socks5" else socks.SOCKS4,
+                        socks_type,
                         proxy["host"],
                         proxy["port"],
                         True,  # rdns
                         proxy.get("username"),
                         proxy.get("password"),
                     )
-                elif proxy_type in ("http", "https"):
-                    # HTTP proxies have limited support in Telethon for async connections
-                    # Skip salt fetch and use zero salt - Telegram will update it on first real connection
-                    logger.info("HTTP proxy detected, skipping salt fetch (will use zero salt)")
-                    skip_connection = True
-
-            if skip_connection:
-                # Return session with zero salt for HTTP proxies
-                return self.convert_to_webk_format(user_id=user_id, server_salt=None)
 
             if telethon_proxy:
                 client_kwargs["proxy"] = telethon_proxy
