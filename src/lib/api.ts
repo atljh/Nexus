@@ -60,7 +60,7 @@ async function apiUpload(endpoint: string, files: UploadFile[], fields: Record<s
 }
 
 function getElectron(): Window['electron'] {
-  return (window as any).electron
+  return (window as Window & { electron: Window['electron'] }).electron
 }
 
 const fallbackWebview: Window['api']['webview'] = {

@@ -1,10 +1,10 @@
-from typing import Optional, List
+from typing import Optional, List, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone
 
 from database.database import get_session
 from database.models import Proxy
@@ -14,7 +14,7 @@ router = APIRouter()
 
 
 class ProxyCreate(BaseModel):
-    type: str = "socks5"
+    type: Literal["socks4", "socks5", "http", "https"] = "socks5"
     host: str
     port: int
     username: Optional[str] = None
@@ -28,7 +28,7 @@ class ProxyCreate(BaseModel):
 
 class ProxyBulkCreate(BaseModel):
     proxies: List[str]  # Format: host:port or host:port:user:pass
-    type: str = "socks5"
+    type: Literal["socks4", "socks5", "http", "https"] = "socks5"
 
 
 class ProxyCheckBatch(BaseModel):
@@ -98,7 +98,7 @@ async def create_proxy(
         proxy.ping_ms = data.ping_ms
         proxy.external_ip = data.external_ip
         proxy.geo = data.geo
-        proxy.last_checked_at = datetime.utcnow()
+        proxy.last_checked_at = datetime.now(timezone.utc)
 
     session.add(proxy)
     await session.commit()
@@ -114,16 +114,28 @@ async def create_proxies_bulk(
 ):
     """Create multiple proxies at once"""
     created = []
+    skipped = 0
 
     for line in data.proxies:
         parts = line.strip().split(":")
         if len(parts) < 2:
+            skipped += 1
+            continue
+
+        try:
+            port = int(parts[1])
+        except ValueError:
+            skipped += 1
+            continue
+
+        if not (1 <= port <= 65535):
+            skipped += 1
             continue
 
         proxy = Proxy(
             type=data.type,
             host=parts[0],
-            port=int(parts[1]),
+            port=port,
             username=parts[2] if len(parts) > 2 else None,
             password=parts[3] if len(parts) > 3 else None
         )
@@ -133,7 +145,7 @@ async def create_proxies_bulk(
 
     await session.commit()
 
-    return {"created": len(created)}
+    return {"created": len(created), "skipped": skipped}
 
 
 @router.put("/{proxy_id}")
@@ -209,7 +221,7 @@ async def check_proxy(
     proxy.ping_ms = check_result.ping_ms
     proxy.external_ip = check_result.external_ip
     proxy.geo = check_result.geo
-    proxy.last_checked_at = datetime.utcnow()
+    proxy.last_checked_at = datetime.now(timezone.utc)
 
     await session.commit()
 
@@ -257,7 +269,7 @@ async def check_batch_proxies(
             proxy.ping_ms = check_result.ping_ms
             proxy.external_ip = check_result.external_ip
             proxy.geo = check_result.geo
-            proxy.last_checked_at = datetime.utcnow()
+            proxy.last_checked_at = datetime.now(timezone.utc)
 
             response_results.append({
                 "id": proxy.id,
@@ -310,7 +322,7 @@ async def check_all_proxies(
             proxy.ping_ms = check_result.ping_ms
             proxy.external_ip = check_result.external_ip
             proxy.geo = check_result.geo
-            proxy.last_checked_at = datetime.utcnow()
+            proxy.last_checked_at = datetime.now(timezone.utc)
 
             response_results.append({
                 "id": proxy.id,

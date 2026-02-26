@@ -16,6 +16,10 @@ from services.session_to_webk import convert_account_to_webk
 
 logger = logging.getLogger(__name__)
 
+# WebK default API credentials (Telegram Web K official)
+WEBK_DEFAULT_API_ID = 2040
+WEBK_DEFAULT_API_HASH = "b18441a1ff607e10a989891a5462e627"
+
 router = APIRouter(tags=["webk"])
 
 
@@ -67,8 +71,8 @@ async def get_webk_session(
         )
 
     # Use default API credentials if account doesn't have custom ones
-    api_id = account.api_id or 2040
-    api_hash = account.api_hash or "b18441a1ff607e10a989891a5462e627"
+    api_id = account.api_id or WEBK_DEFAULT_API_ID
+    api_hash = account.api_hash or WEBK_DEFAULT_API_HASH
 
     # Prepare proxy config
     proxy_config = {

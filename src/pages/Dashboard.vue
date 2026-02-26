@@ -8,8 +8,6 @@ const { t } = useI18n()
 const stats = ref({
   accounts: { total: 0, active: 0 },
   proxies: { total: 0, working: 0 },
-  likes: { today: 0, tasks: 0 },
-  comments: { today: 0, tasks: 0 }
 })
 
 interface Account { id: number; status: string }
@@ -64,27 +62,6 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div class="stat-card">
-          <div class="stat-icon-wrap stat-icon-green">
-            <i class="pi pi-heart"></i>
-          </div>
-          <div class="stat-content">
-            <div class="stat-value">{{ stats.likes.today }}</div>
-            <div class="stat-label">{{ t('dashboard.likesToday') }}</div>
-            <div class="stat-sub">{{ t('dashboard.tasksCount', { count: stats.likes.tasks }) }}</div>
-          </div>
-        </div>
-
-        <div class="stat-card">
-          <div class="stat-icon-wrap stat-icon-orange">
-            <i class="pi pi-comments"></i>
-          </div>
-          <div class="stat-content">
-            <div class="stat-value">{{ stats.comments.today }}</div>
-            <div class="stat-label">{{ t('dashboard.commentsToday') }}</div>
-            <div class="stat-sub">{{ t('dashboard.tasksCount', { count: stats.comments.tasks }) }}</div>
-          </div>
-        </div>
       </div>
 
       <!-- Quick Actions -->

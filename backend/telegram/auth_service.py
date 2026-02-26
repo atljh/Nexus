@@ -10,7 +10,7 @@ SECURITY: All connections MUST use proxy to protect user's IP.
 
 import uuid
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
@@ -49,7 +49,7 @@ class AuthSession:
     proxy: Optional[Dict] = None
     needs_password: bool = False
     created_at: datetime = field(default_factory=datetime.utcnow)
-    expires_at: datetime = field(default_factory=lambda: datetime.utcnow() + timedelta(minutes=10))
+    expires_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc) + timedelta(minutes=10))
 
 
 @dataclass
@@ -97,7 +97,7 @@ class AuthService:
 
     def _cleanup_expired(self):
         """Remove expired sessions."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expired = [sid for sid, sess in self._sessions.items() if sess.expires_at < now]
         for sid in expired:
             del self._sessions[sid]
@@ -435,7 +435,7 @@ class AuthService:
             # Update session
             auth_session.phone_code_hash = sent_code.phone_code_hash
             auth_session.session_string = client.session.save()
-            auth_session.expires_at = datetime.utcnow() + timedelta(minutes=self.SESSION_TTL_MINUTES)
+            auth_session.expires_at = datetime.now(timezone.utc) + timedelta(minutes=self.SESSION_TTL_MINUTES)
 
             await client.disconnect()
 

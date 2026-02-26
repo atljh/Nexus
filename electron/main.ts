@@ -6,6 +6,9 @@ import { webViewManager, ProxyConfig, DeviceFingerprint } from './webview-manage
 let mainWindow: BrowserWindow | null = null
 let pythonProcess: ChildProcess | null = null
 let backendReady = false
+let backendRestartCount = 0
+let intentionalStop = false
+const MAX_BACKEND_RESTARTS = 3
 
 const isDev = !app.isPackaged
 
@@ -75,10 +78,19 @@ function startPythonBackend() {
   pythonProcess.on('close', (code) => {
     console.log(`[Python] Process exited with code ${code}`)
     backendReady = false
+    pythonProcess = null
+
+    if (!intentionalStop && code !== 0 && backendRestartCount < MAX_BACKEND_RESTARTS) {
+      backendRestartCount++
+      const delay = backendRestartCount * 2000
+      console.log(`[Python] Restarting in ${delay}ms (attempt ${backendRestartCount}/${MAX_BACKEND_RESTARTS})`)
+      setTimeout(() => startPythonBackend(), delay)
+    }
   })
 }
 
 function stopPythonBackend() {
+  intentionalStop = true
   if (pythonProcess) {
     pythonProcess.kill()
     pythonProcess = null
@@ -192,6 +204,15 @@ ipcMain.on('webview:health-update', (_event, status) => {
   mainWindow?.webContents.send('webview:health-status', status)
 })
 
+// Global error handlers
+process.on('uncaughtException', (error) => {
+  console.error('[Main] Uncaught exception:', error)
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[Main] Unhandled rejection:', reason)
+})
+
 // App lifecycle
 app.whenReady().then(() => {
   startPythonBackend()
@@ -211,6 +232,7 @@ app.on('window-all-closed', () => {
   }
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
+  await webViewManager.destroyAllSessions()
   stopPythonBackend()
 })

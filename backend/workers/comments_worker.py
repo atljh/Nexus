@@ -15,7 +15,7 @@ Features:
 import asyncio
 import random
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional, Callable, Any, Set, Tuple
 
 from sqlalchemy.orm import Session
@@ -94,7 +94,7 @@ class CommentsWorker:
                 return
 
             task.status = "running"
-            task.started_at = datetime.utcnow()
+            task.started_at = datetime.now(timezone.utc)
             db.commit()
 
             accounts = list(task.accounts)
@@ -156,7 +156,7 @@ class CommentsWorker:
             while completed + failed < task.total_actions:
                 if cancel_event.is_set():
                     task.status = "cancelled"
-                    task.completed_at = datetime.utcnow()
+                    task.completed_at = datetime.now(timezone.utc)
                     db.commit()
                     return
 
@@ -257,7 +257,7 @@ class CommentsWorker:
                     await asyncio.sleep(delay)
 
             task.status = "completed"
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now(timezone.utc)
             db.commit()
 
             logger.info(f"Task {self.task_id} completed: success={completed}, failed={failed}")
@@ -269,7 +269,7 @@ class CommentsWorker:
                 if task:
                     task.status = "failed"
                     task.last_error = str(e)
-                    task.completed_at = datetime.utcnow()
+                    task.completed_at = datetime.now(timezone.utc)
                     db.commit()
             except Exception:
                 pass
@@ -489,7 +489,7 @@ class CommentsWorker:
                     await asyncio.sleep(1)
 
                 task.status = "completed" if completed > 0 else "cancelled"
-                task.completed_at = datetime.utcnow()
+                task.completed_at = datetime.now(timezone.utc)
                 db.commit()
                 logger.info(f"Task {self.task_id} monitoring ended: {completed} comments sent")
 
@@ -497,7 +497,7 @@ class CommentsWorker:
             logger.exception(f"Monitoring error: {e}")
             task.status = "failed"
             task.last_error = str(e)
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now(timezone.utc)
             db.commit()
 
     # ============ Channel Management ============
@@ -820,7 +820,7 @@ class CommentsWorker:
                         reply_to=disc_msg.id
                     )
 
-                    account.last_used_at = datetime.utcnow()
+                    account.last_used_at = datetime.now(timezone.utc)
                     db.commit()
 
                     return SendResult(
@@ -899,7 +899,7 @@ class CommentsWorker:
                         reply_to=disc_msg.id
                     )
 
-                    account.last_used_at = datetime.utcnow()
+                    account.last_used_at = datetime.now(timezone.utc)
                     db.commit()
 
                     return SendResult(

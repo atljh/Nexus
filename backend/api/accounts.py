@@ -6,7 +6,7 @@ import random
 import re
 from pathlib import Path
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy import select
@@ -186,6 +186,8 @@ async def get_accounts(
     status: Optional[str] = None,
     group_id: Optional[int] = None,
     tag_id: Optional[int] = None,
+    offset: int = 0,
+    limit: int = 0,
     session: AsyncSession = Depends(get_session)
 ):
     query = select(Account).options(
@@ -200,6 +202,9 @@ async def get_accounts(
         query = query.where(Account.group_id == group_id)
     if tag_id:
         query = query.join(Account.tags).where(AccountTag.id == tag_id)
+
+    if limit > 0:
+        query = query.offset(offset).limit(limit)
 
     result = await session.execute(query)
     accounts = result.scalars().all()
@@ -807,7 +812,7 @@ async def check_batch_accounts(
         check_result = results_map.get(acc.id)
         if check_result:
             acc.status = check_result.status.value
-            acc.last_checked_at = datetime.utcnow()
+            acc.last_checked_at = datetime.now(timezone.utc)
 
             # Update user info if valid
             if check_result.status == AccountStatus.VALID:
@@ -837,11 +842,13 @@ async def check_batch_accounts(
 
     await session.commit()
 
-    # Add accounts without proxy to results as errors
+    # Mark accounts without proxy as invalid and add to results
     for acc in accounts_without_proxy:
+        acc.status = "invalid"
+        acc.last_checked_at = datetime.now(timezone.utc)
         response_results.append({
             "id": acc.id,
-            "status": "error",
+            "status": "invalid",
             "telegram_id": acc.telegram_id,
             "username": acc.username,
             "spamblock": None,
@@ -1034,7 +1041,7 @@ async def import_session_json_pairs(
                         register_time = datetime.fromisoformat(
                             register_time_str.replace("Z", "+00:00")
                         )
-                except:
+                except (ValueError, TypeError):
                     pass
 
             # Detect geo from phone if not provided
@@ -1164,12 +1171,12 @@ async def get_2fa_status(
         unique_id=account.phone or str(account.telegram_id),
     )
 
-    # Update database with current status
-    account.has_2fa = check_result.has_2fa
-    if check_result.password_hint:
-        account.password_hint = check_result.password_hint
-
-    await session.commit()
+    # Only update database if check succeeded (no error)
+    if check_result.error is None:
+        account.has_2fa = check_result.has_2fa
+        if check_result.password_hint:
+            account.password_hint = check_result.password_hint
+        await session.commit()
 
     return {
         "has_2fa": check_result.has_2fa,
@@ -1229,7 +1236,7 @@ async def set_2fa(
     account.has_2fa = True
     account.password_hint = data.hint
     account.two_fa_password = encryption_service.encrypt(data.password)  # Encrypted for security
-    account.two_fa_set_at = datetime.utcnow()
+    account.two_fa_set_at = datetime.now(timezone.utc)
 
     await session.commit()
 
@@ -1287,7 +1294,7 @@ async def change_2fa(
     # Update database
     account.password_hint = data.new_hint
     account.two_fa_password = encryption_service.encrypt(data.new_password)  # Encrypted for security
-    account.two_fa_set_at = datetime.utcnow()
+    account.two_fa_set_at = datetime.now(timezone.utc)
 
     await session.commit()
 
@@ -1406,7 +1413,7 @@ async def bulk_set_2fa(
                     account.has_2fa = True
                     account.password_hint = data.hint
                     account.two_fa_password = encryption_service.encrypt(data.password)
-                    account.two_fa_set_at = datetime.utcnow()
+                    account.two_fa_set_at = datetime.now(timezone.utc)
                     return {"id": account.id, "success": True}
                 else:
                     return {"id": account.id, "success": False, "error": set_result.error}
@@ -2086,7 +2093,7 @@ async def save_verified_accounts(
                         register_time = datetime.fromisoformat(
                             register_time_str.replace("Z", "+00:00")
                         )
-                except:
+                except (ValueError, TypeError):
                     pass
 
             # Create account

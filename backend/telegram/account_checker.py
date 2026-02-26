@@ -3,10 +3,13 @@ Account checker with parallel execution and detailed status detection.
 Based on GramGPT implementation.
 """
 import asyncio
+import logging
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -51,6 +54,7 @@ class AccountCheckResult:
     phone: Optional[str] = None
     is_premium: bool = False
     spamblock: Optional[bool] = None
+    flood_wait: bool = False
     error: Optional[str] = None
 
 
@@ -209,6 +213,7 @@ class AccountChecker:
         except FloodWaitError as e:
             # Account is valid but rate limited
             result.status = AccountStatus.VALID
+            result.flood_wait = True
             result.error = f"Flood wait: {e.seconds}s"
 
         except ConnectionError as e:
@@ -227,8 +232,8 @@ class AccountChecker:
             if client:
                 try:
                     await client.disconnect()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Disconnect error: {e}")
 
         return result
 
@@ -266,31 +271,31 @@ class AccountChecker:
             if history.messages:
                 message_text = history.messages[0].message.lower()
 
-                # Check for spamblock indicators
-                spamblock_keywords = [
-                    "ограничен",
-                    "restricted",
-                    "limited",
-                    "spam",
-                    "временно",
-                    "temporary",
-                ]
-
-                for keyword in spamblock_keywords:
-                    if keyword in message_text:
-                        return True
-
-                # Check for "no limits" indicators
+                # Check for "no limits" first to avoid false positives
                 no_limit_keywords = [
                     "no limits",
                     "нет ограничений",
-                    "free",
-                    "good",
+                    "your account is free",
+                    "good news",
+                    "no limits on your account",
                 ]
 
                 for keyword in no_limit_keywords:
                     if keyword in message_text:
                         return False
+
+                # Check for spamblock indicators
+                spamblock_keywords = [
+                    "your account is limited",
+                    "ваш аккаунт ограничен",
+                    "account is restricted",
+                    "temporarily limited",
+                    "временно ограничен",
+                ]
+
+                for keyword in spamblock_keywords:
+                    if keyword in message_text:
+                        return True
 
             return False
 

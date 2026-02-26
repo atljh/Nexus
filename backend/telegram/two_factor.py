@@ -4,9 +4,12 @@ Provides methods to check, set, change, and remove 2FA.
 """
 
 import asyncio
+import logging
 from typing import Optional, Dict, Tuple
 from dataclasses import dataclass
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -173,8 +176,8 @@ class TwoFactorManager:
             if client:
                 try:
                     await client.disconnect()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Disconnect error: {e}")
 
     async def set_2fa(
         self,
@@ -241,8 +244,8 @@ class TwoFactorManager:
             if client:
                 try:
                     await client.disconnect()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Disconnect error: {e}")
 
     async def change_2fa(
         self,
@@ -317,8 +320,8 @@ class TwoFactorManager:
             if client:
                 try:
                     await client.disconnect()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Disconnect error: {e}")
 
     async def remove_2fa(
         self,
@@ -388,8 +391,8 @@ class TwoFactorManager:
             if client:
                 try:
                     await client.disconnect()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Disconnect error: {e}")
 
 
 # Singleton instance

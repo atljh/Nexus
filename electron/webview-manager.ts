@@ -82,6 +82,7 @@ class SocksRelay {
    * 4. Pipe data bidirectionally
    */
   private handleClient(client: net.Socket): void {
+    client.setTimeout(30000, () => client.destroy())
     client.once('error', () => client.destroy())
 
     // Step 1: Read client greeting
@@ -141,9 +142,9 @@ class SocksRelay {
         return
       }
 
-      // Send username/password
-      const uBuf = Buffer.from(this.username, 'utf8')
-      const pBuf = Buffer.from(this.password, 'utf8')
+      // Send username/password (RFC 1929: max 255 bytes each)
+      const uBuf = Buffer.from(this.username.slice(0, 255), 'utf8')
+      const pBuf = Buffer.from(this.password.slice(0, 255), 'utf8')
       const authBuf = Buffer.alloc(3 + uBuf.length + pBuf.length)
       authBuf[0] = 0x01 // auth version
       authBuf[1] = uBuf.length

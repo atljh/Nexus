@@ -118,7 +118,8 @@ export function useWebKSession(accountRef: Ref<Account | null>) {
 
       state.value.partition = result.partition || null
 
-      // Setup health status listener
+      // Clear previous health listener before registering new one
+      window.api.webview.removeHealthListener()
       window.api.webview.onHealthStatus((status: WebViewHealthStatus) => {
         healthStatus.value = status
         state.value.connected = status.connected

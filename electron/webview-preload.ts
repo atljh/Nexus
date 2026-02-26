@@ -42,7 +42,7 @@ let healthStatus: WebKHealthStatus = {
  */
 function injectSession(sessionData: WebKSessionData): boolean {
   try {
-    console.log('[WebKPreload] Injecting session data...')
+    console.log('[WebKPreload] Injecting session data')
 
     // Clear existing session data first
     const keysToRemove: string[] = []
@@ -70,7 +70,7 @@ function injectSession(sessionData: WebKSessionData): boolean {
     healthStatus.userId = sessionData.user_auth?.id || null
     healthStatus.timestamp = Date.now()
 
-    console.log(`[WebKPreload] Session injected: DC${sessionData.dc}, user=${healthStatus.userId}`)
+    console.log(`[WebKPreload] Session injected for DC${sessionData.dc}`)
 
     // Notify main process
     ipcRenderer.send('webview:session-injected', {
@@ -143,8 +143,13 @@ function getHealthStatus(): WebKHealthStatus {
 /**
  * Monitor WebK's connection status
  */
+let healthIntervalId: ReturnType<typeof setInterval> | null = null
+
 function startHealthMonitoring(intervalMs: number = 5000): void {
-  setInterval(() => {
+  if (healthIntervalId !== null) {
+    clearInterval(healthIntervalId)
+  }
+  healthIntervalId = setInterval(() => {
     const status = getHealthStatus()
     ipcRenderer.send('webview:health-update', status)
   }, intervalMs)

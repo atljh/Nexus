@@ -1,5 +1,5 @@
 """Tasks API - Create and manage automation tasks."""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -295,9 +295,9 @@ async def update_task(task_id: int, request: UpdateTaskRequest, db: Session = De
             raise HTTPException(status_code=400, detail="Invalid status")
         task.status = request.status
         if request.status == "running" and not task.started_at:
-            task.started_at = datetime.utcnow()
+            task.started_at = datetime.now(timezone.utc)
         elif request.status in ["completed", "failed", "cancelled"]:
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now(timezone.utc)
 
     if request.min_delay is not None:
         task.min_delay = request.min_delay
@@ -381,7 +381,7 @@ async def cancel_task(task_id: int, db: Session = Depends(get_db)):
     await task_queue.cancel(task_id)
 
     task.status = "cancelled"
-    task.completed_at = datetime.utcnow()
+    task.completed_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(task)
     return task.to_dict()
@@ -465,7 +465,7 @@ async def add_task_log(
     # Check if task is complete
     if task.completed_actions + task.failed_actions >= task.total_actions:
         task.status = "completed"
-        task.completed_at = datetime.utcnow()
+        task.completed_at = datetime.now(timezone.utc)
 
     db.add(log)
     db.commit()

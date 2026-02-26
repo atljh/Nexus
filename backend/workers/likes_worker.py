@@ -5,7 +5,7 @@ Likes Worker - Executes reaction tasks using Telethon.
 import asyncio
 import random
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional, Callable, Any
 
 from sqlalchemy.orm import Session
@@ -89,7 +89,7 @@ class LikesWorker:
 
             # Update status
             task.status = "running"
-            task.started_at = datetime.utcnow()
+            task.started_at = datetime.now(timezone.utc)
             db.commit()
 
             # Get accounts
@@ -126,7 +126,7 @@ class LikesWorker:
                 # Check cancel
                 if cancel_event.is_set():
                     task.status = "cancelled"
-                    task.completed_at = datetime.utcnow()
+                    task.completed_at = datetime.now(timezone.utc)
                     db.commit()
                     logger.info(f"Task {self.task_id} cancelled")
                     return
@@ -191,7 +191,7 @@ class LikesWorker:
 
             # Task completed
             task.status = "completed"
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now(timezone.utc)
             db.commit()
 
             logger.info(
@@ -206,10 +206,10 @@ class LikesWorker:
                 if task:
                     task.status = "failed"
                     task.last_error = str(e)
-                    task.completed_at = datetime.utcnow()
+                    task.completed_at = datetime.now(timezone.utc)
                     db.commit()
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Task cleanup error: {e}")
         finally:
             db.close()
 
@@ -293,7 +293,7 @@ class LikesWorker:
                 ))
 
                 # Update account last_used
-                account.last_used_at = datetime.utcnow()
+                account.last_used_at = datetime.now(timezone.utc)
                 db.commit()
 
                 return True, f"Reaction {reaction} sent to {channel}/{msg_id}", None

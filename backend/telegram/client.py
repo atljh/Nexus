@@ -3,7 +3,10 @@ Telegram Client wrapper for Nexus
 """
 
 import asyncio
+import logging
 from typing import Optional, Dict, Tuple, Any
+
+logger = logging.getLogger(__name__)
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -275,8 +278,8 @@ class BaseClient:
                     writer.close()
                     try:
                         await writer.wait_closed()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Writer close error: {e}")
 
                     elapsed = time.time() - start
 
@@ -304,8 +307,8 @@ class BaseClient:
                 except asyncio.TimeoutError:
                     try:
                         writer.close()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Writer close error: {e}")
                     elapsed = time.time() - start
                     return {
                         "success": False,
@@ -315,8 +318,8 @@ class BaseClient:
                 except Exception as e:
                     try:
                         writer.close()
-                    except Exception:
-                        pass
+                    except Exception as e2:
+                        logger.debug(f"Writer close error: {e2}")
                     elapsed = time.time() - start
                     return {
                         "success": False,

@@ -105,6 +105,7 @@ export const useAccountStore = defineStore('accounts', () => {
       banned: 0,
       muted: 0,
       spamblock: 0,
+      frozen: 0,
       session_expired: 0,
       deactivated: 0,
       needs_reauth: 0,
