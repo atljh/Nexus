@@ -30,8 +30,8 @@ const groupStore = useGroupStore()
 // Form state
 const channel = ref('')
 const postId = ref<number | null>(null)
-const reaction = ref('👍')
-const mode = ref<'single' | 'monitoring'>('single')
+const selectedReactions = ref<string[]>(['👍'])
+const emojiMode = ref<'single' | 'random' | 'all'>('single')
 const totalActions = ref(10)
 const minDelay = ref(30)
 const maxDelay = ref(120)
@@ -49,10 +49,11 @@ const tabs = computed(() => [
   { label: t('autoLikes.selectAccounts') || 'Аккаунты', icon: 'pi pi-users' }
 ])
 
-// Mode options
-const modeOptions = [
-  { value: 'single', label: t('autoLikes.modes.single') },
-  { value: 'monitoring', label: t('autoLikes.modes.monitoring') }
+// Emoji mode options
+const emojiModeOptions = [
+  { value: 'single', label: 'Один эмодзи' },
+  { value: 'random', label: 'Случайный' },
+  { value: 'all', label: 'Все эмодзи' }
 ]
 
 // Filter accounts by group and valid status
@@ -97,6 +98,16 @@ async function createTask() {
     return
   }
 
+  if (selectedReactions.value.length === 0) {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: 'Выберите хотя бы одну реакцию',
+      life: 3000
+    })
+    return
+  }
+
   if (selectedAccountIds.value.length === 0) {
     toast.add({
       severity: 'error',
@@ -112,9 +123,9 @@ async function createTask() {
     const task = await taskStore.createLikesTask({
       config: {
         channel: channel.value.trim(),
-        post_id: mode.value === 'single' ? postId.value : null,
-        reaction: reaction.value,
-        mode: mode.value
+        post_id: postId.value || undefined,
+        reactions: selectedReactions.value,
+        emoji_mode: emojiMode.value
       },
       account_ids: selectedAccountIds.value,
       total_actions: totalActions.value,
@@ -178,80 +189,6 @@ async function refreshTasks() {
   await taskStore.fetchTasks('likes')
 }
 
-// Load test data for demo
-function loadTestData() {
-  const testTasks = [
-    {
-      id: 1,
-      task_type: 'likes',
-      status: 'completed',
-      config: { channel: '@durov', reaction: '👍', mode: 'single' },
-      total_actions: 100,
-      completed_actions: 100,
-      failed_actions: 2,
-      progress: 100,
-      created_at: new Date(Date.now() - 86400000).toISOString(),
-      started_at: new Date(Date.now() - 86400000).toISOString(),
-      completed_at: new Date(Date.now() - 82800000).toISOString(),
-      last_error: null
-    },
-    {
-      id: 2,
-      task_type: 'likes',
-      status: 'running',
-      config: { channel: '@telegram', reaction: '❤️', mode: 'monitoring' },
-      total_actions: 50,
-      completed_actions: 23,
-      failed_actions: 1,
-      progress: 46,
-      created_at: new Date(Date.now() - 3600000).toISOString(),
-      started_at: new Date(Date.now() - 3600000).toISOString(),
-      completed_at: null,
-      last_error: null
-    },
-    {
-      id: 3,
-      task_type: 'likes',
-      status: 'pending',
-      config: { channel: '@tech_news', reaction: '🔥', mode: 'single', post_id: 1234 },
-      total_actions: 25,
-      completed_actions: 0,
-      failed_actions: 0,
-      progress: 0,
-      created_at: new Date().toISOString(),
-      started_at: null,
-      completed_at: null,
-      last_error: null
-    },
-    {
-      id: 4,
-      task_type: 'likes',
-      status: 'failed',
-      config: { channel: '@private_channel', reaction: '👎', mode: 'single' },
-      total_actions: 30,
-      completed_actions: 5,
-      failed_actions: 10,
-      progress: 17,
-      created_at: new Date(Date.now() - 172800000).toISOString(),
-      started_at: new Date(Date.now() - 172800000).toISOString(),
-      completed_at: new Date(Date.now() - 172000000).toISOString(),
-      last_error: 'Channel not accessible'
-    }
-  ]
-
-  const testAccounts = [
-    { id: 1, phone: '+380991234567', username: 'test_user1', status: 'valid', group_id: null },
-    { id: 2, phone: '+380997654321', username: 'test_user2', status: 'valid', group_id: null },
-    { id: 3, phone: '+380501112233', username: 'test_user3', status: 'valid', group_id: null },
-    { id: 4, phone: '+380672223344', username: null, status: 'valid', group_id: null }
-  ]
-
-  // @ts-ignore - Setting test data directly
-  taskStore.tasks = testTasks
-  // @ts-ignore - Setting test data directly
-  accountStore.accounts = testAccounts
-}
-
 // Initialize
 onMounted(async () => {
   await Promise.all([
@@ -260,12 +197,6 @@ onMounted(async () => {
     groupStore.fetchGroups()
   ])
 
-  // Load test data if no tasks exist
-  if (taskStore.tasks.length === 0) {
-    loadTestData()
-  }
-
-  // Start polling if there are running tasks
   if (taskStore.hasRunningTasks) {
     taskStore.startPolling()
   }
@@ -349,38 +280,44 @@ onUnmounted(() => {
               <div class="form-section">
                 <div class="form-section-header">
                   <i class="pi pi-cog"></i>
-                  <span>Режим работы</span>
+                  <span>Реакции</span>
                 </div>
-                <div class="form-grid-2">
-                  <div class="form-group">
-                    <label class="form-label">
-                      <i class="pi pi-play-circle"></i>
-                      {{ t('autoLikes.mode') }}
-                    </label>
-                    <Dropdown
-                      v-model="mode"
-                      :options="modeOptions"
-                      option-label="label"
-                      option-value="value"
-                      class="w-full"
-                    />
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label">
-                      <i class="pi pi-heart"></i>
-                      {{ t('autoLikes.reaction') }}
-                    </label>
-                    <Dropdown
-                      v-model="reaction"
-                      :options="reactionOptions"
-                      option-label="label"
-                      option-value="value"
-                      class="w-full"
-                    />
-                  </div>
+                <div class="form-group">
+                  <label class="form-label">
+                    <i class="pi pi-heart"></i>
+                    {{ t('autoLikes.reaction') }}
+                  </label>
+                  <MultiSelect
+                    v-model="selectedReactions"
+                    :options="reactionOptions"
+                    option-label="label"
+                    option-value="value"
+                    placeholder="Выберите реакции"
+                    :maxSelectedLabels="5"
+                    class="w-full"
+                    display="chip"
+                  />
+                </div>
+                <div class="form-group" style="margin-top: 14px">
+                  <label class="form-label">
+                    <i class="pi pi-sliders-h"></i>
+                    Режим эмодзи
+                  </label>
+                  <Dropdown
+                    v-model="emojiMode"
+                    :options="emojiModeOptions"
+                    option-label="label"
+                    option-value="value"
+                    class="w-full"
+                  />
+                  <small class="emoji-mode-hint">
+                    <template v-if="emojiMode === 'single'">Первый эмодзи из списка для всех аккаунтов</template>
+                    <template v-else-if="emojiMode === 'random'">Случайный эмодзи для каждого аккаунта</template>
+                    <template v-else>Все эмодзи от каждого аккаунта</template>
+                  </small>
                 </div>
 
-                <div v-if="mode === 'single'" class="form-group" style="margin-top: 14px">
+                <div class="form-group" style="margin-top: 14px">
                   <label class="form-label">{{ t('autoLikes.postId') }} ({{ t('common.optional') }})</label>
                   <InputNumber
                     v-model="postId"
@@ -597,7 +534,7 @@ onUnmounted(() => {
                 <div class="task-channel">
                   <i class="pi pi-hashtag"></i>
                   <span class="channel-name">{{ task.config?.channel }}</span>
-                  <span class="reaction-emoji">{{ task.config?.reaction }}</span>
+                  <span class="reaction-emoji">{{ (task.config?.reactions || []).join('') }}</span>
                 </div>
               </div>
 
@@ -906,6 +843,12 @@ onUnmounted(() => {
   background: rgba(236, 72, 153, 0.1);
   padding: 4px 10px;
   border-radius: 20px;
+}
+
+.emoji-mode-hint {
+  font-size: 11px;
+  color: #71717a;
+  margin-top: 4px;
 }
 
 /* Form Groups */

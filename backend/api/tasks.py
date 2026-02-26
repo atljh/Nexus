@@ -19,9 +19,9 @@ router = APIRouter()
 class TaskConfig(BaseModel):
     """Configuration for a task."""
     channel: str = Field(..., description="Channel username or link")
-    post_id: Optional[int] = Field(None, description="Specific post ID (for single mode)")
-    reaction: str = Field("👍", description="Reaction emoji")
-    mode: str = Field("single", description="single or monitoring")
+    post_id: Optional[int] = Field(None, description="Specific post ID")
+    reactions: List[str] = Field(["👍"], description="List of reaction emojis")
+    emoji_mode: str = Field("single", description="single | random | all")
 
 
 class CreateLikesTaskRequest(BaseModel):
@@ -198,6 +198,10 @@ async def create_likes_task(request: CreateLikesTaskRequest, db: Session = Depen
     elif not channel.startswith("@"):
         channel = "@" + channel
 
+    # Validate emoji_mode
+    if request.config.emoji_mode not in ("single", "random", "all"):
+        raise HTTPException(status_code=400, detail="emoji_mode must be 'single', 'random', or 'all'")
+
     # Create task
     task = Task(
         task_type="likes",
@@ -205,8 +209,8 @@ async def create_likes_task(request: CreateLikesTaskRequest, db: Session = Depen
         config={
             "channel": channel,
             "post_id": request.config.post_id,
-            "reaction": request.config.reaction,
-            "mode": request.config.mode
+            "reactions": request.config.reactions,
+            "emoji_mode": request.config.emoji_mode,
         },
         total_actions=request.total_actions,
         min_delay=request.min_delay,

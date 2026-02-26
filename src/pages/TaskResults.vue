@@ -468,16 +468,16 @@ watch(() => task.value?.status, (newStatus) => {
                     <span class="config-value channel">{{ task.config?.channel }}</span>
                   </div>
                   <div class="config-row">
-                    <span class="config-label">Реакція</span>
-                    <span class="config-value emoji">{{ task.config?.reaction }}</span>
+                    <span class="config-label">Реакції</span>
+                    <span class="config-value emoji">{{ (task.config?.reactions || []).join(' ') }}</span>
+                  </div>
+                  <div v-if="task.config?.emoji_mode" class="config-row">
+                    <span class="config-label">Режим емодзі</span>
+                    <span class="config-value">{{ { single: 'Один', random: 'Випадковий', all: 'Всі' }[task.config.emoji_mode] || task.config.emoji_mode }}</span>
                   </div>
                   <div v-if="task.config?.post_id" class="config-row">
                     <span class="config-label">ID поста</span>
                     <span class="config-value">{{ task.config?.post_id }}</span>
-                  </div>
-                  <div class="config-row">
-                    <span class="config-label">Режим</span>
-                    <span class="config-value">{{ task.config?.mode === 'single' ? 'Один пост' : 'Моніторинг' }}</span>
                   </div>
                 </template>
 

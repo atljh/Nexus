@@ -226,13 +226,14 @@ export interface TaskConfig {
   // For likes tasks
   channel?: string
   post_id?: number | null
-  reaction?: string
-  mode?: 'single' | 'monitoring'
+  reactions?: string[]
+  emoji_mode?: 'single' | 'random' | 'all'
   // For comments tasks
   channels?: string[]
   templates?: string[]
   rotation_mode?: 'random' | 'round_robin'
   comments_per_account?: number
+  mode?: 'single' | 'monitoring'
 }
 
 export interface TaskLog {
@@ -252,8 +253,8 @@ export interface CreateLikesTaskParams {
   config: {
     channel: string
     post_id?: number | null
-    reaction: string
-    mode: 'single' | 'monitoring'
+    reactions: string[]
+    emoji_mode: 'single' | 'random' | 'all'
   }
   account_ids: number[]
   total_actions: number
