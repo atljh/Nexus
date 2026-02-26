@@ -103,37 +103,25 @@ class TwoFactorManager:
         used_api_id = api_id or self.DEFAULT_API_ID
         used_api_hash = api_hash or self.DEFAULT_API_HASH
 
-        # Use device fingerprint from account if provided, otherwise generate
+        # Use device fingerprint from account if provided
+        # If no fingerprint — don't generate a fake one, let Telethon use its defaults
+        client_kwargs = dict(
+            proxy=proxy_tuple,
+            timeout=self.connection_timeout,
+        )
+
         if device_fingerprint and device_fingerprint.get("device_model"):
-            device_model = device_fingerprint.get("device_model")
-            system_version = device_fingerprint.get("system_version")
-            app_version = device_fingerprint.get("app_version")
-            lang_code = device_fingerprint.get("lang_code", "en")
-            system_lang_code = device_fingerprint.get("system_lang_code", "en")
-        else:
-            # Generate fingerprint
-            seed = unique_id or session_string[:32]
-            fingerprint = generate_fingerprint_for_api(
-                unique_id=seed,
-                api_id=used_api_id,
-            )
-            device_model = fingerprint["device_model"]
-            system_version = fingerprint["system_version"]
-            app_version = fingerprint["app_version"]
-            lang_code = fingerprint["lang_code"]
-            system_lang_code = fingerprint["system_lang_code"]
+            client_kwargs["device_model"] = device_fingerprint.get("device_model")
+            client_kwargs["system_version"] = device_fingerprint.get("system_version")
+            client_kwargs["app_version"] = device_fingerprint.get("app_version")
+            client_kwargs["lang_code"] = device_fingerprint.get("lang_code", "en")
+            client_kwargs["system_lang_code"] = device_fingerprint.get("system_lang_code", "en")
 
         return TelegramClient(
             session,
             used_api_id,
             used_api_hash,
-            proxy=proxy_tuple,
-            timeout=self.connection_timeout,
-            device_model=device_model,
-            system_version=system_version,
-            app_version=app_version,
-            lang_code=lang_code,
-            system_lang_code=system_lang_code,
+            **client_kwargs,
         )
 
     async def check_2fa_status(

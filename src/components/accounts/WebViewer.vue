@@ -175,37 +175,39 @@ async function injectSessionToWebview(data: WebKSessionData): Promise<boolean> {
     const script = `
       (function() {
         try {
-          // Clear existing session data
-          const keysToRemove = [];
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && (key.startsWith('dc') || key.startsWith('user_auth') || key.startsWith('account') || key === 'auth_key_fingerprint')) {
-              keysToRemove.push(key);
-            }
-          }
-          keysToRemove.forEach(key => localStorage.removeItem(key));
+          // Step 1: Clear ALL localStorage (clean slate for WebK)
+          localStorage.clear();
 
-          // Inject new session data
+          // Step 2: Delete all IndexedDB databases to remove stale state
+          if (indexedDB.databases) {
+            indexedDB.databases().then(dbs => {
+              dbs.forEach(db => {
+                if (db.name) {
+                  indexedDB.deleteDatabase(db.name);
+                  console.log('[Nexus] Deleted IDB:', db.name);
+                }
+              });
+            });
+          }
+
+          // Step 3: Inject session data using JSON.stringify for ALL values
+          // (WebK internally stores everything via JSON.stringify)
           const sessionData = ${JSON.stringify(data)};
           for (const [key, value] of Object.entries(sessionData)) {
             if (value !== undefined && value !== null) {
-              if (typeof value === 'object') {
-                localStorage.setItem(key, JSON.stringify(value));
-              } else {
-                localStorage.setItem(key, String(value));
-              }
+              localStorage.setItem(key, JSON.stringify(value));
             }
           }
 
           // Verify injection
           const dc = localStorage.getItem('dc');
-          const userAuth = localStorage.getItem('user_auth');
+          const account1 = localStorage.getItem('account1');
           const allKeys = [];
           for (let i = 0; i < localStorage.length; i++) {
             allKeys.push(localStorage.key(i));
           }
-          console.log('[Nexus] Session injected OK: dc=' + dc + ', keys=' + allKeys.join(','));
-          return { success: true, dc: dc, userAuth: userAuth, keys: allKeys };
+          console.log('[Nexus] Session injected OK: dc=' + dc + ', account1_len=' + (account1 ? account1.length : 0) + ', keys=' + allKeys.join(','));
+          return { success: true, dc: dc, keys: allKeys };
         } catch (error) {
           console.error('[Nexus] Session injection failed:', error);
           return { success: false, error: error.message };

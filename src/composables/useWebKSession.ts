@@ -106,6 +106,9 @@ export function useWebKSession(accountRef: Ref<Account | null>) {
         | WebViewDeviceFingerprint
         | undefined
 
+      // Clear previous session data to avoid stale IDB state
+      await window.api.webview.clearSession(acc.id).catch(() => {})
+
       // Create isolated session with proxy
       const result = await window.api.webview.createSession(acc.id, proxyConfig, deviceFingerprint)
 

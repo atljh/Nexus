@@ -23,7 +23,7 @@ from telethon.tl.functions.messages import GetHistoryRequest
 from telethon.tl.functions.account import GetAuthorizationsRequest
 
 from .session_manager import SessionManager
-from .device_generator import generate_fingerprint_for_api, OFFICIAL_APIS
+from .device_generator import OFFICIAL_APIS
 
 
 class AccountStatus(str, Enum):
@@ -65,9 +65,11 @@ class AccountChecker:
         self,
         max_concurrent: int = 3,
         connection_timeout: int = 30,
+        delay_between: float = 2.0,
     ):
         self.max_concurrent = max_concurrent
         self.connection_timeout = connection_timeout
+        self.delay_between = delay_between
         self._semaphore: Optional[asyncio.Semaphore] = None
 
     def _format_proxy(self, proxy: Optional[Dict]) -> Optional[tuple]:
@@ -138,39 +140,27 @@ class AccountChecker:
             session = SessionManager.create_memory_session(session_string)
             proxy_tuple = self._format_proxy(proxy)
 
-            # Use device fingerprint from account if provided, otherwise generate
+            # Use device fingerprint from account if provided
+            # If no fingerprint — don't generate a fake one, let Telethon use its defaults
+            # This prevents fingerprint mismatch for accounts imported from other clients
+            client_kwargs = dict(
+                proxy=proxy_tuple,
+                connection_retries=3,
+                timeout=self.connection_timeout,
+            )
+
             if device_fingerprint and device_fingerprint.get("device_model"):
-                device_model = device_fingerprint.get("device_model")
-                system_version = device_fingerprint.get("system_version")
-                app_version = device_fingerprint.get("app_version")
-                lang_code = device_fingerprint.get("lang_code", "en")
-                system_lang_code = device_fingerprint.get("system_lang_code", "en")
-            else:
-                # Generate device fingerprint for consistent emulation
-                seed = unique_id or session_string[:32] if session_string else str(account_id)
-                fingerprint = generate_fingerprint_for_api(
-                    unique_id=seed,
-                    api_id=used_api_id,
-                )
-                device_model = fingerprint["device_model"]
-                system_version = fingerprint["system_version"]
-                app_version = fingerprint["app_version"]
-                lang_code = fingerprint["lang_code"]
-                system_lang_code = fingerprint["system_lang_code"]
+                client_kwargs["device_model"] = device_fingerprint.get("device_model")
+                client_kwargs["system_version"] = device_fingerprint.get("system_version")
+                client_kwargs["app_version"] = device_fingerprint.get("app_version")
+                client_kwargs["lang_code"] = device_fingerprint.get("lang_code", "en")
+                client_kwargs["system_lang_code"] = device_fingerprint.get("system_lang_code", "en")
 
             client = TelegramClient(
                 session,
                 used_api_id,
                 used_api_hash,
-                proxy=proxy_tuple,
-                connection_retries=3,
-                timeout=self.connection_timeout,
-                # Device fingerprint parameters
-                device_model=device_model,
-                system_version=system_version,
-                app_version=app_version,
-                lang_code=lang_code,
-                system_lang_code=system_lang_code,
+                **client_kwargs,
             )
 
             await client.connect()
@@ -325,9 +315,14 @@ class AccountChecker:
             List of AccountCheckResult objects
         """
         self._semaphore = asyncio.Semaphore(self.max_concurrent)
+        self._check_counter = 0
 
         async def check_with_semaphore(account_data: Dict[str, Any]) -> AccountCheckResult:
             async with self._semaphore:
+                # Delay between checks to avoid triggering anti-abuse systems
+                if self._check_counter > 0 and self.delay_between > 0:
+                    await asyncio.sleep(self.delay_between)
+                self._check_counter += 1
                 # Use phone or telegram_id for consistent device fingerprint
                 unique_id = (
                     account_data.get("phone") or

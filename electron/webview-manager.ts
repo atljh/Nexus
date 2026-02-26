@@ -3,9 +3,14 @@
  *
  * Manages isolated webview sessions with per-account proxy configuration
  * and device fingerprint spoofing.
+ *
+ * For SOCKS5 proxies with auth: Chromium doesn't support SOCKS5 authentication,
+ * so we spin up a local SOCKS5 relay (no-auth on localhost) that forwards
+ * traffic to the remote SOCKS5 proxy with username/password authentication.
  */
 
 import { app, session, Session } from 'electron'
+import * as net from 'net'
 
 export interface ProxyConfig {
   type: string // socks5, socks4, http, https
@@ -31,9 +36,177 @@ export interface WebViewSession {
   deviceFingerprint?: DeviceFingerprint
 }
 
+/**
+ * Local SOCKS5 relay that accepts unauthenticated connections from Chromium
+ * and forwards them to a remote SOCKS5 proxy with username/password auth.
+ */
+class SocksRelay {
+  private server: net.Server | null = null
+  public localPort = 0
+
+  constructor(
+    private remoteHost: string,
+    private remotePort: number,
+    private username: string,
+    private password: string
+  ) {}
+
+  /**
+   * Start the local relay server on a random port
+   */
+  start(): Promise<number> {
+    return new Promise((resolve, reject) => {
+      this.server = net.createServer((clientSocket) => {
+        this.handleClient(clientSocket)
+      })
+
+      this.server.on('error', (err) => {
+        console.error('[SocksRelay] Server error:', err.message)
+        reject(err)
+      })
+
+      this.server.listen(0, '127.0.0.1', () => {
+        const addr = this.server!.address() as net.AddressInfo
+        this.localPort = addr.port
+        console.log(`[SocksRelay] Listening on 127.0.0.1:${this.localPort}`)
+        resolve(this.localPort)
+      })
+    })
+  }
+
+  /**
+   * Handle an incoming client connection (from Chromium).
+   * 1. Do SOCKS5 no-auth handshake with client
+   * 2. Read CONNECT request from client
+   * 3. Connect to remote SOCKS5, authenticate, send CONNECT
+   * 4. Pipe data bidirectionally
+   */
+  private handleClient(client: net.Socket): void {
+    client.once('error', () => client.destroy())
+
+    // Step 1: Read client greeting
+    client.once('data', (greeting) => {
+      if (greeting[0] !== 0x05) {
+        client.destroy()
+        return
+      }
+
+      // Reply: SOCKS5, no auth required
+      client.write(Buffer.from([0x05, 0x00]))
+
+      // Step 2: Read CONNECT request
+      client.once('data', (request) => {
+        if (request[0] !== 0x05 || request[1] !== 0x01) {
+          // Not a CONNECT command
+          client.write(Buffer.from([0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0]))
+          client.destroy()
+          return
+        }
+
+        // Forward to remote SOCKS5 with auth
+        this.connectRemote(client, request)
+      })
+    })
+  }
+
+  /**
+   * Connect to remote SOCKS5, authenticate, and relay the CONNECT request
+   */
+  private connectRemote(client: net.Socket, connectRequest: Buffer): void {
+    const remote = net.createConnection(this.remotePort, this.remoteHost, () => {
+      // Step 3: Send SOCKS5 greeting with user/pass auth method
+      remote.write(Buffer.from([0x05, 0x01, 0x02]))
+    })
+
+    remote.once('error', (err) => {
+      console.error(`[SocksRelay] Remote connection error: ${err.message}`)
+      // Send general failure to client
+      client.write(Buffer.from([0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0]))
+      client.destroy()
+      remote.destroy()
+    })
+
+    client.once('error', () => {
+      remote.destroy()
+    })
+
+    // Step 3: Handle auth negotiation with remote
+    remote.once('data', (authMethodResponse) => {
+      if (authMethodResponse[0] !== 0x05 || authMethodResponse[1] !== 0x02) {
+        // Server doesn't support user/pass auth
+        console.error('[SocksRelay] Remote proxy rejected user/pass auth')
+        client.write(Buffer.from([0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0]))
+        client.destroy()
+        remote.destroy()
+        return
+      }
+
+      // Send username/password
+      const uBuf = Buffer.from(this.username, 'utf8')
+      const pBuf = Buffer.from(this.password, 'utf8')
+      const authBuf = Buffer.alloc(3 + uBuf.length + pBuf.length)
+      authBuf[0] = 0x01 // auth version
+      authBuf[1] = uBuf.length
+      uBuf.copy(authBuf, 2)
+      authBuf[2 + uBuf.length] = pBuf.length
+      pBuf.copy(authBuf, 3 + uBuf.length)
+      remote.write(authBuf)
+
+      // Step 4: Read auth result
+      remote.once('data', (authResult) => {
+        if (authResult[1] !== 0x00) {
+          console.error('[SocksRelay] Remote proxy auth failed')
+          client.write(Buffer.from([0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0]))
+          client.destroy()
+          remote.destroy()
+          return
+        }
+
+        // Step 5: Forward the original CONNECT request
+        remote.write(connectRequest)
+
+        // Step 6: Read remote's CONNECT response and forward to client
+        remote.once('data', (connectResponse) => {
+          client.write(connectResponse)
+
+          if (connectResponse[1] !== 0x00) {
+            // CONNECT failed
+            client.destroy()
+            remote.destroy()
+            return
+          }
+
+          // Step 7: Pipe bidirectionally
+          client.pipe(remote)
+          remote.pipe(client)
+        })
+      })
+    })
+  }
+
+  /**
+   * Stop the relay server
+   */
+  stop(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.server) {
+        this.server.close(() => {
+          console.log(`[SocksRelay] Stopped (port ${this.localPort})`)
+          resolve()
+        })
+        // Destroy any remaining connections
+        this.server.unref()
+      } else {
+        resolve()
+      }
+    })
+  }
+}
+
 class WebViewManager {
   private sessions: Map<number, WebViewSession> = new Map()
   private proxyCredentials: Map<string, { username: string; password: string }> = new Map()
+  private socksRelays: Map<number, SocksRelay> = new Map()
   private loginHandlerRegistered = false
 
   /**
@@ -44,19 +217,16 @@ class WebViewManager {
   }
 
   /**
-   * Register global app login handler for proxy authentication.
-   * Session objects do NOT have a 'login' event — only app does.
+   * Register global app login handler for HTTP proxy authentication.
    */
   private registerGlobalLoginHandler(): void {
     if (this.loginHandlerRegistered) return
     this.loginHandlerRegistered = true
 
-    app.on('login', (event, webContents, details, authInfo, callback) => {
+    app.on('login', (event, webContents, _details, authInfo, callback) => {
       if (!authInfo.isProxy) return
 
-      // Check all registered proxy credentials
       for (const [partition, creds] of this.proxyCredentials.entries()) {
-        // Match by checking if the webContents uses a session we manage
         const sess = this.getSessionByPartition(partition)
         if (sess && webContents.session === sess.session) {
           console.log(`[WebViewManager] Providing proxy credentials for ${authInfo.host} (account ${sess.accountId})`)
@@ -65,8 +235,6 @@ class WebViewManager {
           return
         }
       }
-
-      console.log(`[WebViewManager] Login event for unknown session: isProxy=${authInfo.isProxy}, host=${authInfo.host}`)
     })
 
     console.log('[WebViewManager] Global login handler registered')
@@ -90,12 +258,10 @@ class WebViewManager {
     proxyConfig?: ProxyConfig,
     deviceFingerprint?: DeviceFingerprint
   ): Promise<WebViewSession> {
-    // Check if session already exists
     const existing = this.sessions.get(accountId)
     if (existing) {
-      // Update proxy if changed
       if (proxyConfig) {
-        await this.setupProxy(existing.session, existing.partition, proxyConfig)
+        await this.setupProxy(accountId, existing.session, existing.partition, proxyConfig)
         existing.proxyConfig = proxyConfig
       }
       return existing
@@ -104,17 +270,14 @@ class WebViewManager {
     const partition = this.getPartitionName(accountId)
     const sess = session.fromPartition(partition)
 
-    // Setup proxy
     if (proxyConfig) {
-      await this.setupProxy(sess, partition, proxyConfig)
+      await this.setupProxy(accountId, sess, partition, proxyConfig)
     }
 
-    // Setup user agent based on device fingerprint
     if (deviceFingerprint) {
       this.setupUserAgent(sess, deviceFingerprint)
     }
 
-    // Setup unified request interceptors (Accept-Language + Proxy-Authorization)
     this.setupRequestInterceptors(sess, proxyConfig, deviceFingerprint)
 
     const webViewSession: WebViewSession = {
@@ -132,39 +295,61 @@ class WebViewManager {
   }
 
   /**
-   * Setup proxy for session
+   * Setup proxy for session.
+   * For SOCKS5 with auth: starts a local relay since Chromium can't auth SOCKS5.
+   * For HTTP with auth: uses app.on('login') event.
    */
-  private async setupProxy(sess: Session, partition: string, proxy: ProxyConfig): Promise<void> {
+  private async setupProxy(accountId: number, sess: Session, partition: string, proxy: ProxyConfig): Promise<void> {
     let proxyRules: string
 
     const proxyType = proxy.type.toLowerCase()
+    const hasAuth = !!(proxy.username && proxy.password)
+    const isSocks = proxyType === 'socks5' || proxyType === 'socks4'
 
-    // Build proxy URL without credentials.
-    // Chromium does not support user:pass@ in HTTP proxy URLs.
-    // Auth is handled via app.on('login') event.
-    if (proxyType === 'socks5' || proxyType === 'socks4') {
+    if (isSocks && hasAuth) {
+      // Chromium can't do SOCKS5 auth — use local relay
+      await this.stopRelay(accountId)
+
+      const relay = new SocksRelay(proxy.host, proxy.port, proxy.username!, proxy.password!)
+      const localPort = await relay.start()
+      this.socksRelays.set(accountId, relay)
+
+      proxyRules = `socks5://127.0.0.1:${localPort}`
+      console.log(`[WebViewManager] SOCKS5 auth relay: ${proxy.host}:${proxy.port} → 127.0.0.1:${localPort}`)
+    } else if (isSocks) {
       proxyRules = `socks5://${proxy.host}:${proxy.port}`
     } else {
       proxyRules = `http://${proxy.host}:${proxy.port}`
     }
 
-    console.log(`[WebViewManager] Setting proxy: ${proxyType}://${proxy.host}:${proxy.port} (auth: ${!!proxy.username})`)
+    console.log(`[WebViewManager] Setting proxy: ${proxyType}://${proxy.host}:${proxy.port} (auth: ${hasAuth})`)
 
     await sess.setProxy({
       proxyRules,
       proxyBypassRules: '<local>',
     })
 
-    // Store credentials and register auth handlers
-    if (proxy.username && proxy.password) {
+    // HTTP proxy auth via login event
+    if (hasAuth && !isSocks) {
       this.proxyCredentials.set(partition, {
-        username: proxy.username,
-        password: proxy.password,
+        username: proxy.username!,
+        password: proxy.password!,
       })
       this.registerGlobalLoginHandler()
     }
 
     console.log(`[WebViewManager] Proxy configured successfully`)
+  }
+
+  /**
+   * Stop relay for account if it exists
+   */
+  private async stopRelay(accountId: number): Promise<void> {
+    const existing = this.socksRelays.get(accountId)
+    if (existing) {
+      await existing.stop()
+      this.socksRelays.delete(accountId)
+    }
   }
 
   /**
@@ -182,8 +367,7 @@ class WebViewManager {
 
   /**
    * Setup unified request header interceptor.
-   * Combines Accept-Language and Proxy-Authorization in a single handler
-   * (Electron only allows one onBeforeSendHeaders handler per session).
+   * Combines Accept-Language and Proxy-Authorization in a single handler.
    */
   private setupRequestInterceptors(
     sess: Session,
@@ -242,6 +426,7 @@ class WebViewManager {
     const webViewSession = this.sessions.get(accountId)
     if (webViewSession) {
       this.proxyCredentials.delete(webViewSession.partition)
+      await this.stopRelay(accountId)
       await this.clearSession(accountId)
       this.sessions.delete(accountId)
       console.log(`[WebViewManager] Destroyed session for account ${accountId}`)

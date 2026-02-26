@@ -100,11 +100,10 @@ class BaseClient:
             self.app_version = app_version
             self.lang_code = lang_code or "en"
             self.system_lang_code = system_lang_code or "en"
-        else:
-            # Generate fingerprint based on unique_id or session
+        elif any([device_model, system_version, app_version]):
+            # Some params provided but not all — generate missing ones
             seed = unique_id or self.session_string[:32] if self.session_string else "default"
 
-            # Generate device params matching our api_id platform
             fingerprint = generate_fingerprint_for_api(
                 unique_id=seed,
                 api_id=self.api_id,
@@ -112,11 +111,20 @@ class BaseClient:
                 system_lang_code=system_lang_code or "en",
             )
 
-            self.device_model = fingerprint["device_model"]
-            self.system_version = fingerprint["system_version"]
-            self.app_version = fingerprint["app_version"]
-            self.lang_code = fingerprint["lang_code"]
-            self.system_lang_code = fingerprint["system_lang_code"]
+            self.device_model = device_model or fingerprint["device_model"]
+            self.system_version = system_version or fingerprint["system_version"]
+            self.app_version = app_version or fingerprint["app_version"]
+            self.lang_code = lang_code or fingerprint["lang_code"]
+            self.system_lang_code = system_lang_code or fingerprint["system_lang_code"]
+        else:
+            # No device params provided — leave as None, Telethon will use its platform defaults
+            # This is critical for accounts imported from other clients (e.g. Desktop)
+            # to avoid fingerprint mismatch that triggers account freezing
+            self.device_model = None
+            self.system_version = None
+            self.app_version = None
+            self.lang_code = lang_code or "en"
+            self.system_lang_code = system_lang_code or "en"
 
     def _format_proxy(self, proxy: Dict) -> Tuple:
         """Format proxy dict to Telethon tuple format"""
@@ -146,20 +154,27 @@ class BaseClient:
         """Create TelegramClient instance with device fingerprint"""
         session = SessionManager.create_memory_session(self.session_string)
 
-        return TelegramClient(
-            session,
-            self.api_id,
-            self.api_hash,
+        # Only pass device params if they are set; otherwise let Telethon use its defaults
+        kwargs = dict(
             proxy=self.proxy,
             connection_retries=self.connection_retries,
             request_retries=self.request_retries,
             timeout=self.timeout,
-            # Device fingerprint parameters
-            device_model=self.device_model,
-            system_version=self.system_version,
-            app_version=self.app_version,
             lang_code=self.lang_code,
             system_lang_code=self.system_lang_code,
+        )
+        if self.device_model:
+            kwargs["device_model"] = self.device_model
+        if self.system_version:
+            kwargs["system_version"] = self.system_version
+        if self.app_version:
+            kwargs["app_version"] = self.app_version
+
+        return TelegramClient(
+            session,
+            self.api_id,
+            self.api_hash,
+            **kwargs,
         )
 
     async def _test_proxy_connection(self) -> dict:
@@ -390,6 +405,7 @@ async def validate_session(
     system_version: Optional[str] = None,
     app_version: Optional[str] = None,
     lang_code: Optional[str] = None,
+    check_frozen: bool = False,
 ) -> Tuple[bool, Optional[Dict], Optional[str]]:
     """
     Validate session string and get account info.
@@ -442,22 +458,24 @@ async def validate_session(
 
             # Try to perform a search to detect frozen accounts
             # Frozen accounts get FROZEN_METHOD_INVALID error
-            try:
-                from telethon.tl.functions.contacts import SearchRequest
-                await client._client(SearchRequest(q='telegram', limit=1))
-            except Exception as action_error:
-                error_str = str(action_error).lower()
-                if "frozen" in error_str:
-                    return False, None, "frozen"
-                elif "deactivated" in error_str or "banned" in error_str:
-                    return False, None, "banned"
-                elif "forbidden" in error_str or "restricted" in error_str:
-                    return False, None, "restricted"
-                elif "flood" in error_str:
-                    # Flood is not a permanent issue, account might still be valid
+            # WARNING: This action is suspicious from a "new device" — only run if explicitly requested
+            if check_frozen:
+                try:
+                    from telethon.tl.functions.contacts import SearchRequest
+                    await client._client(SearchRequest(q='telegram', limit=1))
+                except Exception as action_error:
+                    error_str = str(action_error).lower()
+                    if "frozen" in error_str:
+                        return False, None, "frozen"
+                    elif "deactivated" in error_str or "banned" in error_str:
+                        return False, None, "banned"
+                    elif "forbidden" in error_str or "restricted" in error_str:
+                        return False, None, "restricted"
+                    elif "flood" in error_str:
+                        # Flood is not a permanent issue, account might still be valid
+                        pass
+                    # Other errors - account might still be valid
                     pass
-                # Other errors - account might still be valid
-                pass
 
             user_info = {
                 "telegram_id": me.id,

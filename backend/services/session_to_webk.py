@@ -121,22 +121,19 @@ class StringSessionToWebKConverter:
             logger.warning("Using zero salt (will be updated on first connection)")
             server_salt = b"\x00" * 8
 
-        # Calculate auth_key fingerprint
-        auth_key_fingerprint = self._calculate_auth_key_fingerprint(auth_key)
-
-        # Convert auth_key and server_salt to arrays (Web K format)
-        auth_key_array = list(auth_key)
-        server_salt_array = list(server_salt)
-
-        # Convert to hex for account1 object
+        # Convert auth_key and server_salt to hex strings (Web K format)
         auth_key_hex = "".join(f"{b:02x}" for b in auth_key)
         server_salt_hex = "".join(f"{b:02x}" for b in server_salt)
 
-        # Create Web K format
+        # Web K fingerprint = first 8 chars of hex auth_key (NOT SHA1-based!)
+        # See tweb/src/lib/accounts/accountController.ts: authKey.slice(0, 8)
+        auth_key_fingerprint = auth_key_hex[:8]
+
+        # Create Web K format — auth_key and server_salt as HEX strings
         webk_data = {
             "dc": dc_id,
-            f"dc{dc_id}_auth_key": auth_key_array,
-            f"dc{dc_id}_server_salt": server_salt_array,
+            f"dc{dc_id}_auth_key": auth_key_hex,
+            f"dc{dc_id}_server_salt": server_salt_hex,
         }
 
         # Add user_auth if user_id is provided
@@ -144,9 +141,10 @@ class StringSessionToWebKConverter:
             webk_data["user_auth"] = {
                 "dcID": dc_id,
                 "id": user_id,
+                "date": int(time.time()),
             }
 
-            # Add account1 object (required for proper Web K session)
+            # Add account1 object (primary session storage for modern Web K)
             webk_data["account1"] = {
                 f"dc{dc_id}_auth_key": auth_key_hex,
                 f"dc{dc_id}_server_salt": server_salt_hex,
@@ -158,8 +156,13 @@ class StringSessionToWebKConverter:
 
             webk_data["auth_key_fingerprint"] = auth_key_fingerprint
 
+        # Additional Web K keys (number types must match what WebK stores via JSON.stringify)
+        webk_data["number_of_accounts"] = 1
+        webk_data["k_build"] = 605
+        webk_data["kz_version"] = "K"
+
         logger.info(
-            f"Session converted: DC{dc_id}, user_id={user_id}, fingerprint={auth_key_fingerprint[:8]}..."
+            f"Session converted: DC{dc_id}, user_id={user_id}, fingerprint={auth_key_fingerprint}..."
         )
         return webk_data
 

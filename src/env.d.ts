@@ -71,4 +71,22 @@ interface Window {
       removeHealthListener: () => void
     }
   }
+  electron: {
+    getVersion: () => Promise<string>
+    getBackendStatus: () => Promise<{ ready: boolean; running: boolean }>
+    webview: {
+      getPreloadPath: () => Promise<string>
+      createSession: (
+        accountId: number,
+        proxy?: WebViewProxyConfig,
+        deviceFingerprint?: WebViewDeviceFingerprint
+      ) => Promise<{ success: boolean; partition?: string; error?: string }>
+      getSession: (accountId: number) => Promise<{ exists: boolean; partition?: string }>
+      getPartition: (accountId: number) => Promise<string>
+      clearSession: (accountId: number) => Promise<{ success: boolean; error?: string }>
+      destroySession: (accountId: number) => Promise<{ success: boolean; error?: string }>
+      onHealthStatus: (callback: (status: WebViewHealthStatus) => void) => void
+      removeHealthListener: () => void
+    }
+  }
 }

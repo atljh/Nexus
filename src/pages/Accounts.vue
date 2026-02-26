@@ -18,6 +18,7 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Dropdown from 'primevue/dropdown'
 import Tag from 'primevue/tag'
+import MultiSelect from 'primevue/multiselect'
 import ProgressBar from 'primevue/progressbar'
 import Checkbox from 'primevue/checkbox'
 import Slider from 'primevue/slider'
@@ -496,7 +497,14 @@ async function parseFiles() {
     const zipFiles = pendingFiles.value.filter(f => f.name.endsWith('.zip'))
     const tdataFile = zipFiles[0] // Only one tdata at a time
 
+    console.log('[Import] Files to parse:', {
+      sessions: sessionFiles.map(f => f.name),
+      jsons: jsonFiles.map(f => f.name),
+      tdata: tdataFile?.name
+    })
+
     const result = await accountStore.parseImportFiles(sessionFiles, jsonFiles, tdataFile)
+    console.log('[Import] Parse result:', { accounts: result.accounts?.length, errors: result.errors })
 
     const newAccounts = result.accounts.map(a => ({
       ...a,
@@ -513,7 +521,7 @@ async function parseFiles() {
           severity: 'error',
           summary: err.file,
           detail: err.error,
-          life: 5000
+          life: 8000
         })
       })
     }
@@ -521,11 +529,14 @@ async function parseFiles() {
     if (newAccounts.length > 0) {
       importStep.value = 'preview'
     } else {
+      const errorDetails = result.errors?.length > 0
+        ? result.errors.map(e => `${e.file}: ${e.error}`).join('\n')
+        : t('accounts.importFlow.noAccountsParsed')
       toast.add({
         severity: 'warn',
         summary: t('common.warning'),
-        detail: t('accounts.importFlow.noAccountsParsed'),
-        life: 3000
+        detail: errorDetails,
+        life: 8000
       })
     }
   } catch (error: any) {
@@ -1334,6 +1345,34 @@ function getFullName(account: Account): string {
   return parts.join(' ') || account.username || '—'
 }
 
+// Inline update functions
+async function updateAccountGroup(account: Account, groupId: number | null) {
+  try {
+    await accountStore.updateAccount(account.id, { group_id: groupId ?? 0 })
+  } catch (error: any) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: error.message, life: 3000 })
+  }
+}
+
+async function updateAccountTags(account: Account, tagIds: number[]) {
+  try {
+    await accountStore.updateAccount(account.id, { tag_ids: tagIds })
+  } catch (error: any) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: error.message, life: 3000 })
+  }
+}
+
+// Group options for inline dropdown
+const groupOptions = computed(() => [
+  { label: '—', value: null },
+  ...groupStore.groups.map(g => ({ label: g.name, value: g.id, color: g.color }))
+])
+
+// Tag options for inline multiselect
+const tagOptions = computed(() =>
+  tagStore.tags.map(tg => ({ label: tg.name, value: tg.id, color: tg.color }))
+)
+
 // Stats computed
 const totalAccounts = computed(() => accountStore.accounts.length)
 const validAccounts = computed(() => accountStore.accounts.filter(a => a.status === 'valid').length)
@@ -1376,11 +1415,8 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
       <!-- Toolbar -->
       <div class="toolbar-row">
         <div class="toolbar-actions">
-          <button class="toolbar-btn" @click="showAddAccountDialog = true" v-tooltip.top="'Добавить аккаунт'">
+          <button class="toolbar-btn toolbar-btn--primary" @click="showImportDialog = true" v-tooltip.top="t('accounts.import')">
             <i class="pi pi-plus"></i>
-          </button>
-          <button class="toolbar-btn" @click="showImportDialog = true" v-tooltip.top="t('accounts.import')">
-            <i class="pi pi-folder-open"></i>
           </button>
           <button class="toolbar-btn" :disabled="accountStore.accounts.length === 0" @click="checkAllAccounts" v-tooltip.top="t('accounts.checkAll')">
             <i class="pi pi-refresh"></i>
@@ -1491,15 +1527,9 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             </div>
           </template>
 
-          <Column selectionMode="multiple" headerStyle="width: 3rem"></Column>
+          <Column selectionMode="multiple" headerStyle="width: 2.5rem"></Column>
 
-          <Column header="#" style="width: 50px">
-            <template #body="{ index }">
-              <span class="row-index">{{ index + 1 }}</span>
-            </template>
-          </Column>
-
-          <Column header="" style="width: 44px">
+          <Column header="" style="width: 36px">
             <template #body="{ data }">
               <div class="account-avatar">
                 {{ (data.first_name || data.username || '?')[0].toUpperCase() }}
@@ -1507,57 +1537,119 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             </template>
           </Column>
 
-          <Column header="Телефон" sortable field="phone" style="min-width: 130px">
+          <Column header="Аккаунт" sortable field="phone" style="min-width: 120px">
             <template #body="{ data }">
-              <span class="phone-text">{{ data.phone || '—' }}</span>
+              <div class="account-info-cell">
+                <span class="phone-text">{{ data.phone || '—' }}</span>
+                <span class="account-name-sub" :title="getFullName(data)">{{ getFullName(data) }}</span>
+              </div>
             </template>
           </Column>
 
-          <Column header="Гео" style="width: 70px" sortable field="geo">
+          <Column header="Гео" style="width: 42px" sortable field="geo">
             <template #body="{ data }">
-              <div v-if="data.geo" class="geo-cell">
-                <span class="geo-flag">{{ countryFlag(data.geo) }}</span>
-                <span class="geo-code">{{ data.geo?.toUpperCase() }}</span>
-              </div>
+              <span v-if="data.geo" class="geo-flag" v-tooltip.top="data.geo?.toUpperCase()">{{ countryFlag(data.geo) }}</span>
               <span v-else class="no-data">—</span>
             </template>
           </Column>
 
-          <Column field="status" :header="t('common.status')" sortable style="min-width: 140px">
+          <Column field="status" :header="t('common.status')" sortable style="min-width: 90px">
             <template #body="{ data }">
               <div v-if="data.status === 'checking'" class="checking-status">
                 <i class="pi pi-spin pi-spinner"></i>
-                <span>{{ t('accounts.status.checking') }}</span>
               </div>
               <Tag v-else :value="t(`accounts.status.${data.status}`)" :severity="getStatusSeverity(data.status)" class="status-pill" />
             </template>
           </Column>
 
-          <Column header="Отлежка" style="min-width: 100px" sortable field="register_time">
+          <Column header="Прокси" style="min-width: 110px">
+            <template #body="{ data }">
+              <div v-if="data.proxy" class="proxy-cell" v-tooltip.top="`${data.proxy.host}:${data.proxy.port}`">
+                <i class="pi pi-circle-fill proxy-dot" :class="'proxy-dot--' + data.proxy.status"></i>
+                <span class="proxy-addr">{{ data.proxy.host }}:{{ data.proxy.port }}</span>
+              </div>
+              <span v-else class="no-data">—</span>
+            </template>
+          </Column>
+
+          <Column header="Отлежка" style="min-width: 70px" sortable field="register_time">
             <template #body="{ data }">
               <span class="aging-text">{{ formatAging(data.register_time) }}</span>
             </template>
           </Column>
 
-          <Column header="Роль" style="min-width: 120px">
+          <Column header="Группа" style="min-width: 110px">
             <template #body="{ data }">
-              <span class="role-text">{{ data.group?.name || '—' }}</span>
+              <Dropdown
+                :model-value="data.group_id"
+                :options="groupOptions"
+                optionLabel="label"
+                optionValue="value"
+                placeholder="—"
+                @update:model-value="(val: number | null) => updateAccountGroup(data, val)"
+                class="inline-group-dropdown"
+              >
+                <template #value="{ value }">
+                  <div class="inline-group-value">
+                    <span
+                      v-if="value && groupStore.groups.find(g => g.id === value)"
+                      class="group-dot"
+                      :style="{ background: groupStore.groups.find(g => g.id === value)?.color || '#6b7280' }"
+                    ></span>
+                    <span>{{ value ? (groupStore.groups.find(g => g.id === value)?.name || '—') : '—' }}</span>
+                  </div>
+                </template>
+                <template #option="{ option }">
+                  <div class="inline-group-option">
+                    <span v-if="option.color" class="group-dot" :style="{ background: option.color }"></span>
+                    <span>{{ option.label }}</span>
+                  </div>
+                </template>
+              </Dropdown>
             </template>
           </Column>
 
-          <Column header="Использован" style="min-width: 130px" sortable field="last_used_at">
+          <Column header="Теги" style="min-width: 120px">
+            <template #body="{ data }">
+              <MultiSelect
+                :model-value="data.tags?.map((tg: any) => tg.id) || []"
+                :options="tagOptions"
+                optionLabel="label"
+                optionValue="value"
+                placeholder="—"
+                :maxSelectedLabels="1"
+                @update:model-value="(val: number[]) => updateAccountTags(data, val)"
+                class="inline-tag-select"
+              >
+                <template #value="{ value }">
+                  <div v-if="value && value.length > 0" class="inline-tags-value">
+                    <span
+                      v-for="tagId in value.slice(0, 1)"
+                      :key="tagId"
+                      class="inline-tag-chip"
+                      :style="{ background: (tagStore.tags.find(t => t.id === tagId)?.color || '#6b7280') + '22', color: tagStore.tags.find(t => t.id === tagId)?.color || '#6b7280', borderColor: (tagStore.tags.find(t => t.id === tagId)?.color || '#6b7280') + '44' }"
+                    >{{ tagStore.tags.find(t => t.id === tagId)?.name }}</span>
+                    <span v-if="value.length > 1" class="inline-tag-more">+{{ value.length - 1 }}</span>
+                  </div>
+                  <span v-else class="no-data">—</span>
+                </template>
+                <template #option="{ option }">
+                  <div class="inline-tag-option">
+                    <span class="tag-color-dot" :style="{ background: option.color }"></span>
+                    <span>{{ option.label }}</span>
+                  </div>
+                </template>
+              </MultiSelect>
+            </template>
+          </Column>
+
+          <Column header="Послед." style="min-width: 80px" sortable field="last_used_at">
             <template #body="{ data }">
               <span class="last-used-text">{{ formatLastUsed(data.last_used_at) }}</span>
             </template>
           </Column>
 
-          <Column header="Имя" style="min-width: 140px" sortable field="first_name">
-            <template #body="{ data }">
-              <span class="name-text" :title="getFullName(data)">{{ getFullName(data) }}</span>
-            </template>
-          </Column>
-
-          <Column header="Разное" style="width: 150px">
+          <Column header="" style="width: 120px">
             <template #body="{ data }">
               <div class="actions-cell">
                 <button class="action-icon" @click="checkAccount(data)" v-tooltip.top="t('common.check')">
@@ -1568,9 +1660,6 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
                 </button>
                 <button class="action-icon" @click="openTwoFADialog(data)" v-tooltip.top="'2FA'">
                   <i :class="data.has_2fa ? 'pi pi-lock' : 'pi pi-lock-open'"></i>
-                </button>
-                <button class="action-icon" v-tooltip.top="'Инфо'">
-                  <i class="pi pi-info-circle"></i>
                 </button>
                 <button class="action-icon delete" @click="confirmDelete(data)" v-tooltip.top="t('common.delete')">
                   <i class="pi pi-trash"></i>
@@ -2185,7 +2274,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
   height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
 }
 
 /* Stats Cards */
@@ -2198,10 +2287,11 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
   flex: 1;
   background: linear-gradient(145deg, #161616 0%, #111111 100%);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  padding: 16px 20px;
+  border-radius: 10px;
+  padding: 10px 14px;
   cursor: pointer;
   transition: all 0.2s;
+  min-width: 0;
 }
 
 .stat-card:hover {
@@ -2215,7 +2305,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 }
 
 .stat-value {
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 700;
   color: #e5e7eb;
   line-height: 1.2;
@@ -2256,6 +2346,23 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
   cursor: pointer;
   transition: all 0.2s;
   font-size: 14px;
+}
+
+.toolbar-btn--primary {
+  width: 44px;
+  height: 44px;
+  background: linear-gradient(145deg, #a855f7 0%, #7c3aed 100%);
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #fff;
+  font-size: 18px;
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.3);
+}
+
+.toolbar-btn--primary:hover {
+  background: linear-gradient(145deg, #b86af8 0%, #8b5cf6 100%);
+  color: #fff;
+  border-color: rgba(168, 85, 247, 0.6);
+  box-shadow: 0 0 18px rgba(168, 85, 247, 0.4);
 }
 
 .toolbar-btn:hover:not(:disabled) {
@@ -2376,71 +2483,232 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
 /* Avatar */
 .account-avatar {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
   color: white;
   flex-shrink: 0;
 }
 
+/* Account info cell (phone + name) */
+.account-info-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
 /* Phone */
 .phone-text {
-  font-size: 13px;
+  font-size: 12px;
   color: #e5e7eb;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.account-name-sub {
+  font-size: 10px;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
 }
 
 /* Geo */
-.geo-cell {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .geo-flag {
   font-size: 14px;
   line-height: 1;
-}
-
-.geo-code {
-  font-size: 12px;
-  color: #9ca3af;
-  font-weight: 500;
+  cursor: default;
 }
 
 /* Status */
 :deep(.status-pill) {
-  font-size: 11px;
-  padding: 4px 10px;
-  border-radius: 12px;
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 10px;
   white-space: nowrap;
 }
 
 .checking-status {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
   color: #60a5fa;
 }
 
 .checking-status i {
-  font-size: 14px;
+  font-size: 13px;
 }
 
 /* Aging */
 .aging-text {
-  font-size: 13px;
+  font-size: 11px;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+/* Proxy cell */
+.proxy-cell {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.proxy-dot {
+  font-size: 6px;
+  flex-shrink: 0;
+}
+
+.proxy-dot--working { color: #22c55e; }
+.proxy-dot--slow { color: #f59e0b; }
+.proxy-dot--very_slow { color: #f59e0b; }
+.proxy-dot--not_working { color: #ef4444; }
+.proxy-dot--timeout { color: #ef4444; }
+.proxy-dot--unchecked { color: #6b7280; }
+
+.proxy-addr {
+  font-size: 11px;
+  color: #9ca3af;
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Inline group dropdown */
+:deep(.inline-group-dropdown) {
+  width: 100%;
+  max-width: 120px;
+}
+
+:deep(.inline-group-dropdown .p-dropdown) {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  min-height: 30px;
+  transition: all 0.15s;
+}
+
+:deep(.inline-group-dropdown .p-dropdown:hover) {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:deep(.inline-group-dropdown .p-dropdown .p-dropdown-label) {
+  padding: 3px 6px;
+  font-size: 12px;
+  color: #d1d5db;
+}
+
+:deep(.inline-group-dropdown .p-dropdown .p-dropdown-trigger) {
+  width: 24px;
+  color: #4b5563;
+}
+
+:deep(.inline-group-dropdown .p-dropdown:hover .p-dropdown-trigger) {
   color: #9ca3af;
 }
 
-/* Role */
+.inline-group-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inline-group-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Inline tag multiselect */
+:deep(.inline-tag-select) {
+  width: 100%;
+  max-width: 130px;
+}
+
+:deep(.inline-tag-select .p-multiselect) {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  min-height: 30px;
+  transition: all 0.15s;
+}
+
+:deep(.inline-tag-select .p-multiselect:hover) {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:deep(.inline-tag-select .p-multiselect .p-multiselect-label) {
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
+:deep(.inline-tag-select .p-multiselect .p-multiselect-trigger) {
+  width: 24px;
+  color: #4b5563;
+}
+
+:deep(.inline-tag-select .p-multiselect:hover .p-multiselect-trigger) {
+  color: #9ca3af;
+}
+
+.inline-tags-value {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.inline-tag-chip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid;
+  white-space: nowrap;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 80px;
+}
+
+.inline-tag-more {
+  font-size: 11px;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.inline-tag-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag-color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Role (kept for backward compat) */
 .role-text {
   font-size: 13px;
   color: #d1d5db;
@@ -2448,19 +2716,19 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
 /* Last used */
 .last-used-text {
-  font-size: 12px;
+  font-size: 11px;
   color: #9ca3af;
   white-space: nowrap;
 }
 
 /* Name */
 .name-text {
-  font-size: 13px;
+  font-size: 12px;
   color: #e5e7eb;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 140px;
+  max-width: 120px;
   display: block;
 }
 
@@ -2468,12 +2736,12 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 .actions-cell {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
 }
 
 .action-icon {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2483,7 +2751,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
   color: #6b7280;
   cursor: pointer;
   transition: all 0.15s;
-  font-size: 13px;
+  font-size: 12px;
   padding: 0;
 }
 
@@ -2571,9 +2839,9 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
   border-color: rgba(255, 255, 255, 0.06);
   color: #6b7280;
   font-weight: 600;
-  font-size: 12px;
+  font-size: 11px;
   letter-spacing: 0.3px;
-  padding: 10px 12px;
+  padding: 6px 8px;
 }
 
 :deep(.custom-table .p-datatable-tbody > tr) {
@@ -2588,7 +2856,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
 :deep(.custom-table .p-datatable-tbody > tr > td) {
   border-color: rgba(255, 255, 255, 0.04);
-  padding: 8px 12px;
+  padding: 5px 8px;
 }
 
 :deep(.custom-table .p-datatable-tbody > tr.p-highlight) {

@@ -1603,6 +1603,12 @@ async def parse_import_files(
     parsed_accounts = []
     errors = []
 
+    print(f"[PARSE] session_files={len(session_files)}, json_files={len(json_files)}, tdata={tdata_file is not None}")
+    for sf in session_files:
+        print(f"[PARSE] session: '{sf.filename}' size={sf.size}")
+    for jf in json_files:
+        print(f"[PARSE] json: '{jf.filename}' size={jf.size}")
+
     # Helper to get base name
     def get_base_name(filename: str) -> str:
         name = Path(filename).stem
@@ -1665,12 +1671,17 @@ async def parse_import_files(
         session_map = {}
         for sf in session_files:
             base = get_base_name(sf.filename)
+            print(f"[PARSE] session base: '{base}' <- '{sf.filename}'")
             session_map[base] = sf
 
         json_map = {}
         for jf in json_files:
             base = get_base_name(jf.filename)
+            print(f"[PARSE] json base: '{base}' <- '{jf.filename}'")
             json_map[base] = jf
+
+        print(f"[PARSE] session keys: {list(session_map.keys())}")
+        print(f"[PARSE] json keys: {list(json_map.keys())}")
 
         for base_name, session_file in session_map.items():
             json_file = json_map.get(base_name)
@@ -1685,6 +1696,7 @@ async def parse_import_files(
             try:
                 # Read session file
                 session_content = await session_file.read()
+                print(f"[PARSE] Processing pair '{base_name}': session={len(session_content)} bytes")
 
                 # Convert .session file to string
                 with tempfile.NamedTemporaryFile(suffix=".session", delete=False) as tmp:
@@ -1693,10 +1705,14 @@ async def parse_import_files(
 
                 try:
                     session_string = await SessionManager.session_file_to_string(tmp_path)
+                except Exception as conv_err:
+                    print(f"[PARSE] Session conversion ERROR for '{base_name}': {conv_err}")
+                    raise
                 finally:
                     Path(tmp_path).unlink(missing_ok=True)
 
                 if not session_string:
+                    print(f"[PARSE] Empty session string for '{base_name}'")
                     errors.append({
                         "file": session_file.filename,
                         "error": "Failed to convert session file"
@@ -1759,6 +1775,10 @@ async def parse_import_files(
                     "file": session_file.filename,
                     "error": str(e)
                 })
+
+    print(f"[PARSE] RESULT: {len(parsed_accounts)} accounts, {len(errors)} errors")
+    for e in errors:
+        print(f"[PARSE] ERROR: {e}")
 
     return {
         "accounts": parsed_accounts,

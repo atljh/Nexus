@@ -10,9 +10,13 @@ import Tooltip from 'primevue/tooltip'
 import App from './App.vue'
 import router from './router'
 import i18n from './i18n'
+import { installApi } from './lib/api'
 
 import 'primeicons/primeicons.css'
 import './assets/main.css'
+
+// Install window.api with direct fetch (no IPC/contextBridge for HTTP calls)
+installApi()
 
 const app = createApp(App)
 

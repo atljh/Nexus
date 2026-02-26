@@ -8,7 +8,6 @@ let pythonProcess: ChildProcess | null = null
 let backendReady = false
 
 const isDev = !app.isPackaged
-const BACKEND_URL = 'http://127.0.0.1:8000'
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -87,66 +86,7 @@ function stopPythonBackend() {
   }
 }
 
-// IPC Handlers
-ipcMain.handle('api:request', async (_event, { method, endpoint, data }) => {
-  try {
-    const options: RequestInit = {
-      method,
-      headers: { 'Content-Type': 'application/json' }
-    }
-
-    if (data && method !== 'GET') {
-      options.body = JSON.stringify(data)
-    }
-
-    const response = await fetch(`${BACKEND_URL}${endpoint}`, options)
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ detail: response.statusText }))
-      throw new Error(errorData.detail || `HTTP ${response.status}`)
-    }
-
-    return await response.json()
-  } catch (error: any) {
-    console.error('API request failed:', error)
-    throw new Error(error.message || 'Request failed')
-  }
-})
-
-// File upload handler
-ipcMain.handle('api:upload', async (_event, { endpoint, files, fields }) => {
-  try {
-    // Use native FormData (Node 18+)
-    const formData = new FormData()
-
-    // Add files as Blob
-    for (const file of files) {
-      const blob = new Blob([Buffer.from(file.data)], { type: 'application/octet-stream' })
-      formData.append(file.name, blob, file.filename)
-    }
-
-    // Add other fields
-    for (const [key, value] of Object.entries(fields || {})) {
-      formData.append(key, value as string)
-    }
-
-    const response = await fetch(`${BACKEND_URL}${endpoint}`, {
-      method: 'POST',
-      body: formData
-    })
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ detail: response.statusText }))
-      throw new Error(errorData.detail || `HTTP ${response.status}`)
-    }
-
-    return await response.json()
-  } catch (error: any) {
-    console.error('Upload failed:', error)
-    throw new Error(error.message || 'Upload failed')
-  }
-})
-
+// IPC Handlers (API calls are now handled directly in preload via fetch)
 ipcMain.handle('app:getVersion', () => app.getVersion())
 
 ipcMain.handle('backend:status', () => ({

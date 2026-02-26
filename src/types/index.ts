@@ -442,6 +442,7 @@ export interface WebKSessionData {
   user_auth?: {
     dcID: number
     id: number
+    date: number
   }
   account1?: Record<string, unknown>
   auth_key_fingerprint?: string
