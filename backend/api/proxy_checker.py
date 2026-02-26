@@ -4,11 +4,14 @@ Based on GramGPT implementation.
 """
 import asyncio
 import base64
+import logging
 import time
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 import aiohttp
 from aiohttp_socks import ProxyConnector
@@ -167,7 +170,8 @@ class ProxyChecker:
                 return {"success": True, "error": None}
             except asyncio.TimeoutError:
                 continue
-            except Exception:
+            except Exception as e:
+                logger.debug(f"SOCKS telegram test failed for {dc_host}: {e}")
                 continue
 
         return {
@@ -192,7 +196,8 @@ class ProxyChecker:
                 reader, writer = await asyncio.wait_for(
                     asyncio.open_connection(proxy_host, proxy_port), timeout=5
                 )
-            except Exception:
+            except Exception as e:
+                logger.debug(f"HTTP proxy connect failed to {proxy_host}:{proxy_port}: {e}")
                 continue
 
             try:
@@ -216,8 +221,8 @@ class ProxyChecker:
                 writer.close()
                 try:
                     await writer.wait_closed()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Writer close error: {e}")
 
                 if "200" in response_str:
                     return {"success": True, "error": None}
@@ -234,14 +239,15 @@ class ProxyChecker:
             except asyncio.TimeoutError:
                 try:
                     writer.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Writer close error: {e}")
                 continue
-            except Exception:
+            except Exception as e:
+                logger.debug(f"HTTP CONNECT test error: {e}")
                 try:
                     writer.close()
-                except Exception:
-                    pass
+                except Exception as e2:
+                    logger.debug(f"Writer close error: {e2}")
                 continue
 
         return {
@@ -312,8 +318,8 @@ class ProxyChecker:
                         data = await response.json()
                         if data.get("status") == "success":
                             return data.get("countryCode")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"GEO lookup failed for {ip}: {e}")
 
         return None
 

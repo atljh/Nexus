@@ -271,8 +271,8 @@ class CommentsWorker:
                     task.last_error = str(e)
                     task.completed_at = datetime.now(timezone.utc)
                     db.commit()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Task cleanup error: {e}")
         finally:
             if self._ai_service:
                 await self._ai_service.close()
@@ -572,8 +572,8 @@ class CommentsWorker:
 
                         try:
                             await client.client(JoinChannelRequest(entity))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Channel join skipped: {e}")
 
                         # Check discussion group and join it
                         await self._join_discussion_group(client, entity, target)
@@ -605,8 +605,8 @@ class CommentsWorker:
                 # Try to join the discussion group
                 try:
                     await client.client(JoinChannelRequest(linked_chat_id))
-                except Exception:
-                    pass  # Already member or can't join
+                except Exception as e:
+                    logger.debug(f"Discussion group join skipped: {e}")
             else:
                 target.can_comment = False
                 target.status = "cannot_comment"

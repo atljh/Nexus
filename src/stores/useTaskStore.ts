@@ -298,9 +298,13 @@ export const useTaskStore = defineStore('task', () => {
 
   function stopPolling() {
     if (pollingInterval.value) {
-      clearInterval(pollingInterval.value)
+      window.clearInterval(pollingInterval.value)
       pollingInterval.value = null
     }
+  }
+
+  function $reset() {
+    stopPolling()
   }
 
   function setCurrentTask(task: Task | null) {
@@ -342,6 +346,7 @@ export const useTaskStore = defineStore('task', () => {
     deleteTask,
     startPolling,
     stopPolling,
+    $reset,
     setCurrentTask,
     // Templates
     fetchTemplates,

@@ -1,4 +1,4 @@
-import { ref, watch, type Ref } from 'vue'
+import { ref, watch, onScopeDispose, type Ref } from 'vue'
 
 /**
  * Creates a debounced ref that updates after a delay
@@ -17,6 +17,13 @@ export function useDebouncedRef<T>(sourceRef: Ref<T>, delay = 300): Ref<T> {
     timeout = setTimeout(() => {
       debouncedValue.value = newVal
     }, delay)
+  })
+
+  onScopeDispose(() => {
+    if (timeout) {
+      clearTimeout(timeout)
+      timeout = null
+    }
   })
 
   return debouncedValue
