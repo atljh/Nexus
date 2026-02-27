@@ -138,7 +138,7 @@ export default {
       title: 'Batch Check Accounts',
       description: 'Check multiple accounts in parallel',
       checkSpamblock: 'Check spamblock status',
-      spamblockWarning: 'Spamblock check requires sending messages to @SpamBot',
+      spamblockWarning: "Spamblock check requires sending messages to {'@'}SpamBot",
       maxConcurrent: 'Max concurrent checks',
       startCheck: 'Start Check',
       progress: 'Checking: {current}/{total}',
@@ -484,7 +484,7 @@ export default {
   autoLikes: {
     createTask: 'Create Task',
     channel: 'Channel',
-    channelPlaceholder: '@channel or https://t.me/channel',
+    channelPlaceholder: "{'@'}channel or https://t.me/channel",
     mode: 'Mode',
     modes: {
       single: 'Single Post',
@@ -536,12 +536,13 @@ export default {
   },
 
   autoComments: {
+    subtitle: 'Automatic commenting on channel posts',
     createTask: 'Create Task',
     settings: 'Settings',
     templates: 'Templates',
     accounts: 'Accounts',
     channels: 'Channels',
-    channelsPlaceholder: 'Enter @channel and press Enter',
+    channelsPlaceholder: "Enter {'@'}channel and press Enter",
     channelsHint: 'Add multiple channels with Enter or comma',
     mode: 'Mode',
     modes: {

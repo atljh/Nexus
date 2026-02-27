@@ -138,7 +138,7 @@ export default {
       title: 'Масова перевірка акаунтів',
       description: 'Перевірка декількох акаунтів паралельно',
       checkSpamblock: 'Перевірити статус спам-блоку',
-      spamblockWarning: 'Перевірка спам-блоку вимагає надсилання повідомлень до @SpamBot',
+      spamblockWarning: "Перевірка спам-блоку вимагає надсилання повідомлень до {'@'}SpamBot",
       maxConcurrent: 'Макс. паралельних перевірок',
       startCheck: 'Почати перевірку',
       progress: 'Перевірка: {current}/{total}',
@@ -484,7 +484,7 @@ export default {
   autoLikes: {
     createTask: 'Створити завдання',
     channel: 'Канал',
-    channelPlaceholder: '@channel або https://t.me/channel',
+    channelPlaceholder: "{'@'}channel або https://t.me/channel",
     mode: 'Режим',
     modes: {
       single: 'Один пост',
@@ -536,12 +536,13 @@ export default {
   },
 
   autoComments: {
+    subtitle: 'Автоматичне коментування постів у каналах',
     createTask: 'Створити завдання',
     settings: 'Налаштування',
     templates: 'Шаблони',
     accounts: 'Акаунти',
     channels: 'Канали',
-    channelsPlaceholder: 'Введіть @channel і натисніть Enter',
+    channelsPlaceholder: "Введіть {'@'}channel і натисніть Enter",
     channelsHint: 'Додайте кілька каналів через Enter або кому',
     mode: 'Режим',
     modes: {

@@ -7,9 +7,9 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Textarea from 'primevue/textarea'
-import Dropdown from 'primevue/dropdown'
+import Select from 'primevue/select'
 import MultiSelect from 'primevue/multiselect'
-import Chips from 'primevue/chips'
+import InputChips from 'primevue/inputchips'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Tag from 'primevue/tag'
@@ -357,7 +357,7 @@ onUnmounted(() => {
           </div>
           <div class="header-text">
             <h1>{{ t('nav.autoComments') }}</h1>
-            <p class="header-subtitle">{{ t('autoComments.subtitle') || 'Автоматичне коментування постів у каналах' }}</p>
+            <p class="header-subtitle">{{ t('autoComments.subtitle') }}</p>
           </div>
         </div>
         <div class="header-stats">
@@ -408,7 +408,7 @@ onUnmounted(() => {
                   <span>Цільові канали</span>
                 </div>
                 <div class="form-group">
-                  <Chips
+                  <InputChips
                     v-model="channels"
                     :placeholder="t('autoComments.channelsPlaceholder')"
                     class="w-full custom-chips"
@@ -432,7 +432,7 @@ onUnmounted(() => {
                       <i class="pi pi-play-circle"></i>
                       {{ t('autoComments.mode') }}
                     </label>
-                    <Dropdown
+                    <Select
                       v-model="mode"
                       :options="modeOptions"
                       option-label="label"
@@ -445,7 +445,7 @@ onUnmounted(() => {
                       <i class="pi pi-sync"></i>
                       {{ t('autoComments.rotationMode') }}
                     </label>
-                    <Dropdown
+                    <Select
                       v-model="rotationMode"
                       :options="rotationOptions"
                       option-label="label"
@@ -554,7 +554,7 @@ onUnmounted(() => {
                   <span>Власні коментарі</span>
                 </div>
                 <div class="form-group">
-                  <Chips
+                  <InputChips
                     v-model="customTemplates"
                     :placeholder="t('autoComments.customTemplatesPlaceholder')"
                     class="w-full custom-chips"
@@ -625,7 +625,7 @@ onUnmounted(() => {
                 </div>
                 <div class="form-group">
                   <label class="form-label">{{ t('autoComments.filterByGroup') }}</label>
-                  <Dropdown
+                  <Select
                     v-model="selectedGroupId"
                     :options="[{ id: null, name: t('groups.allAccounts') }, ...groupStore.groups]"
                     option-label="name"

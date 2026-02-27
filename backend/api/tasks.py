@@ -134,7 +134,22 @@ class TaskLogResponse(BaseModel):
     created_at: str
 
 
+class AIPromptRequest(BaseModel):
+    """Request to create/update an AI prompt template."""
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    prompt_template: str = Field(..., min_length=1)
+    ai_model: str = Field("gpt-4o-mini")
+    temperature: float = Field(0.7, ge=0, le=2)
+    max_length: int = Field(200, ge=10, le=2000)
+    is_default: bool = Field(False)
+
+
 # ============ Routes ============
+# IMPORTANT: Static prefix routes MUST be registered before dynamic /{task_id}
+# routes, otherwise FastAPI will try to parse "templates" etc. as task_id int.
+
+# ── Task list & creation ──
 
 @router.get("", response_model=List[TaskResponse])
 async def get_tasks(
@@ -165,14 +180,239 @@ async def get_active_tasks(db: Session = Depends(get_db)):
     return [task.to_dict() for task in tasks]
 
 
-@router.get("/{task_id}", response_model=TaskResponse)
-async def get_task(task_id: int, db: Session = Depends(get_db)):
-    """Get a specific task by ID."""
-    task = db.query(Task).options(joinedload(Task.accounts)).filter(Task.id == task_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return task.to_dict()
+# ── Statistics ──
 
+@router.get("/stats/summary")
+async def get_task_stats(db: Session = Depends(get_db)):
+    """Get task statistics summary."""
+    total = db.query(Task).count()
+    running = db.query(Task).filter(Task.status == "running").count()
+    pending = db.query(Task).filter(Task.status == "pending").count()
+    completed = db.query(Task).filter(Task.status == "completed").count()
+    failed = db.query(Task).filter(Task.status == "failed").count()
+
+    return {
+        "total": total,
+        "running": running,
+        "pending": pending,
+        "completed": completed,
+        "failed": failed
+    }
+
+
+# ── Comment Templates ──
+
+@router.get("/templates", response_model=List[CommentTemplateResponse])
+async def get_templates(db: Session = Depends(get_db)):
+    """Get all comment templates."""
+    templates = db.query(CommentTemplate).order_by(CommentTemplate.created_at.desc()).all()
+    return [t.to_dict() for t in templates]
+
+
+@router.post("/templates", response_model=CommentTemplateResponse)
+async def create_template(request: CommentTemplateRequest, db: Session = Depends(get_db)):
+    """Create a new comment template."""
+    from workers.spintax import validate_spintax
+
+    # Validate spintax
+    is_valid, error = validate_spintax(request.content)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Invalid spintax: {error}")
+
+    template = CommentTemplate(
+        name=request.name,
+        content=request.content,
+        is_default=request.is_default
+    )
+
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+
+    return template.to_dict()
+
+
+@router.put("/templates/{template_id}", response_model=CommentTemplateResponse)
+async def update_template(
+    template_id: int,
+    request: CommentTemplateRequest,
+    db: Session = Depends(get_db)
+):
+    """Update a comment template."""
+    from workers.spintax import validate_spintax
+
+    template = db.query(CommentTemplate).filter(CommentTemplate.id == template_id).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    # Validate spintax
+    is_valid, error = validate_spintax(request.content)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Invalid spintax: {error}")
+
+    template.name = request.name
+    template.content = request.content
+    template.is_default = request.is_default
+
+    db.commit()
+    db.refresh(template)
+
+    return template.to_dict()
+
+
+@router.delete("/templates/{template_id}")
+async def delete_template(template_id: int, db: Session = Depends(get_db)):
+    """Delete a comment template."""
+    template = db.query(CommentTemplate).filter(CommentTemplate.id == template_id).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    db.delete(template)
+    db.commit()
+
+    return {"message": "Template deleted"}
+
+
+@router.post("/templates/preview")
+async def preview_template(content: str, count: int = 5, db: Session = Depends(get_db)):
+    """Preview spintax template with sample outputs."""
+    from workers.spintax import validate_spintax, generate_samples, count_variants
+
+    is_valid, error = validate_spintax(content)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Invalid spintax: {error}")
+
+    samples = generate_samples(content, count)
+    total_variants = count_variants(content)
+
+    return {
+        "samples": samples,
+        "total_variants": total_variants
+    }
+
+
+# ── AI Prompt Templates ──
+
+@router.get("/ai-prompts", response_model=list)
+async def get_ai_prompts(db: Session = Depends(get_db)):
+    """Get all AI prompt templates."""
+    prompts = db.query(AIPromptTemplate).order_by(AIPromptTemplate.created_at.desc()).all()
+    return [p.to_dict() for p in prompts]
+
+
+@router.post("/ai-prompts")
+async def create_ai_prompt(request: AIPromptRequest, db: Session = Depends(get_db)):
+    """Create a new AI prompt template."""
+    # Validate template has required placeholders
+    if "{post_text}" not in request.prompt_template:
+        raise HTTPException(
+            status_code=400,
+            detail="Prompt template must contain {post_text} placeholder"
+        )
+
+    prompt = AIPromptTemplate(
+        name=request.name,
+        description=request.description,
+        prompt_template=request.prompt_template,
+        ai_model=request.ai_model,
+        temperature=request.temperature,
+        max_length=request.max_length,
+        is_default=request.is_default,
+    )
+    db.add(prompt)
+    db.commit()
+    db.refresh(prompt)
+    return prompt.to_dict()
+
+
+@router.put("/ai-prompts/{prompt_id}")
+async def update_ai_prompt(
+    prompt_id: int,
+    request: AIPromptRequest,
+    db: Session = Depends(get_db)
+):
+    """Update an AI prompt template."""
+    prompt = db.query(AIPromptTemplate).filter(AIPromptTemplate.id == prompt_id).first()
+    if not prompt:
+        raise HTTPException(status_code=404, detail="AI prompt not found")
+
+    if "{post_text}" not in request.prompt_template:
+        raise HTTPException(
+            status_code=400,
+            detail="Prompt template must contain {post_text} placeholder"
+        )
+
+    prompt.name = request.name
+    prompt.description = request.description
+    prompt.prompt_template = request.prompt_template
+    prompt.ai_model = request.ai_model
+    prompt.temperature = request.temperature
+    prompt.max_length = request.max_length
+    prompt.is_default = request.is_default
+
+    db.commit()
+    db.refresh(prompt)
+    return prompt.to_dict()
+
+
+@router.delete("/ai-prompts/{prompt_id}")
+async def delete_ai_prompt(prompt_id: int, db: Session = Depends(get_db)):
+    """Delete an AI prompt template."""
+    prompt = db.query(AIPromptTemplate).filter(AIPromptTemplate.id == prompt_id).first()
+    if not prompt:
+        raise HTTPException(status_code=404, detail="AI prompt not found")
+
+    db.delete(prompt)
+    db.commit()
+    return {"message": "AI prompt deleted"}
+
+
+# ── Comment History (static prefix) ──
+
+@router.get("/comment-history/by-account/{account_id}")
+async def get_account_comment_history(
+    account_id: int,
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db)
+):
+    """Get comment history for a specific account."""
+    items = db.query(CommentHistory).filter(
+        CommentHistory.account_id == account_id
+    ).order_by(CommentHistory.created_at.desc()).offset(offset).limit(limit).all()
+    return [h.to_dict() for h in items]
+
+
+# ── Blacklist (static prefix) ──
+
+@router.get("/blacklist/{account_id}")
+async def get_account_blacklist(
+    account_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get blacklist entries for an account."""
+    items = db.query(AccountBlacklist).filter(
+        AccountBlacklist.account_id == account_id
+    ).order_by(AccountBlacklist.created_at.desc()).all()
+    return [b.to_dict() for b in items]
+
+
+@router.delete("/blacklist/{blacklist_id}")
+async def delete_blacklist_entry(
+    blacklist_id: int,
+    db: Session = Depends(get_db)
+):
+    """Remove an entry from the blacklist."""
+    entry = db.query(AccountBlacklist).filter(AccountBlacklist.id == blacklist_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Blacklist entry not found")
+
+    db.delete(entry)
+    db.commit()
+    return {"message": "Blacklist entry removed"}
+
+
+# ── Task creation (static prefix) ──
 
 @router.post("/likes", response_model=TaskResponse)
 async def create_likes_task(request: CreateLikesTaskRequest, db: Session = Depends(get_db)):
@@ -284,6 +524,18 @@ async def create_comments_task(request: CreateCommentsTaskRequest, db: Session =
     db.commit()
     db.refresh(task)
 
+    return task.to_dict()
+
+
+# ============ Dynamic /{task_id} routes ============
+# These MUST come after all static prefix routes above.
+
+@router.get("/{task_id}", response_model=TaskResponse)
+async def get_task(task_id: int, db: Session = Depends(get_db)):
+    """Get a specific task by ID."""
+    task = db.query(Task).options(joinedload(Task.accounts)).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
     return task.to_dict()
 
 
@@ -406,7 +658,7 @@ async def delete_task(task_id: int, db: Session = Depends(get_db)):
     return {"message": "Task deleted"}
 
 
-# ============ Task Logs ============
+# ── Task Logs ──
 
 @router.get("/{task_id}/logs", response_model=List[TaskLogResponse])
 async def get_task_logs(
@@ -478,118 +730,7 @@ async def add_task_log(
     return log.to_dict()
 
 
-# ============ Statistics ============
-
-@router.get("/stats/summary")
-async def get_task_stats(db: Session = Depends(get_db)):
-    """Get task statistics summary."""
-    total = db.query(Task).count()
-    running = db.query(Task).filter(Task.status == "running").count()
-    pending = db.query(Task).filter(Task.status == "pending").count()
-    completed = db.query(Task).filter(Task.status == "completed").count()
-    failed = db.query(Task).filter(Task.status == "failed").count()
-
-    return {
-        "total": total,
-        "running": running,
-        "pending": pending,
-        "completed": completed,
-        "failed": failed
-    }
-
-
-# ============ Comment Templates ============
-
-@router.get("/templates", response_model=List[CommentTemplateResponse])
-async def get_templates(db: Session = Depends(get_db)):
-    """Get all comment templates."""
-    templates = db.query(CommentTemplate).order_by(CommentTemplate.created_at.desc()).all()
-    return [t.to_dict() for t in templates]
-
-
-@router.post("/templates", response_model=CommentTemplateResponse)
-async def create_template(request: CommentTemplateRequest, db: Session = Depends(get_db)):
-    """Create a new comment template."""
-    from workers.spintax import validate_spintax
-
-    # Validate spintax
-    is_valid, error = validate_spintax(request.content)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=f"Invalid spintax: {error}")
-
-    template = CommentTemplate(
-        name=request.name,
-        content=request.content,
-        is_default=request.is_default
-    )
-
-    db.add(template)
-    db.commit()
-    db.refresh(template)
-
-    return template.to_dict()
-
-
-@router.put("/templates/{template_id}", response_model=CommentTemplateResponse)
-async def update_template(
-    template_id: int,
-    request: CommentTemplateRequest,
-    db: Session = Depends(get_db)
-):
-    """Update a comment template."""
-    from workers.spintax import validate_spintax
-
-    template = db.query(CommentTemplate).filter(CommentTemplate.id == template_id).first()
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
-
-    # Validate spintax
-    is_valid, error = validate_spintax(request.content)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=f"Invalid spintax: {error}")
-
-    template.name = request.name
-    template.content = request.content
-    template.is_default = request.is_default
-
-    db.commit()
-    db.refresh(template)
-
-    return template.to_dict()
-
-
-@router.delete("/templates/{template_id}")
-async def delete_template(template_id: int, db: Session = Depends(get_db)):
-    """Delete a comment template."""
-    template = db.query(CommentTemplate).filter(CommentTemplate.id == template_id).first()
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
-
-    db.delete(template)
-    db.commit()
-
-    return {"message": "Template deleted"}
-
-
-@router.post("/templates/preview")
-async def preview_template(content: str, count: int = 5, db: Session = Depends(get_db)):
-    """Preview spintax template with sample outputs."""
-    from workers.spintax import validate_spintax, generate_samples, count_variants
-
-    is_valid, error = validate_spintax(content)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=f"Invalid spintax: {error}")
-
-    samples = generate_samples(content, count)
-    total_variants = count_variants(content)
-
-    return {
-        "samples": samples,
-        "total_variants": total_variants
-    }
-
-
-# ============ Target Channels ============
+# ── Target Channels ──
 
 @router.get("/{task_id}/channels", response_model=List[TargetChannelResponse])
 async def get_task_channels(task_id: int, db: Session = Depends(get_db)):
@@ -602,7 +743,7 @@ async def get_task_channels(task_id: int, db: Session = Depends(get_db)):
     return [ch.to_dict() for ch in channels]
 
 
-# ============ Comment History ============
+# ── Comment History (per task) ──
 
 @router.get("/{task_id}/comment-history")
 async def get_task_comment_history(
@@ -626,133 +767,3 @@ async def get_task_comment_history(
 
     items = query.order_by(CommentHistory.created_at.desc()).offset(offset).limit(limit).all()
     return [h.to_dict() for h in items]
-
-
-@router.get("/comment-history/by-account/{account_id}")
-async def get_account_comment_history(
-    account_id: int,
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db)
-):
-    """Get comment history for a specific account."""
-    items = db.query(CommentHistory).filter(
-        CommentHistory.account_id == account_id
-    ).order_by(CommentHistory.created_at.desc()).offset(offset).limit(limit).all()
-    return [h.to_dict() for h in items]
-
-
-# ============ Blacklist ============
-
-@router.get("/blacklist/{account_id}")
-async def get_account_blacklist(
-    account_id: int,
-    db: Session = Depends(get_db)
-):
-    """Get blacklist entries for an account."""
-    items = db.query(AccountBlacklist).filter(
-        AccountBlacklist.account_id == account_id
-    ).order_by(AccountBlacklist.created_at.desc()).all()
-    return [b.to_dict() for b in items]
-
-
-@router.delete("/blacklist/{blacklist_id}")
-async def delete_blacklist_entry(
-    blacklist_id: int,
-    db: Session = Depends(get_db)
-):
-    """Remove an entry from the blacklist."""
-    entry = db.query(AccountBlacklist).filter(AccountBlacklist.id == blacklist_id).first()
-    if not entry:
-        raise HTTPException(status_code=404, detail="Blacklist entry not found")
-
-    db.delete(entry)
-    db.commit()
-    return {"message": "Blacklist entry removed"}
-
-
-# ============ AI Prompt Templates ============
-
-class AIPromptRequest(BaseModel):
-    """Request to create/update an AI prompt template."""
-    name: str = Field(..., min_length=1, max_length=100)
-    description: Optional[str] = None
-    prompt_template: str = Field(..., min_length=1)
-    ai_model: str = Field("gpt-4o-mini")
-    temperature: float = Field(0.7, ge=0, le=2)
-    max_length: int = Field(200, ge=10, le=2000)
-    is_default: bool = Field(False)
-
-
-@router.get("/ai-prompts", response_model=list)
-async def get_ai_prompts(db: Session = Depends(get_db)):
-    """Get all AI prompt templates."""
-    prompts = db.query(AIPromptTemplate).order_by(AIPromptTemplate.created_at.desc()).all()
-    return [p.to_dict() for p in prompts]
-
-
-@router.post("/ai-prompts")
-async def create_ai_prompt(request: AIPromptRequest, db: Session = Depends(get_db)):
-    """Create a new AI prompt template."""
-    # Validate template has required placeholders
-    if "{post_text}" not in request.prompt_template:
-        raise HTTPException(
-            status_code=400,
-            detail="Prompt template must contain {post_text} placeholder"
-        )
-
-    prompt = AIPromptTemplate(
-        name=request.name,
-        description=request.description,
-        prompt_template=request.prompt_template,
-        ai_model=request.ai_model,
-        temperature=request.temperature,
-        max_length=request.max_length,
-        is_default=request.is_default,
-    )
-    db.add(prompt)
-    db.commit()
-    db.refresh(prompt)
-    return prompt.to_dict()
-
-
-@router.put("/ai-prompts/{prompt_id}")
-async def update_ai_prompt(
-    prompt_id: int,
-    request: AIPromptRequest,
-    db: Session = Depends(get_db)
-):
-    """Update an AI prompt template."""
-    prompt = db.query(AIPromptTemplate).filter(AIPromptTemplate.id == prompt_id).first()
-    if not prompt:
-        raise HTTPException(status_code=404, detail="AI prompt not found")
-
-    if "{post_text}" not in request.prompt_template:
-        raise HTTPException(
-            status_code=400,
-            detail="Prompt template must contain {post_text} placeholder"
-        )
-
-    prompt.name = request.name
-    prompt.description = request.description
-    prompt.prompt_template = request.prompt_template
-    prompt.ai_model = request.ai_model
-    prompt.temperature = request.temperature
-    prompt.max_length = request.max_length
-    prompt.is_default = request.is_default
-
-    db.commit()
-    db.refresh(prompt)
-    return prompt.to_dict()
-
-
-@router.delete("/ai-prompts/{prompt_id}")
-async def delete_ai_prompt(prompt_id: int, db: Session = Depends(get_db)):
-    """Delete an AI prompt template."""
-    prompt = db.query(AIPromptTemplate).filter(AIPromptTemplate.id == prompt_id).first()
-    if not prompt:
-        raise HTTPException(status_code=404, detail="AI prompt not found")
-
-    db.delete(prompt)
-    db.commit()
-    return {"message": "AI prompt deleted"}
