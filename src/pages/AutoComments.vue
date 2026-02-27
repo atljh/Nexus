@@ -327,92 +327,6 @@ function formatDate(date: string | null): string {
   return new Date(date).toLocaleString()
 }
 
-// Load test data for demo
-function loadTestData() {
-  const testTasks = [
-    {
-      id: 101,
-      task_type: 'comments',
-      status: 'completed',
-      config: {
-        channels: ['@durov', '@telegram'],
-        templates: ['Крутий пост!', 'Дякую за інформацію'],
-        rotation_mode: 'random',
-        comments_per_account: 10,
-        mode: 'single'
-      },
-      total_actions: 50,
-      completed_actions: 50,
-      failed_actions: 3,
-      progress: 100,
-      created_at: new Date(Date.now() - 86400000).toISOString(),
-      started_at: new Date(Date.now() - 86400000).toISOString(),
-      completed_at: new Date(Date.now() - 82800000).toISOString(),
-      last_error: null
-    },
-    {
-      id: 102,
-      task_type: 'comments',
-      status: 'running',
-      config: {
-        channels: ['@tech_news'],
-        templates: ['Цікаво!', 'Супер стаття'],
-        rotation_mode: 'round_robin',
-        comments_per_account: 5,
-        mode: 'monitoring'
-      },
-      total_actions: 30,
-      completed_actions: 12,
-      failed_actions: 1,
-      progress: 40,
-      created_at: new Date(Date.now() - 3600000).toISOString(),
-      started_at: new Date(Date.now() - 3600000).toISOString(),
-      completed_at: null,
-      last_error: null
-    },
-    {
-      id: 103,
-      task_type: 'comments',
-      status: 'pending',
-      config: {
-        channels: ['@news_channel', '@crypto_ua'],
-        templates: ['Дякую!'],
-        rotation_mode: 'random',
-        comments_per_account: 8,
-        mode: 'single'
-      },
-      total_actions: 20,
-      completed_actions: 0,
-      failed_actions: 0,
-      progress: 0,
-      created_at: new Date().toISOString(),
-      started_at: null,
-      completed_at: null,
-      last_error: null
-    }
-  ]
-
-  const testTemplates = [
-    { id: 1, name: 'Позитивний відгук', content: '{Чудово|Супер|Відмінно}! {Дякую за пост|Цікава інформація|Корисно}!' },
-    { id: 2, name: 'Коротка реакція', content: '{👍|🔥|💯|❤️}' },
-    { id: 3, name: 'Питання', content: '{А як щодо|Що думаєте про|Як ви вважаєте} {цього?|такого підходу?|майбутнього?}' }
-  ]
-
-  const testAccounts = [
-    { id: 1, phone: '+380991234567', username: 'test_user1', status: 'valid', group_id: null },
-    { id: 2, phone: '+380997654321', username: 'test_user2', status: 'valid', group_id: null },
-    { id: 3, phone: '+380501112233', username: 'test_user3', status: 'valid', group_id: null },
-    { id: 4, phone: '+380672223344', username: null, status: 'valid', group_id: null }
-  ]
-
-  // @ts-ignore - Setting test data directly
-  taskStore.tasks = testTasks
-  // @ts-ignore - Setting test data directly
-  taskStore.templates = testTemplates
-  // @ts-ignore - Setting test data directly
-  accountStore.accounts = testAccounts
-}
-
 // Initialize
 onMounted(async () => {
   await Promise.all([
@@ -421,11 +335,6 @@ onMounted(async () => {
     accountStore.fetchAccounts(),
     groupStore.fetchGroups()
   ])
-
-  // Load test data if no tasks exist
-  if (taskStore.tasks.length === 0) {
-    loadTestData()
-  }
 
   if (taskStore.hasRunningTasks) {
     taskStore.startPolling()
