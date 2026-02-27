@@ -9,7 +9,7 @@ import InputNumber from 'primevue/inputnumber'
 import Textarea from 'primevue/textarea'
 import Select from 'primevue/select'
 import MultiSelect from 'primevue/multiselect'
-import InputChips from 'primevue/inputchips'
+import AutoComplete from 'primevue/autocomplete'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Tag from 'primevue/tag'
@@ -401,11 +401,13 @@ onUnmounted(() => {
                   <span>Цільові канали</span>
                 </div>
                 <div class="form-group">
-                  <InputChips
+                  <AutoComplete
                     v-model="channels"
                     :placeholder="t('autoComments.channelsPlaceholder')"
                     class="w-full custom-chips"
                     separator=","
+                    multiple
+                    :typeahead="false"
                   />
                   <small class="input-hint">
                     <i class="pi pi-info-circle"></i>
@@ -534,10 +536,12 @@ onUnmounted(() => {
                   <span>Власні коментарі</span>
                 </div>
                 <div class="form-group">
-                  <InputChips
+                  <AutoComplete
                     v-model="customTemplates"
                     :placeholder="t('autoComments.customTemplatesPlaceholder')"
                     class="w-full custom-chips"
+                    multiple
+                    :typeahead="false"
                   />
                   <small class="input-hint">
                     <i class="pi pi-info-circle"></i>

@@ -500,10 +500,11 @@ textarea.p-textarea {
   color: #a855f7 !important;
 }
 
-/* Chips - Force dark theme */
+/* Chips / AutoComplete (multiple) - Force dark theme */
 .p-chips,
 .p-chips.p-component,
-.p-inputchips {
+.p-inputchips,
+.p-autocomplete.p-autocomplete-multiple .p-autocomplete-input-multiple {
   background: #141417 !important;
   background-color: #141417 !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
@@ -511,7 +512,8 @@ textarea.p-textarea {
 }
 
 .p-chips .p-chips-multiple-container,
-.p-inputchips .p-inputchips-input-container {
+.p-inputchips .p-inputchips-input-container,
+.p-autocomplete .p-autocomplete-input-multiple {
   background: transparent !important;
   padding: 6px 10px !important;
 }
@@ -519,14 +521,17 @@ textarea.p-textarea {
 .p-chips:not(.p-disabled).p-focus,
 .p-chips.p-focus,
 .p-inputchips:not(.p-disabled).p-focus,
-.p-inputchips.p-focus {
+.p-inputchips.p-focus,
+.p-autocomplete:not(.p-disabled).p-focus .p-autocomplete-input-multiple,
+.p-autocomplete.p-focus .p-autocomplete-input-multiple {
   border-color: #a855f7 !important;
   box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.15) !important;
 }
 
 .p-chips-token,
 .p-chip,
-.p-inputchips-chip {
+.p-inputchips-chip,
+.p-autocomplete-chip .p-chip {
   background: rgba(168, 85, 247, 0.15) !important;
   color: #a855f7 !important;
   border-radius: 4px !important;
@@ -538,7 +543,8 @@ textarea.p-textarea {
 }
 
 .p-chips-input-token input,
-.p-inputchips-input {
+.p-inputchips-input,
+.p-autocomplete-input-chip input {
   color: #fafafa !important;
   background: transparent !important;
 }
