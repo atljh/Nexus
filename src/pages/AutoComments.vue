@@ -35,7 +35,6 @@ const selectedTemplateIds = ref<number[]>([])
 const customTemplates = ref<string[]>([])
 const rotationMode = ref<'random' | 'round_robin'>('random')
 const commentsPerAccount = ref(10)
-const mode = ref<'single' | 'monitoring'>('single')
 const totalActions = ref(50)
 const minDelay = ref(60)
 const maxDelay = ref(300)
@@ -59,12 +58,6 @@ const tabs = computed(() => [
   { label: t('autoComments.settings'), icon: 'pi pi-cog' },
   { label: t('autoComments.templates'), icon: 'pi pi-file-edit' },
   { label: t('autoComments.accounts'), icon: 'pi pi-users' }
-])
-
-// Mode options
-const modeOptions = computed(() => [
-  { value: 'single', label: t('autoComments.modes.single') },
-  { value: 'monitoring', label: t('autoComments.modes.monitoring') }
 ])
 
 // Rotation mode options
@@ -170,7 +163,7 @@ async function createTask() {
         templates: selectedTemplates.value,
         rotation_mode: rotationMode.value,
         comments_per_account: commentsPerAccount.value,
-        mode: mode.value
+        mode: 'single'
       },
       account_ids: selectedAccountIds.value,
       total_actions: totalActions.value,
@@ -427,19 +420,6 @@ onUnmounted(() => {
                   <span>Режим роботи</span>
                 </div>
                 <div class="form-grid-2">
-                  <div class="form-group">
-                    <label class="form-label">
-                      <i class="pi pi-play-circle"></i>
-                      {{ t('autoComments.mode') }}
-                    </label>
-                    <Select
-                      v-model="mode"
-                      :options="modeOptions"
-                      option-label="label"
-                      option-value="value"
-                      class="w-full"
-                    />
-                  </div>
                   <div class="form-group">
                     <label class="form-label">
                       <i class="pi pi-sync"></i>
@@ -926,10 +906,6 @@ onUnmounted(() => {
                   :severity="getStatusSeverity(selectedTask.status)"
                   class="overview-tag"
                 />
-              </div>
-              <div class="overview-item">
-                <span class="overview-label">Режим</span>
-                <span class="overview-value">{{ t(`autoComments.modes.${selectedTask.config?.mode}`) }}</span>
               </div>
               <div class="overview-item">
                 <span class="overview-label">Ротація</span>
