@@ -40,6 +40,7 @@ function toggleTheme() {
           <div class="logo-icon">
             <i class="pi pi-bolt"></i>
           </div>
+          <span class="logo-text">Nexus</span>
         </div>
       </div>
 
@@ -51,17 +52,17 @@ function toggleTheme() {
           class="nav-item"
           :class="{ active: isActive(item.to) }"
         >
-          <i :class="['pi', item.icon]"></i>
+          <div class="nav-icon-wrap">
+            <i :class="['pi', item.icon]"></i>
+          </div>
           <span>{{ item.label }}</span>
         </router-link>
       </nav>
 
       <div class="sidebar-footer">
-        <div class="footer-row">
-          <button class="theme-toggle" @click="toggleTheme" :title="themeStore.resolvedTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'">
-            <i :class="['pi', themeIcon]"></i>
-          </button>
-        </div>
+        <button class="theme-toggle" @click="toggleTheme" :title="themeStore.resolvedTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'">
+          <i :class="['pi', themeIcon]"></i>
+        </button>
       </div>
     </aside>
 
@@ -79,9 +80,9 @@ function toggleTheme() {
 }
 
 .sidebar {
-  width: 260px;
-  background: linear-gradient(180deg, #141414 0%, #0d0d0d 100%);
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  width: 230px;
+  background: #0c0c0e;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
   display: flex;
   flex-direction: column;
   position: fixed;
@@ -92,57 +93,58 @@ function toggleTheme() {
 }
 
 .sidebar-header {
-  padding: 24px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 20px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .logo {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .logo-icon {
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
-  box-shadow: 0 4px 16px rgba(168, 85, 247, 0.4);
+  box-shadow: 0 2px 12px rgba(168, 85, 247, 0.35);
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
-  font-size: 18px;
+  font-size: 15px;
 }
 
 .logo-text {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
-  background: linear-gradient(135deg, #a855f7, #7c3aed);
+  background: linear-gradient(135deg, #c084fc, #a855f7);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  letter-spacing: -0.5px;
+  letter-spacing: -0.3px;
 }
 
 .sidebar-nav {
   flex: 1;
-  padding: 16px 12px;
+  padding: 12px 10px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px 18px;
-  border-radius: 10px;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
   color: #6b7280;
   text-decoration: none;
-  transition: all 0.2s ease;
-  font-size: 14px;
+  transition: all 0.15s ease;
+  font-size: 13.5px;
   font-weight: 500;
+  position: relative;
 }
 
 .nav-item:hover {
@@ -151,32 +153,36 @@ function toggleTheme() {
 }
 
 .nav-item.active {
-  background: linear-gradient(135deg, rgba(168, 85, 247, 0.15) 0%, rgba(124, 58, 237, 0.1) 100%);
-  color: #a855f7;
-  box-shadow: inset 0 0 0 1px rgba(168, 85, 247, 0.2);
+  background: rgba(168, 85, 247, 0.08);
+  color: #c084fc;
 }
 
-.nav-item i {
-  font-size: 18px;
-  width: 24px;
-  text-align: center;
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  background: #a855f7;
+  border-radius: 0 3px 3px 0;
+}
+
+.nav-icon-wrap {
+  width: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-icon-wrap i {
+  font-size: 16px;
 }
 
 .sidebar-footer {
-  padding: 16px 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.footer-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.backend-status {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .theme-toggle {
@@ -184,17 +190,17 @@ function toggleTheme() {
   height: 32px;
   border-radius: 8px;
   border: none;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.05);
   color: #6b7280;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
 }
 
 .theme-toggle:hover {
-  background: rgba(168, 85, 247, 0.15);
+  background: rgba(168, 85, 247, 0.12);
   color: #a855f7;
 }
 
@@ -202,36 +208,11 @@ function toggleTheme() {
   font-size: 14px;
 }
 
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #6b7280;
-  flex-shrink: 0;
-}
-
-.status-dot.connected {
-  background: #10b981;
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
-  animation: pulse 2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-
-.status-text {
-  font-size: 12px;
-  color: #6b7280;
-}
-
 .main-content {
   flex: 1;
-  margin-left: 260px;
+  margin-left: 230px;
   padding: 20px 24px;
-  background: #0a0a0a;
+  background: #09090b;
   min-height: 100vh;
-  transition: background-color 0.2s ease;
 }
 </style>

@@ -6,7 +6,7 @@ import MainLayout from '@/layouts/MainLayout.vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
-import Dropdown from 'primevue/dropdown'
+import Select from 'primevue/select'
 import MultiSelect from 'primevue/multiselect'
 import Tag from 'primevue/tag'
 import { useToast } from 'primevue/usetoast'
@@ -45,8 +45,8 @@ const activeTab = ref(0)
 
 // Tabs
 const tabs = computed(() => [
-  { label: t('autoLikes.settings') || 'Настройки', icon: 'pi pi-cog' },
-  { label: t('autoLikes.selectAccounts') || 'Аккаунты', icon: 'pi pi-users' }
+  { label: t('autoLikes.settings'), icon: 'pi pi-cog' },
+  { label: t('autoLikes.selectAccounts'), icon: 'pi pi-users' }
 ])
 
 // Emoji mode options
@@ -303,7 +303,7 @@ onUnmounted(() => {
                     <i class="pi pi-sliders-h"></i>
                     Режим эмодзи
                   </label>
-                  <Dropdown
+                  <Select
                     v-model="emojiMode"
                     :options="emojiModeOptions"
                     option-label="label"
@@ -409,7 +409,7 @@ onUnmounted(() => {
                 </div>
                 <div class="form-group">
                   <label class="form-label">{{ t('autoLikes.filterByGroup') }}</label>
-                  <Dropdown
+                  <Select
                     v-model="selectedGroupId"
                     :options="[{ id: null, name: t('groups.allAccounts') }, ...groupStore.groups]"
                     option-label="name"

@@ -56,7 +56,9 @@ export default {
     quickActions: 'Quick Actions',
     addAccount: 'Add Account',
     addProxy: 'Add Proxy',
-    newLikeTask: 'New Like Task'
+    newLikeTask: 'New Like Task',
+    active: 'active',
+    working: 'working'
   },
 
   accounts: {
@@ -482,6 +484,7 @@ export default {
   comingSoon: 'Coming in Stage 3',
 
   autoLikes: {
+    settings: 'Settings',
     createTask: 'Create Task',
     channel: 'Channel',
     channelPlaceholder: "{'@'}channel or https://t.me/channel",

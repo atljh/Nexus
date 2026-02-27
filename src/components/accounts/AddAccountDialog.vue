@@ -6,7 +6,7 @@ import { useAccountStore, useProxyStore } from '@/stores'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
-import Dropdown from 'primevue/dropdown'
+import Select from 'primevue/select'
 import Stepper from 'primevue/stepper'
 import StepItem from 'primevue/stepitem'
 import Step from 'primevue/step'
@@ -292,7 +292,7 @@ function handleDone() {
 
               <div class="form-field">
                 <label class="form-label">{{ t('accounts.auth.proxy.title') }}</label>
-                <Dropdown
+                <Select
                   v-model="selectedProxyId"
                   :options="proxyStore.workingProxies"
                   optionLabel="host"
@@ -314,7 +314,7 @@ function handleDone() {
                       <span class="proxy-type">{{ option.type }}</span>
                     </div>
                   </template>
-                </Dropdown>
+                </Select>
               </div>
 
               <div class="step-actions">

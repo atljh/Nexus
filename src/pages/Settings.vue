@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import Button from 'primevue/button'
-import Dropdown from 'primevue/dropdown'
+import Select from 'primevue/select'
 import { setLocale, getLocale } from '@/i18n'
 
 const { t } = useI18n()
@@ -40,7 +40,7 @@ function changeLanguage(locale: 'en' | 'uk') {
               <div class="setting-title">{{ t('settings.language') }}</div>
               <div class="setting-desc">{{ t('settings.languageDesc') }}</div>
             </div>
-            <Dropdown
+            <Select
               :modelValue="currentLocale"
               :options="languages"
               optionLabel="label"
@@ -60,7 +60,7 @@ function changeLanguage(locale: 'en' | 'uk') {
                   <span>{{ option.label }}</span>
                 </div>
               </template>
-            </Dropdown>
+            </Select>
           </div>
         </div>
       </div>

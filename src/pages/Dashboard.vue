@@ -15,6 +15,8 @@ interface ProxyItem { id: number; status: string }
 interface AccountsResponse { data: Account[] }
 interface ProxiesResponse { data: ProxyItem[] }
 
+const loaded = ref(false)
+
 onMounted(async () => {
   try {
     const [accountsRes, proxiesRes] = await Promise.all([
@@ -32,84 +34,98 @@ onMounted(async () => {
   } catch (error) {
     console.error('Failed to load stats:', error)
   }
+  loaded.value = true
 })
 </script>
 
 <template>
   <MainLayout>
-    <div class="dashboard">
-      <!-- Stats Row -->
-      <div class="stats-row">
+    <div class="dashboard" :class="{ loaded }">
+      <!-- Header -->
+      <div class="dash-header">
+        <h1 class="dash-title">{{ t('nav.dashboard') }}</h1>
+      </div>
+
+      <!-- Stats Grid -->
+      <div class="stats-grid">
         <div class="stat-card">
-          <div class="stat-icon-wrap stat-icon-purple">
-            <i class="pi pi-users"></i>
+          <div class="stat-top">
+            <div class="stat-icon stat-icon-purple">
+              <i class="pi pi-users"></i>
+            </div>
+            <div class="stat-badge" v-if="stats.accounts.active > 0">
+              <span class="stat-badge-dot"></span>
+              {{ stats.accounts.active }} {{ t('dashboard.active') || 'active' }}
+            </div>
           </div>
-          <div class="stat-content">
-            <div class="stat-value">{{ stats.accounts.total }}</div>
-            <div class="stat-label">{{ t('dashboard.accounts') }}</div>
-            <div class="stat-sub">{{ t('dashboard.accountsActive', { count: stats.accounts.active }) }}</div>
-          </div>
+          <div class="stat-value">{{ stats.accounts.total }}</div>
+          <div class="stat-label">{{ t('dashboard.accounts') }}</div>
         </div>
 
         <div class="stat-card">
-          <div class="stat-icon-wrap stat-icon-blue">
-            <i class="pi pi-globe"></i>
+          <div class="stat-top">
+            <div class="stat-icon stat-icon-blue">
+              <i class="pi pi-globe"></i>
+            </div>
+            <div class="stat-badge" v-if="stats.proxies.working > 0">
+              <span class="stat-badge-dot stat-badge-dot-green"></span>
+              {{ stats.proxies.working }} {{ t('dashboard.working') || 'working' }}
+            </div>
           </div>
-          <div class="stat-content">
-            <div class="stat-value">{{ stats.proxies.total }}</div>
-            <div class="stat-label">{{ t('dashboard.proxies') }}</div>
-            <div class="stat-sub">{{ t('dashboard.proxiesWorking', { count: stats.proxies.working }) }}</div>
-          </div>
+          <div class="stat-value">{{ stats.proxies.total }}</div>
+          <div class="stat-label">{{ t('dashboard.proxies') }}</div>
         </div>
-
       </div>
 
       <!-- Quick Actions -->
-      <div class="section-card">
-        <div class="section-header">
-          <i class="pi pi-bolt section-icon"></i>
-          <h2 class="section-title">{{ t('dashboard.quickActions') }}</h2>
+      <div class="section">
+        <div class="section-label">
+          <i class="pi pi-bolt"></i>
+          <span>{{ t('dashboard.quickActions') }}</span>
         </div>
         <div class="actions-grid">
           <router-link to="/accounts" class="action-card">
-            <div class="action-icon">
+            <div class="action-icon action-icon-purple">
               <i class="pi pi-users"></i>
             </div>
-            <div class="action-text">
-              <span class="action-label">{{ t('dashboard.addAccount') }}</span>
-              <span class="action-hint">{{ t('dashboard.accounts') }}</span>
+            <div class="action-body">
+              <span class="action-title">{{ t('dashboard.addAccount') }}</span>
+              <span class="action-desc">{{ t('dashboard.accounts') }}</span>
             </div>
-            <i class="pi pi-chevron-right action-arrow"></i>
+            <i class="pi pi-arrow-right action-arrow"></i>
           </router-link>
+
           <router-link to="/proxy" class="action-card">
             <div class="action-icon action-icon-blue">
               <i class="pi pi-globe"></i>
             </div>
-            <div class="action-text">
-              <span class="action-label">{{ t('dashboard.addProxy') }}</span>
-              <span class="action-hint">{{ t('dashboard.proxies') }}</span>
+            <div class="action-body">
+              <span class="action-title">{{ t('dashboard.addProxy') }}</span>
+              <span class="action-desc">{{ t('dashboard.proxies') }}</span>
             </div>
-            <i class="pi pi-chevron-right action-arrow"></i>
+            <i class="pi pi-arrow-right action-arrow"></i>
           </router-link>
+
           <router-link to="/autolikes" class="action-card">
             <div class="action-icon action-icon-pink">
               <i class="pi pi-heart"></i>
             </div>
-            <div class="action-text">
-              <span class="action-label">{{ t('dashboard.newLikeTask') }}</span>
-              <span class="action-hint">Autolikes</span>
+            <div class="action-body">
+              <span class="action-title">{{ t('dashboard.newLikeTask') }}</span>
+              <span class="action-desc">AutoLikes</span>
             </div>
-            <i class="pi pi-chevron-right action-arrow"></i>
+            <i class="pi pi-arrow-right action-arrow"></i>
           </router-link>
+
           <router-link to="/autocomments" class="action-card">
             <div class="action-icon action-icon-orange">
               <i class="pi pi-comments"></i>
             </div>
-            <div class="action-text">
-              <span class="action-label">{{ t('dashboard.commentsToday') }}</span>
-              <span class="action-hint">Autocomments</span>
+            <div class="action-body">
+              <span class="action-title">{{ t('dashboard.commentsToday') }}</span>
+              <span class="action-desc">AutoComments</span>
             </div>
-            <i class="pi pi-chevron-right action-arrow"></i>
+            <i class="pi pi-arrow-right action-arrow"></i>
           </router-link>
         </div>
       </div>
@@ -121,146 +137,177 @@ onMounted(async () => {
 .dashboard {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
-/* Stats Row */
-.stats-row {
-  display: flex;
-  gap: 12px;
+.dashboard.loaded {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Header */
+.dash-header {
+  margin-bottom: 4px;
+}
+
+.dash-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: #f3f4f6;
+  letter-spacing: -0.4px;
+}
+
+/* Stats Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
 }
 
 .stat-card {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  background: linear-gradient(145deg, #161616 0%, #111111 100%);
+  background: #111113;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 20px;
-  transition: all 0.2s;
+  transition: border-color 0.2s;
 }
 
 .stat-card:hover {
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
-.stat-icon-wrap {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
+.stat-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.stat-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: 17px;
   color: white;
-  flex-shrink: 0;
 }
 
 .stat-icon-purple {
-  background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
+  background: linear-gradient(135deg, #a855f7, #7c3aed);
 }
 
 .stat-icon-blue {
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
 }
 
-.stat-icon-green {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+.stat-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #9ca3af;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 4px 10px;
+  border-radius: 20px;
 }
 
-.stat-icon-orange {
-  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+.stat-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #a855f7;
 }
 
-.stat-content {
-  min-width: 0;
+.stat-badge-dot-green {
+  background: #22c55e;
 }
 
 .stat-value {
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
   color: #f9fafb;
-  line-height: 1.2;
+  line-height: 1;
+  letter-spacing: -1px;
 }
 
 .stat-label {
-  font-size: 12px;
+  font-size: 13px;
   color: #6b7280;
   font-weight: 500;
-  margin-top: 2px;
+  margin-top: 6px;
 }
 
-.stat-sub {
-  font-size: 12px;
-  color: #4b5563;
-  margin-top: 2px;
+/* Section */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-/* Section Card */
-.section-card {
-  background: linear-gradient(145deg, #161616 0%, #111111 100%);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.section-header {
+.section-label {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.section-icon {
-  color: #a855f7;
-  font-size: 16px;
-}
-
-.section-title {
-  font-size: 14px;
+  gap: 8px;
+  font-size: 13px;
   font-weight: 600;
-  color: #e5e7eb;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.section-label i {
+  font-size: 13px;
+  color: #a855f7;
 }
 
 /* Actions Grid */
 .actions-grid {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
 }
 
 .action-card {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px 20px;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #111113;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
   text-decoration: none;
-  transition: all 0.15s;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-.action-card:last-child {
-  border-bottom: none;
+  transition: all 0.15s ease;
 }
 
 .action-card:hover {
-  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.1);
+  background: #141416;
 }
 
 .action-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: rgba(168, 85, 247, 0.12);
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #a855f7;
-  font-size: 16px;
+  font-size: 15px;
   flex-shrink: 0;
-  transition: all 0.2s;
+  transition: transform 0.15s ease;
+}
+
+.action-card:hover .action-icon {
+  transform: scale(1.05);
+}
+
+.action-icon-purple {
+  background: rgba(168, 85, 247, 0.12);
+  color: #a855f7;
 }
 
 .action-icon-blue {
@@ -278,37 +325,33 @@ onMounted(async () => {
   color: #f59e0b;
 }
 
-.action-text {
+.action-body {
   flex: 1;
   min-width: 0;
 }
 
-.action-label {
+.action-title {
   display: block;
-  font-size: 14px;
+  font-size: 13.5px;
   color: #e5e7eb;
   font-weight: 500;
 }
 
-.action-hint {
+.action-desc {
   display: block;
   font-size: 12px;
-  color: #6b7280;
+  color: #4b5563;
   margin-top: 1px;
 }
 
 .action-arrow {
-  color: #4b5563;
-  font-size: 12px;
-  transition: all 0.2s;
+  color: #3f3f46;
+  font-size: 11px;
+  transition: all 0.15s ease;
 }
 
 .action-card:hover .action-arrow {
   color: #9ca3af;
   transform: translateX(2px);
-}
-
-.action-card:hover .action-icon {
-  transform: scale(1.05);
 }
 </style>

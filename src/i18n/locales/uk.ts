@@ -56,7 +56,9 @@ export default {
     quickActions: 'Швидкі дії',
     addAccount: 'Додати акаунт',
     addProxy: 'Додати проксі',
-    newLikeTask: 'Нове завдання лайків'
+    newLikeTask: 'Нове завдання лайків',
+    active: 'активних',
+    working: 'робочих'
   },
 
   accounts: {
@@ -482,6 +484,7 @@ export default {
   comingSoon: 'Скоро буде',
 
   autoLikes: {
+    settings: 'Налаштування',
     createTask: 'Створити завдання',
     channel: 'Канал',
     channelPlaceholder: "{'@'}channel або https://t.me/channel",

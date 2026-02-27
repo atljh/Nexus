@@ -7,7 +7,7 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
-import Dropdown from 'primevue/dropdown'
+import Select from 'primevue/select'
 import Textarea from 'primevue/textarea'
 import Tag from 'primevue/tag'
 import ProgressBar from 'primevue/progressbar'
@@ -775,7 +775,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
       <!-- Filters + Search -->
       <div class="filters-row">
         <div class="filter-chips">
-          <Dropdown
+          <Select
             :model-value="statusFilter"
             :options="statusOptions"
             optionLabel="label"
@@ -785,7 +785,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
             class="filter-chip"
             showClear
           />
-          <Dropdown
+          <Select
             :model-value="typeFilter"
             :options="typeFilterOptions"
             optionLabel="label"
@@ -964,7 +964,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
             <div v-else class="form-mode">
               <div class="form-field">
                 <label class="form-label">{{ t('proxy.addDialog.type') }}</label>
-                <Dropdown
+                <Select
                   v-model="newProxy.type"
                   :options="proxyTypes"
                   optionLabel="label"
@@ -1146,7 +1146,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
           <div class="form-mode">
             <div class="form-field">
               <label class="form-label">{{ t('proxy.addDialog.type') }}</label>
-              <Dropdown
+              <Select
                 v-model="editProxy.type"
                 :options="proxyTypes"
                 optionLabel="label"

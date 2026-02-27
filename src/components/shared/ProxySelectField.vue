@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useProxyStore } from '@/stores'
-import Dropdown from 'primevue/dropdown'
+import Select from 'primevue/select'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import { useToast } from 'primevue/usetoast'
@@ -239,7 +239,7 @@ async function createProxyFromForm() {
         <div class="proxy-form-row">
           <div class="proxy-form-field type-field">
             <label class="form-label-small">{{ t('proxy.addDialog.type') }}</label>
-            <Dropdown
+            <Select
               v-model="newProxy.type"
               :options="proxyTypes"
               optionLabel="label"
@@ -301,7 +301,7 @@ async function createProxyFromForm() {
     </div>
 
     <!-- Proxy Dropdown -->
-    <Dropdown
+    <Select
       v-if="!showInlineForm"
       v-model="selectedProxy"
       :options="proxies"
@@ -325,7 +325,7 @@ async function createProxyFromForm() {
           <span class="proxy-type-badge">{{ option.type }}</span>
         </div>
       </template>
-    </Dropdown>
+    </Select>
 
     <small v-if="!showInlineForm && proxies.length === 0" class="no-proxy-warning">
       {{ t('accounts.importDialog.noWorkingProxies') }}

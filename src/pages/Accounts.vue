@@ -16,7 +16,7 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
-import Dropdown from 'primevue/dropdown'
+import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import MultiSelect from 'primevue/multiselect'
 import ProgressBar from 'primevue/progressbar'
@@ -1443,7 +1443,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
       <!-- Filters + Search -->
       <div class="filters-row">
         <div class="filter-chips">
-          <Dropdown
+          <Select
             :model-value="accountStore.filters.group_id"
             :options="[{ label: 'Все', value: null }, ...groupStore.groups.map(g => ({ label: g.name, value: g.id }))]"
             optionLabel="label"
@@ -1453,7 +1453,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             class="filter-chip"
             showClear
           />
-          <Dropdown
+          <Select
             :model-value="accountStore.filters.status"
             :options="statusOptions"
             optionLabel="label"
@@ -1463,7 +1463,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             class="filter-chip"
             showClear
           />
-          <Dropdown
+          <Select
             :model-value="accountStore.filters.proxy_id"
             :options="proxyFilterOptions"
             optionLabel="label"
@@ -1474,7 +1474,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             showClear
             filter
           />
-          <Dropdown
+          <Select
             :model-value="accountStore.filters.tag_id"
             :options="[...tagStore.tags.map(tg => ({ label: tg.name, value: tg.id }))]"
             optionLabel="label"
@@ -1580,7 +1580,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
           <Column header="Группа" style="min-width: 110px">
             <template #body="{ data }">
-              <Dropdown
+              <Select
                 :model-value="data.group_id"
                 :options="groupOptions"
                 optionLabel="label"
@@ -1605,7 +1605,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
                     <span>{{ option.label }}</span>
                   </div>
                 </template>
-              </Dropdown>
+              </Select>
             </template>
           </Column>
 
@@ -1731,7 +1731,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
         <!-- Proxy Selection Row -->
         <div class="proxy-selection-row">
-          <Dropdown
+          <Select
             v-model="bulkProxyId"
             :options="proxyStore.proxies"
             optionLabel="host"
@@ -1759,7 +1759,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
                 />
               </div>
             </template>
-          </Dropdown>
+          </Select>
           <Button
             icon="pi pi-plus"
             severity="secondary"
@@ -1834,7 +1834,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
             <Column :header="t('accounts.proxy')" style="min-width: 200px">
               <template #body="{ data }">
-                <Dropdown
+                <Select
                   :model-value="data.proxy_id"
                   :options="proxyStore.proxies"
                   optionLabel="host"
@@ -1859,7 +1859,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
                       />
                     </div>
                   </template>
-                </Dropdown>
+                </Select>
               </template>
             </Column>
 

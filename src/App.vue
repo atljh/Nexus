@@ -41,17 +41,29 @@ async function checkBackend() {
     <!-- Loading screen while connecting to backend -->
     <div v-if="backendStatus === 'connecting'" class="loading-screen">
       <div class="loading-content">
-        <i class="pi pi-spin pi-spinner text-4xl text-purple-500"></i>
-        <p class="mt-4 text-gray-400">Connecting to backend...</p>
+        <div class="loading-logo">
+          <div class="loading-icon">
+            <i class="pi pi-bolt"></i>
+          </div>
+          <span class="loading-brand">Nexus</span>
+        </div>
+        <div class="loading-spinner">
+          <div class="spinner"></div>
+        </div>
+        <p class="loading-text">Connecting to backend...</p>
       </div>
     </div>
 
     <!-- Error screen if backend fails -->
     <div v-else-if="backendStatus === 'error'" class="loading-screen">
       <div class="loading-content">
-        <i class="pi pi-exclamation-triangle text-4xl text-red-500"></i>
-        <p class="mt-4 text-gray-400">Failed to connect to backend</p>
-        <p class="text-sm text-gray-500">Retrying...</p>
+        <div class="loading-logo">
+          <div class="loading-icon loading-icon-error">
+            <i class="pi pi-exclamation-triangle"></i>
+          </div>
+        </div>
+        <p class="loading-text">Failed to connect to backend</p>
+        <p class="loading-subtext">Retrying...</p>
       </div>
     </div>
 
@@ -68,13 +80,13 @@ async function checkBackend() {
 <style>
 .app-container {
   min-height: 100vh;
-  background: var(--color-bg-base, #0f0f0f);
+  background: var(--color-bg-base, #09090b);
   color: var(--color-text-primary, #e5e5e5);
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .app-container.dark {
-  background: #0f0f0f;
+  background: #09090b;
   color: #e5e5e5;
 }
 
@@ -91,15 +103,73 @@ async function checkBackend() {
 }
 
 .loading-content {
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
 }
 
-.light .loading-content .text-gray-400 {
-  color: #64748b;
+.loading-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.light .loading-content .text-gray-500 {
-  color: #94a3b8;
+.loading-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
+  box-shadow: 0 4px 20px rgba(168, 85, 247, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 18px;
+}
+
+.loading-icon-error {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  box-shadow: 0 4px 20px rgba(239, 68, 68, 0.35);
+}
+
+.loading-brand {
+  font-size: 24px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #c084fc, #a855f7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.3px;
+}
+
+.loading-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(168, 85, 247, 0.15);
+  border-top-color: #a855f7;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.loading-subtext {
+  font-size: 13px;
+  color: #4b5563;
+  margin-top: -12px;
 }
 
 .version-badge {
@@ -107,7 +177,8 @@ async function checkBackend() {
   bottom: 8px;
   right: 12px;
   font-size: 11px;
-  color: #666;
+  color: #3f3f46;
+  font-variant-numeric: tabular-nums;
 }
 
 .light .version-badge {
