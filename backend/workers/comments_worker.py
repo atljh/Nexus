@@ -9,6 +9,7 @@ Based on tg_comments logic: resolve → check subscription → auto-join
 import asyncio
 import random
 import logging
+import time
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Callable, Any, Set, Tuple
 
@@ -65,6 +66,7 @@ class CommentsWorker:
         self._failed_accounts: set = set()
         self._linked_chat_cache: Dict[int, Optional[int]] = {}  # channel_entity_id -> linked_chat_id
         self._account_comment_count: Dict[int, int] = {}
+        self._account_action_times: Dict[int, list] = {}  # account_id -> list of timestamps
         self._blacklist_cache: Set[Tuple[int, str]] = set()
         self._ai_service: Optional[AIService] = None
 
@@ -73,7 +75,11 @@ class CommentsWorker:
     async def _connect_accounts(self, accounts: List[Account], db: Session) -> int:
         """Pre-connect all accounts. Returns count of successfully connected."""
         connected = 0
-        for account in accounts:
+        for i, account in enumerate(accounts):
+            # Delay between connections to avoid suspicion
+            if i > 0:
+                await asyncio.sleep(random.uniform(0.5, 1.5))
+
             if not account.session_string:
                 logger.warning(f"Account {account.id}: no session string, skipping")
                 self._failed_accounts.add(account.id)
@@ -358,6 +364,24 @@ class CommentsWorker:
         if channel_username:
             self._blacklist_cache.add((account_id, f"un:{channel_username}"))
 
+    # ── Rate limiting ──
+
+    # Max comments per account per hour (soft limit — skips to next account)
+    MAX_ACTIONS_PER_ACCOUNT_PER_HOUR = 30
+
+    def _is_account_rate_limited(self, account_id: int) -> bool:
+        """Check if account exceeded hourly action limit."""
+        now = time.monotonic()
+        times = self._account_action_times.get(account_id, [])
+        # Purge entries older than 1 hour
+        times = [t for t in times if now - t < 3600]
+        self._account_action_times[account_id] = times
+        return len(times) >= self.MAX_ACTIONS_PER_ACCOUNT_PER_HOUR
+
+    def _record_account_action(self, account_id: int) -> None:
+        """Record an action timestamp for rate limiting."""
+        self._account_action_times.setdefault(account_id, []).append(time.monotonic())
+
     def _select_account(
         self,
         accounts: List[Account],
@@ -367,7 +391,7 @@ class CommentsWorker:
         channel_id: Optional[int] = None,
         channel_username: Optional[str] = None,
     ) -> Optional[Account]:
-        """Select next account with blacklist and pool filtering."""
+        """Select next account with blacklist, pool, and rate limit filtering."""
         available = []
         for a in accounts:
             if a.id in self._failed_accounts:
@@ -375,6 +399,8 @@ class CommentsWorker:
             if a.id not in self._clients:
                 continue
             if self._account_comment_count.get(a.id, 0) >= limit:
+                continue
+            if self._is_account_rate_limited(a.id):
                 continue
             if a.status in SKIP_ACCOUNT_STATUSES:
                 continue
@@ -736,11 +762,17 @@ class CommentsWorker:
                 target_channels = await self._init_target_channels(db, task, channels)
 
                 # Phase 3: Setup channels for each account (resolve, join, discussion group)
+                setup_index = 0
                 for account in accounts:
                     if account.id in self._failed_accounts:
                         continue
                     if account.id not in self._clients:
                         continue
+
+                    # Delay between account setups to avoid mass-join detection
+                    if setup_index > 0:
+                        await asyncio.sleep(random.uniform(1, 3))
+                    setup_index += 1
 
                     await self._setup_channels_for_account(account.id, target_channels, db)
 
@@ -850,6 +882,7 @@ class CommentsWorker:
                         target.comments_sent += 1
                         self._account_comment_count[account.id] = \
                             self._account_comment_count.get(account.id, 0) + 1
+                        self._record_account_action(account.id)
                         account.last_used_at = datetime.now(timezone.utc)
                     else:
                         failed += 1
@@ -1043,6 +1076,13 @@ class CommentsWorker:
                         target_obj.comments_sent += 1
                     self._account_comment_count[commenting_account.id] = \
                         self._account_comment_count.get(commenting_account.id, 0) + 1
+                    self._record_account_action(commenting_account.id)
+                else:
+                    # FLOOD_WAIT / SLOW_MODE — sleep before next action
+                    if result.wait_seconds:
+                        wait = min(result.wait_seconds, 300)
+                        logger.info(f"Monitoring rate limit: sleeping {wait}s")
+                        await asyncio.sleep(wait)
 
                 # Log
                 log = TaskLog(

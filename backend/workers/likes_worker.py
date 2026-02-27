@@ -9,6 +9,7 @@ import asyncio
 import itertools
 import random
 import logging
+import time
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Callable, Any, Tuple
 
@@ -75,6 +76,9 @@ class LikesWorker:
     Handles auto-join, available reactions check, and multi-emoji modes.
     """
 
+    # Max actions per account per hour (soft limit — skips to next account)
+    MAX_ACTIONS_PER_ACCOUNT_PER_HOUR = 60
+
     def __init__(
         self,
         task_id: int,
@@ -85,13 +89,18 @@ class LikesWorker:
         self._clients: Dict[int, BaseClient] = {}
         self._entities: Dict[int, Any] = {}
         self._failed_accounts: set = set()
+        self._account_action_times: Dict[int, List[float]] = {}  # account_id -> list of timestamps
 
     # ── Client pool management ──
 
     async def _connect_accounts(self, accounts: List[Account], db: Session) -> int:
         """Pre-connect all accounts. Returns count of successfully connected."""
         connected = 0
-        for account in accounts:
+        for i, account in enumerate(accounts):
+            # Delay between connections to avoid suspicion
+            if i > 0:
+                await asyncio.sleep(random.uniform(0.5, 1.5))
+
             if not account.session_string:
                 logger.warning(f"Account {account.id}: no session string, skipping")
                 self._failed_accounts.add(account.id)
@@ -256,9 +265,9 @@ class LikesWorker:
             return True, "Reaction already set", None
 
         except FloodWaitError as e:
-            logger.warning(f"FloodWait {e.seconds}s on account {account_id}")
-            await asyncio.sleep(min(e.seconds, 300))
-            return False, None, f"FloodWait: {e.seconds}s"
+            logger.warning(f"FloodWait {e.seconds}s on account {account_id} — quarantining")
+            self._failed_accounts.add(account_id)
+            return False, None, f"FloodWait: {e.seconds}s (account quarantined)"
 
         except ReactionInvalidError:
             return False, None, "Invalid reaction emoji"
@@ -277,6 +286,21 @@ class LikesWorker:
         except Exception as e:
             logger.warning(f"Reaction error on account {account_id}: {e}")
             return False, None, str(e)[:100]
+
+    # ── Rate limiting ──
+
+    def _is_account_rate_limited(self, account_id: int) -> bool:
+        """Check if account exceeded hourly action limit."""
+        now = time.monotonic()
+        times = self._account_action_times.get(account_id, [])
+        # Purge entries older than 1 hour
+        times = [t for t in times if now - t < 3600]
+        self._account_action_times[account_id] = times
+        return len(times) >= self.MAX_ACTIONS_PER_ACCOUNT_PER_HOUR
+
+    def _record_account_action(self, account_id: int) -> None:
+        """Record an action timestamp for rate limiting."""
+        self._account_action_times.setdefault(account_id, []).append(time.monotonic())
 
     # ── Emoji mode helpers ──
 
@@ -354,11 +378,17 @@ class LikesWorker:
 
             try:
                 # Phase 2: Resolve entity + check subscription + auto-join for each account
+                setup_index = 0
                 for account in accounts:
                     if account.id in self._failed_accounts:
                         continue
                     if account.id not in self._clients:
                         continue
+
+                    # Delay between account setups to avoid mass-join detection
+                    if setup_index > 0:
+                        await asyncio.sleep(random.uniform(1, 3))
+                    setup_index += 1
 
                     try:
                         # Resolve entity
@@ -453,19 +483,30 @@ class LikesWorker:
 
                     await pause_event.wait()
 
-                    # Get next active account (skip failed)
+                    # Get next active account (skip failed and rate-limited)
                     account_id = next(account_cycle)
                     attempts = 0
-                    while account_id in self._failed_accounts:
+                    while (
+                        account_id in self._failed_accounts
+                        or self._is_account_rate_limited(account_id)
+                    ):
                         account_id = next(account_cycle)
                         attempts += 1
                         if attempts >= len(active_ids):
-                            # All accounts failed
-                            task.status = "failed"
-                            task.last_error = "All accounts excluded from rotation"
-                            task.completed_at = datetime.now(timezone.utc)
-                            db.commit()
-                            return
+                            # All accounts failed or rate-limited
+                            all_failed = all(
+                                aid in self._failed_accounts for aid in active_ids
+                            )
+                            if all_failed:
+                                task.status = "failed"
+                                task.last_error = "All accounts excluded from rotation"
+                                task.completed_at = datetime.now(timezone.utc)
+                                db.commit()
+                                return
+                            # All rate-limited — wait a bit and retry
+                            logger.info("All accounts rate-limited, cooling down 60s")
+                            await asyncio.sleep(60)
+                            break
 
                     # Pick reaction(s) for this action
                     emojis = self._pick_reaction(filtered_reactions, emoji_mode, completed)
@@ -498,6 +539,7 @@ class LikesWorker:
                         if success:
                             completed += 1
                             task.completed_actions = completed
+                            self._record_account_action(account_id)
                             if account:
                                 account.last_used_at = datetime.now(timezone.utc)
                         else:
