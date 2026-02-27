@@ -137,6 +137,7 @@ class Account(Base):
 
     # Device fingerprint (device_model, system_version, app_version, lang_code, system_lang_code)
     device_fingerprint: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    fingerprint_locked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Extended metadata from JSON import
     extra_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
@@ -197,6 +198,7 @@ class Account(Base):
             "api_id": self.api_id,
             "api_hash": self.api_hash,
             "device_fingerprint": self.device_fingerprint,
+            "fingerprint_locked_at": self.fingerprint_locked_at.isoformat() if self.fingerprint_locked_at else None,
             "has_2fa": self.has_2fa,
             "password_hint": self.password_hint,
             "two_fa_password": self._decrypt_2fa_password(),

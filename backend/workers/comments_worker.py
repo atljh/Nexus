@@ -40,6 +40,7 @@ from telegram.client import BaseClient
 from workers.spintax import parse_spintax, DEFAULT_COMMENT_TEMPLATES
 from workers.shared import SendStatus, SendResult, ErrorClassifier
 from workers.shared.ai_service import AIService
+from workers.shared.account_safety import AccountSafetyValidator
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,7 @@ class CommentsWorker:
         self._account_action_times: Dict[int, list] = {}  # account_id -> list of timestamps
         self._blacklist_cache: Set[Tuple[int, str]] = set()
         self._ai_service: Optional[AIService] = None
+        self._accounts_map: Dict[int, Any] = {}  # account_id -> Account (for warming multiplier)
 
     # ── Client pool management ──
 
@@ -111,6 +113,27 @@ class CommentsWorker:
                 )
                 await client.connect()
                 await client.check_auth()
+
+                # Geo validation (warning only, does not block)
+                proxy_geo = account.proxy.geo if account.proxy else None
+                geo_warnings = AccountSafetyValidator.validate_geo_match(account.geo, proxy_geo)
+                for w in geo_warnings:
+                    logger.warning(f"Account {account.id}: {w}")
+
+                # Fingerprint validation (blocks on mismatch)
+                fp_valid, fp_errors = AccountSafetyValidator.validate_fingerprint(
+                    device_fp, account.device_fingerprint
+                )
+                if not fp_valid:
+                    for e in fp_errors:
+                        logger.error(f"Account {account.id}: {e}")
+                    self._failed_accounts.add(account.id)
+                    await client.disconnect()
+                    continue
+
+                # Lock fingerprint on first connect
+                AccountSafetyValidator.lock_fingerprint(account, device_fp, db)
+
                 self._clients[account.id] = client
                 connected += 1
                 logger.debug(f"Account {account.id}: connected")
@@ -370,13 +393,21 @@ class CommentsWorker:
     MAX_ACTIONS_PER_ACCOUNT_PER_HOUR = 30
 
     def _is_account_rate_limited(self, account_id: int) -> bool:
-        """Check if account exceeded hourly action limit."""
+        """Check if account exceeded hourly action limit (adjusted by warming multiplier)."""
         now = time.monotonic()
         times = self._account_action_times.get(account_id, [])
         # Purge entries older than 1 hour
         times = [t for t in times if now - t < 3600]
         self._account_action_times[account_id] = times
-        return len(times) >= self.MAX_ACTIONS_PER_ACCOUNT_PER_HOUR
+
+        account = self._accounts_map.get(account_id)
+        if account:
+            multiplier = AccountSafetyValidator.get_warming_multiplier(account)
+            effective_limit = int(self.MAX_ACTIONS_PER_ACCOUNT_PER_HOUR * multiplier)
+        else:
+            effective_limit = self.MAX_ACTIONS_PER_ACCOUNT_PER_HOUR
+
+        return len(times) >= effective_limit
 
     def _record_account_action(self, account_id: int) -> None:
         """Record an action timestamp for rate limiting."""
@@ -720,6 +751,9 @@ class CommentsWorker:
                 task.last_error = "No accounts assigned to task"
                 db.commit()
                 return
+
+            # Build accounts map for warming multiplier lookups
+            self._accounts_map = {a.id: a for a in accounts}
 
             config = task.config
             channels = config.get("channels", [])
