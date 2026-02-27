@@ -954,6 +954,7 @@ class CommentsWorker:
         rotation_mode = config.get("rotation_mode", "random")
         comments_per_account = config.get("comments_per_account", 10)
         account_index = 0
+        handler_lock = asyncio.Lock()
 
         @monitor_client.client.on(events.NewMessage(chats=channel_entities))
         async def handler(event):
@@ -978,106 +979,111 @@ class CommentsWorker:
 
             await pause_event.wait()
 
-            chat = await event.get_chat()
-            channel_title = getattr(chat, 'title', '')
-            channel_username = getattr(chat, 'username', '')
-            if channel_username:
-                channel_username = f"@{channel_username}"
+            async with handler_lock:
+                chat = await event.get_chat()
+                channel_title = getattr(chat, 'title', '')
+                channel_username = getattr(chat, 'username', '')
+                if channel_username:
+                    channel_username = f"@{channel_username}"
 
-            target_obj = next(
-                (t for t in valid_targets if t.channel_id == chat.id),
-                valid_targets[0] if valid_targets else None,
-            )
+                target_obj = next(
+                    (t for t in valid_targets if t.channel_id == chat.id),
+                    valid_targets[0] if valid_targets else None,
+                )
 
-            # Select commenting account
-            commenting_account = self._select_account(
-                accounts, rotation_mode, comments_per_account,
-                account_index, chat.id, channel_username
-            )
-            account_index += 1
+                # Select commenting account
+                commenting_account = self._select_account(
+                    accounts, rotation_mode, comments_per_account,
+                    account_index, chat.id, channel_username
+                )
+                account_index += 1
 
-            if not commenting_account:
-                logger.warning("No available account for commenting")
-                return
+                if not commenting_account:
+                    logger.warning("No available account for commenting")
+                    return
 
-            comment_text, is_ai = await self._generate_comment(
-                config, comment_templates, db,
-                post_text=post_text, channel_title=channel_title
-            )
+                comment_text, is_ai = await self._generate_comment(
+                    config, comment_templates, db,
+                    post_text=post_text, channel_title=channel_title
+                )
 
-            # Random delay before commenting
-            delay = random.uniform(task.min_delay, task.max_delay)
-            await asyncio.sleep(delay)
+                # Random delay before commenting
+                delay = random.uniform(task.min_delay, task.max_delay)
+                await asyncio.sleep(delay)
 
-            # Send comment using pre-connected client
-            result = await self._send_comment(
-                account_id=commenting_account.id,
-                target=target_obj,
-                comment=comment_text,
-                post_id=event.id,
-            )
+                # Send comment using pre-connected client
+                result = await self._send_comment(
+                    account_id=commenting_account.id,
+                    target=target_obj,
+                    comment=comment_text,
+                    post_id=event.id,
+                )
 
-            # Handle result
-            if target_obj:
-                self._handle_send_result(db, commenting_account, target_obj, result)
-
-            # Save history
-            self._save_comment_history(
-                db, commenting_account, target_obj, self.task_id,
-                comment_text=comment_text,
-                post_id=event.id,
-                post_text=post_text[:500],
-                comment_id=getattr(result.sent_message, 'id', None) if result.sent_message else None,
-                success=result.success,
-                error_message=result.error if not result.success else None,
-                ai_generated=is_ai,
-                ai_model=config.get("ai_model") if is_ai else None,
-            )
-
-            if result.success:
-                completed += 1
-                task.completed_actions = completed
+                # Handle result
                 if target_obj:
-                    target_obj.comments_sent += 1
-                self._account_comment_count[commenting_account.id] = \
-                    self._account_comment_count.get(commenting_account.id, 0) + 1
+                    self._handle_send_result(db, commenting_account, target_obj, result)
 
-            # Log
-            log = TaskLog(
-                task_id=self.task_id,
-                account_id=commenting_account.id,
-                action_type="comment",
-                target=channel_username,
-                success=result.success,
-                message=result.message,
-                error=result.error if not result.success else None,
-                extra_data={
-                    "comment": comment_text[:100],
-                    "post_id": event.id,
-                    "status": result.status.value,
-                    "mode": "monitoring",
-                }
-            )
-            db.add(log)
-            db.commit()
+                # Save history
+                self._save_comment_history(
+                    db, commenting_account, target_obj, self.task_id,
+                    comment_text=comment_text,
+                    post_id=event.id,
+                    post_text=post_text[:500],
+                    comment_id=getattr(result.sent_message, 'id', None) if result.sent_message else None,
+                    success=result.success,
+                    error_message=result.error if not result.success else None,
+                    ai_generated=is_ai,
+                    ai_model=config.get("ai_model") if is_ai else None,
+                )
 
-            if self.on_progress:
-                try:
-                    await self.on_progress(
-                        self.task_id, completed, task.total_actions,
-                        result.message or result.error or ""
-                    )
-                except Exception as e:
-                    logger.warning(f"Progress callback error: {e}")
+                if result.success:
+                    completed += 1
+                    task.completed_actions = completed
+                    if target_obj:
+                        target_obj.comments_sent += 1
+                    self._account_comment_count[commenting_account.id] = \
+                        self._account_comment_count.get(commenting_account.id, 0) + 1
 
-            # Check limit
-            if task.total_actions > 0 and completed >= task.total_actions:
-                cancel_event.set()
+                # Log
+                log = TaskLog(
+                    task_id=self.task_id,
+                    account_id=commenting_account.id,
+                    action_type="comment",
+                    target=channel_username,
+                    success=result.success,
+                    message=result.message,
+                    error=result.error if not result.success else None,
+                    extra_data={
+                        "comment": comment_text[:100],
+                        "post_id": event.id,
+                        "status": result.status.value,
+                        "mode": "monitoring",
+                    }
+                )
+                db.add(log)
+                db.commit()
+
+                if self.on_progress:
+                    try:
+                        await self.on_progress(
+                            self.task_id, completed, task.total_actions,
+                            result.message or result.error or ""
+                        )
+                    except Exception as e:
+                        logger.warning(f"Progress callback error: {e}")
+
+                # Check limit
+                if task.total_actions > 0 and completed >= task.total_actions:
+                    cancel_event.set()
 
         # Wait until cancelled or limit reached
         logger.info(f"Task {self.task_id}: monitoring {len(channel_entities)} channels")
-        while not cancel_event.is_set():
-            await asyncio.sleep(1)
+        try:
+            while not cancel_event.is_set():
+                await asyncio.sleep(1)
+        finally:
+            # Remove event handler to prevent memory leak
+            monitor_client.client.remove_event_handler(handler)
 
         task.status = "completed" if completed > 0 else "cancelled"
         task.completed_at = datetime.now(timezone.utc)
