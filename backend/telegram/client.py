@@ -447,38 +447,48 @@ async def validate_session(
             await client.check_auth()
             me = await client.get_me()
 
-            # Check if user is restricted/frozen
+            # Check if user is restricted
             is_restricted = getattr(me, "restricted", False)
             restriction_reason = getattr(me, "restriction_reason", None)
 
             if is_restricted:
                 reason_text = ""
                 if restriction_reason:
-                    # restriction_reason is a list of RestrictionReason objects
                     reasons = [getattr(r, "reason", str(r)) for r in restriction_reason]
                     reason_text = ", ".join(reasons)
                 return False, None, f"restricted:{reason_text}" if reason_text else "restricted"
 
-            # Try to perform a search to detect frozen accounts
-            # Frozen accounts get FROZEN_METHOD_INVALID error
-            # WARNING: This action is suspicious from a "new device" — only run if explicitly requested
-            if check_frozen:
-                try:
-                    from telethon.tl.functions.contacts import SearchRequest
-                    await client._client(SearchRequest(q='telegram', limit=1))
-                except Exception as action_error:
-                    error_str = str(action_error).lower()
-                    if "frozen" in error_str:
-                        return False, None, "frozen"
-                    elif "deactivated" in error_str or "banned" in error_str:
-                        return False, None, "banned"
-                    elif "forbidden" in error_str or "restricted" in error_str:
-                        return False, None, "restricted"
-                    elif "flood" in error_str:
-                        # Flood is not a permanent issue, account might still be valid
-                        pass
-                    # Other errors - account might still be valid
-                    pass
+            # Frozen check #1 — free, from get_me()
+            me_deleted = getattr(me, "deleted", False)
+            if me_deleted:
+                return False, {"telegram_id": me.id, "username": me.username, "first_name": me.first_name, "last_name": me.last_name, "phone": me.phone}, "frozen"
+
+            # Frozen check #2 — help.GetAppConfig (official Telegram API, read-only, safe)
+            # Ref: https://core.telegram.org/api/auth#frozen-accounts
+            try:
+                from telethon.tl.functions.help import GetAppConfigRequest
+                app_config_result = await client._client(GetAppConfigRequest(hash=0))
+
+                freeze_since = None
+                if hasattr(app_config_result, 'config'):
+                    for item in app_config_result.config.value:
+                        if item.key == 'freeze_since_date':
+                            freeze_since = int(item.value.value)
+                            break
+
+                if freeze_since and freeze_since > 0:
+                    return False, {"telegram_id": me.id, "username": me.username, "first_name": me.first_name, "last_name": me.last_name, "phone": me.phone}, "frozen"
+            except Exception as e:
+                logger.warning(f"[FrozenCheck] GetAppConfig failed: {e}")
+
+            # Frozen check #3 — active probe
+            try:
+                from telethon.tl.functions.contacts import SearchRequest
+                await client._client(SearchRequest(q='telegram', limit=1))
+            except Exception as e:
+                error_str = str(e).lower()
+                if "frozen" in error_str:
+                    return False, {"telegram_id": me.id, "username": me.username, "first_name": me.first_name, "last_name": me.last_name, "phone": me.phone}, "frozen"
 
             user_info = {
                 "telegram_id": me.id,
@@ -510,7 +520,9 @@ async def validate_session(
     except Exception as e:
         error_str = str(e).lower()
         # Parse common errors
-        if "deactivated" in error_str and "ban" in error_str:
+        if "frozen" in error_str:
+            return False, None, "frozen"
+        elif "deactivated" in error_str and "ban" in error_str:
             return False, None, "banned"
         elif "deactivated" in error_str:
             return False, None, "deactivated"

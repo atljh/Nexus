@@ -35,6 +35,7 @@ class AccountStatus(str, Enum):
     VALID = "valid"
     INVALID = "invalid"
     BANNED = "banned"
+    FROZEN = "frozen"
     MUTED = "muted"  # Restricted from messaging
     SPAMBLOCK = "spamblock"
     SESSION_EXPIRED = "session_expired"
@@ -183,6 +184,48 @@ class AccountChecker:
             result.last_name = me.last_name
             result.phone = me.phone
             result.is_premium = getattr(me, "premium", False)
+
+            # Frozen check #1 — free, from get_me()
+            me_deleted = getattr(me, "deleted", False)
+            if me_deleted:
+                result.status = AccountStatus.FROZEN
+                result.error = "Account frozen (deleted=True)"
+                return result
+
+            # Frozen check #2 — help.GetAppConfig (official Telegram API)
+            # Read-only, safe for all accounts
+            # Ref: https://core.telegram.org/api/auth#frozen-accounts
+            try:
+                from telethon.tl.functions.help import GetAppConfigRequest
+                app_config_result = await client(GetAppConfigRequest(hash=0))
+
+                freeze_since = None
+                if hasattr(app_config_result, 'config'):
+                    for item in app_config_result.config.value:
+                        if item.key == 'freeze_since_date':
+                            freeze_since = int(item.value.value)
+                            break
+
+                if freeze_since and freeze_since > 0:
+                    result.status = AccountStatus.FROZEN
+                    result.error = f"Account frozen since {freeze_since} (unix)"
+                    return result
+            except Exception as e:
+                logger.debug(f"[FrozenCheck] GetAppConfig failed for account {account_id}: {e}")
+
+            # Frozen check #3 — active probe: try an action that frozen accounts can't do
+            # contacts.SearchRequest is read-only but restricted for frozen accounts
+            try:
+                from telethon.tl.functions.contacts import SearchRequest
+                await client(SearchRequest(q='telegram', limit=1))
+            except Exception as e:
+                error_str = str(e).lower()
+                logger.debug(f"[FrozenCheck] Account {account_id}: active probe: {type(e).__name__}: {e}")
+                if "frozen" in error_str:
+                    result.status = AccountStatus.FROZEN
+                    result.error = f"Account frozen: {e}"
+                    return result
+
             result.status = AccountStatus.VALID
 
             # Check spamblock if requested
@@ -225,8 +268,13 @@ class AccountChecker:
             result.error = "Connection timeout"
 
         except Exception as e:
-            result.status = AccountStatus.INVALID
-            result.error = f"Error: {str(e)}"
+            error_str = str(e).lower()
+            if "frozen" in error_str:
+                result.status = AccountStatus.FROZEN
+                result.error = f"Account frozen: {str(e)}"
+            else:
+                result.status = AccountStatus.INVALID
+                result.error = f"Error: {str(e)}"
 
         finally:
             if client:

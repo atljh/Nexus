@@ -1116,12 +1116,18 @@ async function checkBatchSelected() {
     )
 
     const validCount = result.results.filter(r => r.status === 'valid').length
-    const invalidCount = result.results.filter(r => r.status !== 'valid').length
+    const frozenCount = result.results.filter(r => r.status === 'frozen').length
+    const otherCount = result.results.filter(r => r.status !== 'valid' && r.status !== 'frozen').length
+
+    const parts = []
+    if (validCount > 0) parts.push(t('accounts.messages.batchCheckValid', { count: validCount }))
+    if (frozenCount > 0) parts.push(t('accounts.messages.batchCheckFrozen', { count: frozenCount }))
+    if (otherCount > 0) parts.push(t('accounts.messages.batchCheckInvalid', { count: otherCount }))
 
     toast.add({
-      severity: 'success',
+      severity: frozenCount > 0 || otherCount > 0 ? 'warn' : 'success',
       summary: t('common.success'),
-      detail: t('accounts.messages.batchCheckComplete', { valid: validCount, invalid: invalidCount }),
+      detail: parts.join(', '),
       life: 5000
     })
   } catch (error: any) {
@@ -1559,11 +1565,12 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             </template>
           </Column>
 
-          <Column header="Аккаунт" sortable field="phone" style="min-width: 120px">
+          <Column header="Аккаунт" sortable field="phone" style="min-width: 140px">
             <template #body="{ data }">
               <div class="account-info-cell">
-                <span class="phone-text">{{ data.phone || '—' }}</span>
-                <span class="account-name-sub" :title="getFullName(data)">{{ getFullName(data) }}</span>
+                <span class="phone-text">{{ data.phone || data.telegram_id || '—' }}</span>
+                <span v-if="data.username" class="account-username-sub">@{{ data.username }}</span>
+                <span v-else class="account-name-sub" :title="getFullName(data)">{{ getFullName(data) }}</span>
               </div>
             </template>
           </Column>
@@ -2558,6 +2565,15 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 .account-name-sub {
   font-size: 10px;
   color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.account-username-sub {
+  font-size: 10px;
+  color: #8b5cf6;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

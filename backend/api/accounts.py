@@ -383,6 +383,18 @@ async def check_account(
         lang_code=device_fp.get("lang_code"),
     )
 
+    # Map error codes to account statuses
+    ERROR_STATUS_MAP = {
+        "banned": "banned",
+        "deactivated": "deactivated",
+        "frozen": "frozen",
+        "session_expired": "session_expired",
+        "session_revoked": "session_expired",
+        "auth_key_duplicated": "session_expired",
+        "connection_failed": "connection_failed",
+        "timeout": "connection_failed",
+    }
+
     if is_valid and user_info:
         account.telegram_id = user_info.get("telegram_id")
         account.username = user_info.get("username")
@@ -391,9 +403,23 @@ async def check_account(
         if user_info.get("phone"):
             account.phone = user_info.get("phone")
         account.status = "valid"
+    elif error:
+        # Determine status from error code
+        error_key = error.split(":")[0] if error else ""
+        account.status = ERROR_STATUS_MAP.get(error_key, "invalid")
+
+        # Save user info even for frozen accounts (get_me() succeeded)
+        if user_info:
+            account.telegram_id = user_info.get("telegram_id")
+            account.username = user_info.get("username")
+            account.first_name = user_info.get("first_name")
+            account.last_name = user_info.get("last_name")
+            if user_info.get("phone"):
+                account.phone = user_info.get("phone")
     else:
         account.status = "invalid"
 
+    account.last_checked_at = datetime.now(timezone.utc)
     await session.commit()
 
     return {
@@ -814,8 +840,8 @@ async def check_batch_accounts(
             acc.status = check_result.status.value
             acc.last_checked_at = datetime.now(timezone.utc)
 
-            # Update user info if valid
-            if check_result.status == AccountStatus.VALID:
+            # Update user info if we got it (valid, frozen, spamblock all have user info)
+            if check_result.status in (AccountStatus.VALID, AccountStatus.FROZEN, AccountStatus.SPAMBLOCK):
                 if check_result.telegram_id:
                     acc.telegram_id = check_result.telegram_id
                 if check_result.username:
