@@ -447,7 +447,9 @@ async function checkAndPreview() {
 
     // Mark all as failed
     for (const p of toCheck) {
-      proxyPreviews.value[p.index].status = 'not_working'
+      if (proxyPreviews.value[p.index]) {
+        proxyPreviews.value[p.index].status = 'not_working'
+      }
     }
   } finally {
     isCheckingPreviews.value = false

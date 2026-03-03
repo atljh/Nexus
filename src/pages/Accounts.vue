@@ -1346,6 +1346,14 @@ function getFullName(account: Account): string {
 }
 
 // Inline update functions
+async function updateAccountProxy(account: Account, proxyId: number | null) {
+  try {
+    await accountStore.updateAccount(account.id, { proxy_id: proxyId ?? 0 })
+  } catch (error: any) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: error.message, life: 3000 })
+  }
+}
+
 async function updateAccountGroup(account: Account, groupId: number | null) {
   try {
     await accountStore.updateAccount(account.id, { group_id: groupId ?? 0 })
@@ -1361,6 +1369,20 @@ async function updateAccountTags(account: Account, tagIds: number[]) {
     toast.add({ severity: 'error', summary: t('common.error'), detail: error.message, life: 3000 })
   }
 }
+
+// Proxy options for inline dropdown
+const proxyOptions = computed(() => [
+  { label: '—', value: null, host: '', port: 0, type: '', status: '', geo: null },
+  ...proxyStore.proxies.map(p => ({
+    label: `${p.host}:${p.port}`,
+    value: p.id,
+    host: p.host,
+    port: p.port,
+    type: p.type,
+    status: p.status,
+    geo: p.geo,
+  }))
+])
 
 // Group options for inline dropdown
 const groupOptions = computed(() => [
@@ -1562,13 +1584,34 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             </template>
           </Column>
 
-          <Column header="Прокси" style="min-width: 110px">
+          <Column header="Прокси" style="min-width: 160px">
             <template #body="{ data }">
-              <div v-if="data.proxy" class="proxy-cell" v-tooltip.top="`${data.proxy.host}:${data.proxy.port}`">
-                <i class="pi pi-circle-fill proxy-dot" :class="'proxy-dot--' + data.proxy.status"></i>
-                <span class="proxy-addr">{{ data.proxy.host }}:{{ data.proxy.port }}</span>
-              </div>
-              <span v-else class="no-data">—</span>
+              <Select
+                :model-value="data.proxy_id"
+                :options="proxyOptions"
+                optionLabel="label"
+                optionValue="value"
+                placeholder="—"
+                @update:model-value="(val: number | null) => updateAccountProxy(data, val)"
+                class="inline-proxy-dropdown"
+              >
+                <template #value="{ value }">
+                  <div v-if="value && proxyStore.getById(value)" class="inline-proxy-value">
+                    <i class="pi pi-circle-fill proxy-dot" :class="'proxy-dot--' + proxyStore.getById(value)!.status"></i>
+                    <span class="proxy-addr">{{ proxyStore.getById(value)!.host }}:{{ proxyStore.getById(value)!.port }}</span>
+                  </div>
+                  <span v-else class="no-data">—</span>
+                </template>
+                <template #option="{ option }">
+                  <div v-if="option.value" class="inline-proxy-option">
+                    <i class="pi pi-circle-fill proxy-dot" :class="'proxy-dot--' + option.status"></i>
+                    <span class="proxy-option-addr">{{ option.host }}:{{ option.port }}</span>
+                    <span class="proxy-option-type">{{ option.type }}</span>
+                    <span v-if="option.geo" class="proxy-option-geo">{{ option.geo }}</span>
+                  </div>
+                  <span v-else class="no-data">—</span>
+                </template>
+              </Select>
             </template>
           </Column>
 
@@ -1655,7 +1698,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
                 <button class="action-icon" @click="checkAccount(data)" v-tooltip.top="t('common.check')">
                   <i class="pi pi-refresh"></i>
                 </button>
-                <button class="action-icon" @click="openWebViewer(data)" :disabled="data.status !== 'valid' || !data.proxy || !data.telegram_id" v-tooltip.top="'WebK'">
+                <button class="action-icon" @click="openWebViewer(data)" :disabled="data.status !== 'valid' || !data.proxy || !data.telegram_id || !['working', 'slow', 'very_slow', 'unchecked'].includes(data.proxy?.status)" v-tooltip.top="'WebK'">
                   <i class="pi pi-external-link"></i>
                 </button>
                 <button class="action-icon" @click="openTwoFADialog(data)" v-tooltip.top="'2FA'">
@@ -2553,14 +2596,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
   white-space: nowrap;
 }
 
-/* Proxy cell */
-.proxy-cell {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-}
-
+/* Proxy dropdown */
 .proxy-dot {
   font-size: 6px;
   flex-shrink: 0;
@@ -2581,6 +2617,71 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+}
+
+.inline-proxy-value {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.inline-proxy-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.proxy-option-addr {
+  font-family: monospace;
+  font-size: 11px;
+  color: #d1d5db;
+}
+
+.proxy-option-type {
+  font-size: 10px;
+  color: #6b7280;
+  text-transform: uppercase;
+}
+
+.proxy-option-geo {
+  font-size: 10px;
+  color: #6b7280;
+  margin-left: auto;
+}
+
+:deep(.inline-proxy-dropdown) {
+  width: 100%;
+  max-width: 160px;
+}
+
+:deep(.inline-proxy-dropdown .p-select) {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0;
+  transition: all 0.15s;
+}
+
+:deep(.inline-proxy-dropdown .p-select:hover) {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:deep(.inline-proxy-dropdown .p-select .p-select-label) {
+  padding: 3px 6px;
+  font-size: 12px;
+  color: #d1d5db;
+}
+
+:deep(.inline-proxy-dropdown .p-select .p-select-dropdown) {
+  width: 24px;
+  color: #4b5563;
+}
+
+:deep(.inline-proxy-dropdown .p-select:hover .p-select-dropdown) {
+  color: #9ca3af;
 }
 
 /* Inline group dropdown */

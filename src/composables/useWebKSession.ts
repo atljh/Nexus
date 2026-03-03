@@ -25,10 +25,27 @@ export function useWebKSession(accountRef: Ref<Account | null>) {
 
   const account = computed(() => accountRef.value)
 
+  const WORKING_PROXY_STATUSES = ['working', 'slow', 'very_slow', 'unchecked']
+
   const canOpen = computed(() => {
     const acc = account.value
     if (!acc) return false
-    return acc.telegram_id !== null && acc.proxy !== null && acc.status === 'valid'
+    return (
+      acc.telegram_id !== null &&
+      acc.proxy !== null &&
+      WORKING_PROXY_STATUSES.includes(acc.proxy.status) &&
+      acc.status === 'valid'
+    )
+  })
+
+  const cannotOpenReason = computed(() => {
+    const acc = account.value
+    if (!acc) return null
+    if (!acc.telegram_id) return 'noTelegramId'
+    if (!acc.proxy) return 'noProxy'
+    if (!WORKING_PROXY_STATUSES.includes(acc.proxy.status)) return 'proxyNotWorking'
+    if (acc.status !== 'valid') return 'notValid'
+    return null
   })
 
   const webkUrl = 'https://web.telegram.org/k/'
@@ -230,6 +247,7 @@ export function useWebKSession(accountRef: Ref<Account | null>) {
     healthStatus,
     preloadPath,
     canOpen,
+    cannotOpenReason,
     webkUrl,
     fetchSessionData,
     initializeWebView,

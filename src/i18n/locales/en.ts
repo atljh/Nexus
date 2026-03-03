@@ -87,8 +87,8 @@ export default {
       proxyForm: 'Form',
       proxyStringLabel: 'Proxy string',
       proxyStringPlaceholder: 'host:port or host:port:user:pass',
-      proxyStringPlaceholderFull: 'socks5://user:pass@host:port',
-      proxyStringFormats: 'Formats: socks5://user:pass@host:port, user:pass@host:port, host:port:user:pass'
+      proxyStringPlaceholderFull: "socks5://user:pass{'@'}host:port",
+      proxyStringFormats: "Formats: socks5://user:pass{'@'}host:port, user:pass{'@'}host:port, host:port:user:pass"
     },
 
     tdata: {
@@ -254,7 +254,7 @@ export default {
       noAccountsYet: 'No accounts yet',
       addProxy: 'Add Proxy',
       proxyString: 'Proxy String',
-      proxyStringPlaceholder: 'socks5://user:pass@host:port',
+      proxyStringPlaceholder: "socks5://user:pass{'@'}host:port",
       invalidProxyFormat: 'Invalid proxy format',
       proxyAdded: 'Proxy added',
       status: {
@@ -419,11 +419,11 @@ export default {
       stringMode: 'String',
       formMode: 'Form',
       proxyString: 'Proxy String',
-      proxyStringPlaceholder: 'socks5://user:pass@host:port',
-      proxyStringFormats: 'Formats: socks5://user:pass@host:port, user:pass@host:port, host:port:user:pass',
+      proxyStringPlaceholder: "socks5://user:pass{'@'}host:port",
+      proxyStringFormats: "Formats: socks5://user:pass{'@'}host:port, user:pass{'@'}host:port, host:port:user:pass",
       bulkImport: 'Bulk Import (one per line)',
       bulkHint: 'All formats supported. Duplicates will be skipped.',
-      bulkPlaceholder: 'socks5://user:pass@192.168.1.1:1080\n192.168.1.2:1080:user:pass',
+      bulkPlaceholder: "socks5://user:pass{'@'}192.168.1.1:1080\n192.168.1.2:1080:user:pass",
       bulkFormat: 'Format: host:port or host:port:user:pass',
       checkAndAdd: 'Check & Add',
       checkResults: 'Check Results',
@@ -455,7 +455,7 @@ export default {
       deleted: 'Proxy deleted',
       deleteFailed: 'Failed to delete proxy',
       enterHostPort: 'Please enter host and port',
-      invalidProxyFormat: 'Invalid proxy format. Example: socks5://user:pass@host:port',
+      invalidProxyFormat: "Invalid proxy format. Example: socks5://user:pass{'@'}host:port",
       duplicateProxy: 'This proxy already exists',
       duplicatesSkipped: 'Duplicates skipped: {count}',
       allDuplicates: 'All proxies already exist',
@@ -635,6 +635,7 @@ export default {
     requirementsNotMet: 'Account requirements not met:',
     noTelegramId: 'Account has no Telegram ID (not verified)',
     noProxy: 'No proxy assigned to account',
+    proxyNotWorking: 'Proxy is not working. Check or replace the proxy before opening WebK.',
     notValid: 'Account status is not valid',
     openInWebK: 'Open in WebK'
   },

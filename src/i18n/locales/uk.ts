@@ -87,8 +87,8 @@ export default {
       proxyForm: 'Форма',
       proxyStringLabel: 'Рядок проксі',
       proxyStringPlaceholder: 'host:port або host:port:user:pass',
-      proxyStringPlaceholderFull: 'socks5://user:pass@host:port',
-      proxyStringFormats: 'Формати: socks5://user:pass@host:port, user:pass@host:port, host:port:user:pass'
+      proxyStringPlaceholderFull: "socks5://user:pass{'@'}host:port",
+      proxyStringFormats: "Формати: socks5://user:pass{'@'}host:port, user:pass{'@'}host:port, host:port:user:pass"
     },
 
     tdata: {
@@ -254,7 +254,7 @@ export default {
       noAccountsYet: 'Акаунтів поки немає',
       addProxy: 'Додати проксі',
       proxyString: 'Рядок проксі',
-      proxyStringPlaceholder: 'socks5://user:pass@host:port',
+      proxyStringPlaceholder: "socks5://user:pass{'@'}host:port",
       invalidProxyFormat: 'Невірний формат проксі',
       proxyAdded: 'Проксі додано',
       status: {
@@ -419,11 +419,11 @@ export default {
       stringMode: 'Рядок',
       formMode: 'Форма',
       proxyString: 'Рядок проксі',
-      proxyStringPlaceholder: 'socks5://user:pass@host:port',
-      proxyStringFormats: 'Формати: socks5://user:pass@host:port, user:pass@host:port, host:port:user:pass',
+      proxyStringPlaceholder: "socks5://user:pass{'@'}host:port",
+      proxyStringFormats: "Формати: socks5://user:pass{'@'}host:port, user:pass{'@'}host:port, host:port:user:pass",
       bulkImport: 'Масовий імпорт (по одному на рядок)',
       bulkHint: 'Підтримуються всі формати. Дублікати будуть пропущені.',
-      bulkPlaceholder: 'socks5://user:pass@192.168.1.1:1080\n192.168.1.2:1080:user:pass',
+      bulkPlaceholder: "socks5://user:pass{'@'}192.168.1.1:1080\n192.168.1.2:1080:user:pass",
       bulkFormat: 'Формат: host:port або host:port:user:pass',
       checkAndAdd: 'Перевірити і додати',
       checkResults: 'Результати перевірки',
@@ -455,7 +455,7 @@ export default {
       deleted: 'Проксі видалено',
       deleteFailed: 'Не вдалося видалити проксі',
       enterHostPort: 'Введіть хост і порт',
-      invalidProxyFormat: 'Невірний формат проксі. Приклад: socks5://user:pass@host:port',
+      invalidProxyFormat: "Невірний формат проксі. Приклад: socks5://user:pass{'@'}host:port",
       duplicateProxy: 'Такий проксі вже існує',
       duplicatesSkipped: 'Пропущено дублікатів: {count}',
       allDuplicates: 'Всі проксі вже існують',
@@ -635,6 +635,7 @@ export default {
     requirementsNotMet: 'Вимоги до акаунту не виконані:',
     noTelegramId: 'Акаунт не має Telegram ID (не верифіковано)',
     noProxy: 'Проксі не призначено акаунту',
+    proxyNotWorking: 'Проксі не працює. Перевірте або замініть проксі перед відкриттям WebK.',
     notValid: 'Статус акаунту не валідний',
     openInWebK: 'Відкрити у WebK'
   },

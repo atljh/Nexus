@@ -39,6 +39,7 @@ const {
   state,
   sessionData,
   canOpen,
+  cannotOpenReason,
   webkUrl,
   fetchSessionData,
   initializeWebView,
@@ -335,7 +336,7 @@ onUnmounted(() => {
             <!-- Cannot open state -->
             <div v-else-if="!canOpen" class="webviewer-error">
               <i class="pi pi-info-circle" style="font-size: 2rem; color: var(--yellow-500)"></i>
-              <span>{{ t('webviewer.cannotOpen') }}</span>
+              <span>{{ cannotOpenReason ? t(`webviewer.${cannotOpenReason}`) : t('webviewer.cannotOpen') }}</span>
             </div>
 
             <!-- Webview -->
