@@ -27,7 +27,8 @@ export default {
     optional: 'опціонально',
     color: 'Колір',
     back: 'Назад',
-    done: 'Готово'
+    done: 'Готово',
+    or: 'або'
   },
 
   nav: {
@@ -182,6 +183,9 @@ export default {
       selectSessionFiles: 'Оберіть session файли',
       selectJsonFiles: 'Оберіть JSON файли',
       batchCheckComplete: 'Перевірку завершено: {valid} активних, {invalid} невдалих',
+      batchCheckValid: '{count} активних',
+      batchCheckFrozen: '{count} заморожених',
+      batchCheckInvalid: '{count} невдалих',
       proxyCheckComplete: 'Перевірка проксі: {working}/{total} працюють',
       noProxiesToCheck: 'Немає проксі у обраних акаунтів',
       bulk2FAComplete: '2FA встановлено: {succeeded} успішно, {failed} невдало',
@@ -485,9 +489,11 @@ export default {
 
   autoLikes: {
     settings: 'Налаштування',
+    subtitle: 'Автоматичні реакції на пости в каналах',
     createTask: 'Створити завдання',
+    createTaskHint: 'Налаштуйте параметри та запустіть завдання',
     channel: 'Канал',
-    channelPlaceholder: "{'@'}channel або https://t.me/channel",
+    channelPlaceholder: "{'@'}channel або https://t.me/channel/post_id",
     mode: 'Режим',
     modes: {
       single: 'Один пост',
@@ -496,7 +502,27 @@ export default {
     postId: 'ID поста',
     postIdPlaceholder: 'Номер поста (порожньо = останній)',
     reaction: 'Реакція',
+    reactions: 'Реакції',
+    selectReactions: 'Оберіть реакції',
+    emojiMode: 'Режим емодзі',
+    emojiModes: {
+      single: 'Один емодзі',
+      random: 'Випадковий',
+      all: 'Всі емодзі'
+    },
+    emojiModeHints: {
+      single: 'Перший емодзі зі списку для всіх акаунтів',
+      random: 'Випадковий емодзі для кожного акаунта',
+      all: 'Всі емодзі від кожного акаунта'
+    },
     totalReactions: 'Кількість реакцій',
+    concurrent: 'Паралельно',
+    limits: 'Ліміти',
+    delay: 'Затримка між діями',
+    sec: 'сек',
+    targetChannel: 'Цільовий канал / пост',
+    linkParsed: 'Посилання розпізнано: {channel}',
+    linkParsedWithPost: 'Посилання розпізнано: {channel} / пост #{postId}',
     minDelay: 'Мін. затримка',
     maxDelay: 'Макс. затримка',
     filterByGroup: 'Фільтр за групою',
@@ -505,7 +531,9 @@ export default {
     available: 'доступно',
     startTask: 'Створити та запустити',
     tasks: 'Завдання',
+    tasksCount: '{count} завдань',
     noTasks: 'Немає завдань',
+    noTasksHint: 'Заповніть форму зліва та натисніть запуск',
     progress: 'Прогрес',
     taskDetails: 'Деталі завдання',
     failed: 'Невдалих',
@@ -518,6 +546,24 @@ export default {
     target: 'Ціль',
     result: 'Результат',
     message: 'Повідомлення',
+    badgeChannel: 'Канал',
+    badgeAccounts: '{count} акк.',
+    controlStatus: {
+      running: '{count} активн.',
+      pending: '{count} очік.',
+      none: 'немає активних'
+    },
+    controlStart: 'Запустити',
+    controlStop: 'Зупинити',
+    tasksStarted: 'Запущено завдань: {count}',
+    tasksStopped: 'Всі завдання зупинені',
+    statsActive: 'Активні',
+    statsCompleted: 'Завершені',
+    tooltipStart: 'Запустити',
+    tooltipPause: 'Пауза',
+    tooltipStop: 'Зупинити',
+    tooltipDetails: 'Деталі',
+    tooltipDelete: 'Видалити',
     status: {
       pending: 'очікує',
       running: 'виконується',
@@ -528,6 +574,7 @@ export default {
     },
     errors: {
       channelRequired: 'Вкажіть канал',
+      reactionsRequired: 'Оберіть хоча б одну реакцію',
       accountsRequired: 'Оберіть хоча б один акаунт'
     },
     messages: {
@@ -541,13 +588,16 @@ export default {
   autoComments: {
     subtitle: 'Автоматичне коментування постів у каналах',
     createTask: 'Створити завдання',
+    createTaskHint: 'Налаштуйте параметри та запустіть завдання',
     settings: 'Налаштування',
     templates: 'Шаблони',
     accounts: 'Акаунти',
     channels: 'Канали',
     channelsPlaceholder: "Введіть {'@'}channel і натисніть Enter",
     channelsHint: 'Додайте кілька каналів через Enter або кому',
+    targetChannels: 'Цільові канали',
     mode: 'Режим',
+    operatingMode: 'Режим роботи',
     modes: {
       single: 'Один пост',
       monitoring: 'Моніторинг нових'
@@ -559,16 +609,21 @@ export default {
     },
     commentsPerAccount: 'Коментарів на акаунт',
     totalComments: 'Всього коментарів',
+    limits: 'Ліміти',
+    delay: 'Затримка між діями',
+    sec: 'сек',
     minDelay: 'Мін. затримка',
     maxDelay: 'Макс. затримка',
     filterByGroup: 'Фільтр за групою',
     selectAccounts: 'Оберіть акаунти',
     selectAccountsPlaceholder: 'Оберіть акаунти для завдання',
     available: 'доступно',
-    selectTemplates: 'Оберіть шаблони',
+    selectTemplates: 'Вибір шаблонів',
     selectTemplatesPlaceholder: 'Оберіть шаблони коментарів',
     customTemplates: 'Свої шаблони',
+    customComments: 'Власні коментарі',
     customTemplatesPlaceholder: 'Введіть текст коментаря',
+    customTemplatesHint: 'Введіть текст коментаря і натисніть Enter',
     createTemplate: 'Створити шаблон',
     loadDefaults: 'Завантажити стандартні',
     templateName: 'Назва шаблону',
@@ -577,14 +632,17 @@ export default {
     templateContentPlaceholder: '{Чудово|Круто|Клас}! {Дуже|Супер} {корисно|цікаво}!',
     spintaxHint: 'Використовуйте {варіант1|варіант2|варіант3} для випадкових варіацій',
     preview: 'Попередній перегляд:',
+    noTemplates: 'Шаблони не створені',
+    noTemplatesHint: 'Створіть перший шаблон або завантажте стандартні',
     startTask: 'Створити та запустити',
     tasks: 'Завдання',
+    tasksCount: '{count} завдань',
     noTasks: 'Немає завдань',
+    noTasksHint: 'Заповніть форму зліва та натисніть запуск',
     progress: 'Прогрес',
     taskDetails: 'Деталі завдання',
     failed: 'Невдалих',
     lastError: 'Остання помилка',
-    targetChannels: 'Цільові канали',
     noChannels: 'Немає каналів',
     channel: 'Канал',
     title: 'Назва',
@@ -596,6 +654,25 @@ export default {
     target: 'Ціль',
     result: 'Результат',
     comment: 'Коментар',
+    badgeChannels: 'Канали',
+    badgeTemplates: 'Шаблони',
+    badgeAccounts: '{count} акк.',
+    controlStatus: {
+      running: '{count} активн.',
+      pending: '{count} очік.',
+      none: 'немає активних'
+    },
+    controlStart: 'Запустити',
+    controlStop: 'Зупинити',
+    tasksStarted: 'Запущено завдань: {count}',
+    tasksStopped: 'Всі завдання зупинені',
+    statsActive: 'Активні',
+    statsCompleted: 'Завершені',
+    tooltipStart: 'Запустити',
+    tooltipPause: 'Пауза',
+    tooltipStop: 'Зупинити',
+    tooltipDetails: 'Деталі',
+    tooltipDelete: 'Видалити',
     status: {
       pending: 'очікує',
       running: 'виконується',
@@ -619,6 +696,20 @@ export default {
       templateDeleted: 'Шаблон видалено',
       defaultsLoaded: 'Стандартні шаблони завантажено'
     }
+  },
+
+  accountPicker: {
+    title: 'Вибір акаунтів',
+    selected: '{count} обрано',
+    available: 'Доступні',
+    selectedPanel: 'Обрано',
+    searchPlaceholder: 'ID, телефон, username...',
+    allGroups: 'Всі групи',
+    addAll: 'Додати все',
+    removeAll: 'Видалити все',
+    allAdded: 'Всі додані',
+    notFound: 'Не знайдено',
+    noAccountsSelected: 'Акаунти не обрані'
   },
 
   webviewer: {

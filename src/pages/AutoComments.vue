@@ -10,15 +10,13 @@ import Textarea from 'primevue/textarea'
 import Select from 'primevue/select'
 import MultiSelect from 'primevue/multiselect'
 import AutoComplete from 'primevue/autocomplete'
-import DataTable from 'primevue/datatable'
-import Column from 'primevue/column'
 import Tag from 'primevue/tag'
 import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
+import { AccountPicker } from '@/components/shared'
 
 import { useTaskStore } from '@/stores/useTaskStore'
 import { useAccountStore } from '@/stores/useAccountStore'
-import { useGroupStore } from '@/stores/useGroupStore'
 import type { Task, CommentTemplate } from '@/types'
 import { DEFAULT_COMMENT_TEMPLATES } from '@/types'
 
@@ -27,7 +25,6 @@ const { t } = useI18n()
 const toast = useToast()
 const taskStore = useTaskStore()
 const accountStore = useAccountStore()
-const groupStore = useGroupStore()
 
 // Form state
 const channels = ref<string[]>([])
@@ -39,7 +36,6 @@ const totalActions = ref(50)
 const minDelay = ref(60)
 const maxDelay = ref(300)
 const selectedAccountIds = ref<number[]>([])
-const selectedGroupId = ref<number | null>(null)
 
 // Template management
 const showTemplateDialog = ref(false)
@@ -48,16 +44,13 @@ const newTemplateContent = ref('')
 const templatePreview = ref<string[]>([])
 
 // UI state
-const showTaskDetails = ref(false)
-const selectedTask = ref<Task | null>(null)
 const isCreating = ref(false)
 const activeTab = ref(0)
 
-// Tabs configuration
+// Tabs configuration (Settings + Templates only, accounts moved to settings)
 const tabs = computed(() => [
   { label: t('autoComments.settings'), icon: 'pi pi-cog' },
-  { label: t('autoComments.templates'), icon: 'pi pi-file-edit' },
-  { label: t('autoComments.accounts'), icon: 'pi pi-users' }
+  { label: t('autoComments.templates'), icon: 'pi pi-file-edit' }
 ])
 
 // Rotation mode options
@@ -65,23 +58,6 @@ const rotationOptions = computed(() => [
   { value: 'random', label: t('autoComments.rotation.random') },
   { value: 'round_robin', label: t('autoComments.rotation.roundRobin') }
 ])
-
-// Filter accounts by group and valid status
-const availableAccounts = computed(() => {
-  let accounts = accountStore.accounts.filter(a => a.status === 'valid')
-  if (selectedGroupId.value) {
-    accounts = accounts.filter(a => a.group_id === selectedGroupId.value)
-  }
-  return accounts
-})
-
-// Formatted account options for multiselect
-const accountOptions = computed(() =>
-  availableAccounts.value.map(a => ({
-    value: a.id,
-    label: a.username ? `@${a.username}` : a.phone || `ID: ${a.id}`
-  }))
-)
 
 // Template options for multiselect
 const templateOptions = computed(() =>
@@ -112,18 +88,7 @@ function getStatusSeverity(status: string): 'success' | 'info' | 'warn' | 'dange
   }
 }
 
-// Channel status badge
-function getChannelStatusSeverity(status: string): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
-  switch (status) {
-    case 'joined': return 'success'
-    case 'pending': return 'info'
-    case 'error': return 'danger'
-    case 'cannot_comment': return 'warn'
-    default: return 'secondary'
-  }
-}
-
-// Create task
+// Create task and auto-start
 async function createTask() {
   if (channels.value.length === 0) {
     toast.add({
@@ -172,12 +137,23 @@ async function createTask() {
     })
 
     if (task) {
-      toast.add({
-        severity: 'success',
-        summary: t('common.success'),
-        detail: t('autoComments.messages.taskCreated'),
-        life: 3000
-      })
+      // Auto-start the created task
+      const started = await taskStore.startTask(task.id)
+      if (started) {
+        toast.add({
+          severity: 'success',
+          summary: t('common.success'),
+          detail: t('autoComments.messages.taskStarted'),
+          life: 3000
+        })
+      } else {
+        toast.add({
+          severity: 'warn',
+          summary: t('common.warning'),
+          detail: t('autoComments.messages.taskCreated'),
+          life: 3000
+        })
+      }
     }
   } catch (e) {
     toast.add({
@@ -189,6 +165,33 @@ async function createTask() {
   } finally {
     isCreating.value = false
   }
+}
+
+// Computed task counts
+const runningTasks = computed(() => taskStore.tasks.filter(t => t.status === 'running'))
+const pendingTasks = computed(() => taskStore.tasks.filter(t => t.status === 'pending' || t.status === 'paused'))
+
+// Batch actions
+async function startAllPending() {
+  for (const task of pendingTasks.value) {
+    await taskStore.startTask(task.id)
+  }
+  toast.add({
+    severity: 'info',
+    summary: t('autoComments.tasksStarted', { count: pendingTasks.value.length }),
+    life: 2000
+  })
+}
+
+async function stopAllRunning() {
+  for (const task of runningTasks.value) {
+    await taskStore.cancelTask(task.id)
+  }
+  toast.add({
+    severity: 'info',
+    summary: t('autoComments.tasksStopped'),
+    life: 2000
+  })
 }
 
 // Template management
@@ -285,12 +288,15 @@ watch(newTemplateContent, () => {
 
 // Task actions
 async function startTask(task: Task) {
-  await taskStore.startTask(task.id)
-  toast.add({
-    severity: 'info',
-    summary: t('autoComments.messages.taskStarted'),
-    life: 2000
-  })
+  if (task.status === 'running') return
+  const ok = await taskStore.startTask(task.id)
+  if (ok) {
+    toast.add({
+      severity: 'info',
+      summary: t('autoComments.messages.taskStarted'),
+      life: 2000
+    })
+  }
 }
 
 async function pauseTask(task: Task) {
@@ -314,19 +320,12 @@ function viewTaskDetails(task: Task) {
   router.push(`/task/${task.id}`)
 }
 
-// Format date
-function formatDate(date: string | null): string {
-  if (!date) return '-'
-  return new Date(date).toLocaleString()
-}
-
 // Initialize
 onMounted(async () => {
   await Promise.all([
     taskStore.fetchTasks('comments'),
     taskStore.fetchTemplates(),
-    accountStore.fetchAccounts(),
-    groupStore.fetchGroups()
+    accountStore.fetchAccounts()
   ])
 
   if (taskStore.hasRunningTasks) {
@@ -353,17 +352,54 @@ onUnmounted(() => {
             <p class="header-subtitle">{{ t('autoComments.subtitle') }}</p>
           </div>
         </div>
-        <div class="header-stats">
-          <div class="stat-card">
-            <span class="stat-value">{{ taskStore.tasks.filter(t => t.status === 'running').length }}</span>
-            <span class="stat-label">Активні</span>
+        <div class="header-right">
+          <!-- Control panel -->
+          <div v-if="taskStore.tasks.length > 0" class="control-panel">
+            <div class="control-status" :class="{ active: runningTasks.length > 0 }">
+              <span class="status-dot"></span>
+              <span class="status-text">
+                <template v-if="runningTasks.length > 0">{{ t('autoComments.controlStatus.running', { count: runningTasks.length }) }}</template>
+                <template v-else-if="pendingTasks.length > 0">{{ t('autoComments.controlStatus.pending', { count: pendingTasks.length }) }}</template>
+                <template v-else>{{ t('autoComments.controlStatus.none') }}</template>
+              </span>
+            </div>
+            <div class="control-buttons">
+              <button
+                v-if="pendingTasks.length > 0 && runningTasks.length === 0"
+                class="ctrl-btn ctrl-start"
+                @click="startAllPending"
+              >
+                <i class="pi pi-play"></i>
+                <span>{{ t('autoComments.controlStart') }}</span>
+              </button>
+              <button
+                v-if="runningTasks.length > 0"
+                class="ctrl-btn ctrl-stop"
+                @click="stopAllRunning"
+              >
+                <i class="pi pi-stop-circle"></i>
+                <span>{{ t('autoComments.controlStop') }}</span>
+              </button>
+            </div>
           </div>
-          <div class="stat-card">
-            <span class="stat-value">{{ taskStore.tasks.filter(t => t.status === 'completed').length }}</span>
-            <span class="stat-label">Завершені</span>
+          <div class="header-stats">
+            <div class="stat-card">
+              <span class="stat-value">{{ runningTasks.length }}</span>
+              <span class="stat-label">{{ t('autoComments.statsActive') }}</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-value">{{ taskStore.tasks.filter(t => t.status === 'completed').length }}</span>
+              <span class="stat-label">{{ t('autoComments.statsCompleted') }}</span>
+            </div>
           </div>
         </div>
       </div>
+
+      <!-- Account Picker — full width, collapsible -->
+      <AccountPicker
+        v-model="selectedAccountIds"
+        accent-color="#a855f7"
+      />
 
       <div class="page-grid">
         <!-- Create Task Card -->
@@ -374,7 +410,7 @@ onUnmounted(() => {
             </div>
             <div class="card-header-text">
               <h2>{{ t('autoComments.createTask') }}</h2>
-              <span class="card-header-hint">Налаштуйте параметри та запустіть завдання</span>
+              <span class="card-header-hint">{{ t('autoComments.createTaskHint') }}</span>
             </div>
           </div>
 
@@ -398,7 +434,7 @@ onUnmounted(() => {
               <div class="form-section">
                 <div class="form-section-header">
                   <i class="pi pi-hashtag"></i>
-                  <span>Цільові канали</span>
+                  <span>{{ t('autoComments.targetChannels') }}</span>
                 </div>
                 <div class="form-group">
                   <AutoComplete
@@ -419,29 +455,27 @@ onUnmounted(() => {
               <div class="form-section">
                 <div class="form-section-header">
                   <i class="pi pi-cog"></i>
-                  <span>Режим роботи</span>
+                  <span>{{ t('autoComments.operatingMode') }}</span>
                 </div>
-                <div class="form-grid-2">
-                  <div class="form-group">
-                    <label class="form-label">
-                      <i class="pi pi-sync"></i>
-                      {{ t('autoComments.rotationMode') }}
-                    </label>
-                    <Select
-                      v-model="rotationMode"
-                      :options="rotationOptions"
-                      option-label="label"
-                      option-value="value"
-                      class="w-full"
-                    />
-                  </div>
+                <div class="form-group">
+                  <label class="form-label">
+                    <i class="pi pi-sync"></i>
+                    {{ t('autoComments.rotationMode') }}
+                  </label>
+                  <Select
+                    v-model="rotationMode"
+                    :options="rotationOptions"
+                    option-label="label"
+                    option-value="value"
+                    class="w-full"
+                  />
                 </div>
               </div>
 
               <div class="form-section">
                 <div class="form-section-header">
                   <i class="pi pi-chart-bar"></i>
-                  <span>Ліміти</span>
+                  <span>{{ t('autoComments.limits') }}</span>
                 </div>
                 <div class="form-grid-2">
                   <div class="form-group">
@@ -476,7 +510,7 @@ onUnmounted(() => {
               <div class="form-section">
                 <div class="form-section-header">
                   <i class="pi pi-clock"></i>
-                  <span>Затримка між діями</span>
+                  <span>{{ t('autoComments.delay') }}</span>
                 </div>
                 <div class="delay-inputs">
                   <div class="form-group">
@@ -488,7 +522,7 @@ onUnmounted(() => {
                         :max="3600"
                         class="w-full"
                       />
-                      <span class="input-suffix">сек</span>
+                      <span class="input-suffix">{{ t('autoComments.sec') }}</span>
                     </div>
                   </div>
                   <div class="delay-separator">
@@ -503,11 +537,12 @@ onUnmounted(() => {
                         :max="3600"
                         class="w-full"
                       />
-                      <span class="input-suffix">сек</span>
+                      <span class="input-suffix">{{ t('autoComments.sec') }}</span>
                     </div>
                   </div>
                 </div>
               </div>
+
             </div>
 
             <!-- Templates Tab -->
@@ -515,7 +550,7 @@ onUnmounted(() => {
               <div class="form-section">
                 <div class="form-section-header">
                   <i class="pi pi-file-edit"></i>
-                  <span>Вибір шаблонів</span>
+                  <span>{{ t('autoComments.selectTemplates') }}</span>
                 </div>
                 <div class="form-group">
                   <MultiSelect
@@ -533,7 +568,7 @@ onUnmounted(() => {
               <div class="form-section">
                 <div class="form-section-header">
                   <i class="pi pi-pencil"></i>
-                  <span>Власні коментарі</span>
+                  <span>{{ t('autoComments.customComments') }}</span>
                 </div>
                 <div class="form-group">
                   <AutoComplete
@@ -545,7 +580,7 @@ onUnmounted(() => {
                   />
                   <small class="input-hint">
                     <i class="pi pi-info-circle"></i>
-                    Введіть текст коментаря і натисніть Enter
+                    {{ t('autoComments.customTemplatesHint') }}
                   </small>
                 </div>
               </div>
@@ -595,109 +630,41 @@ onUnmounted(() => {
 
               <div v-else class="empty-templates">
                 <i class="pi pi-file-edit"></i>
-                <p>Шаблони не створені</p>
-                <span>Створіть перший шаблон або завантажте стандартні</span>
-              </div>
-            </div>
-
-            <!-- Accounts Tab -->
-            <div v-if="activeTab === 2" class="tab-panel">
-              <div class="form-section">
-                <div class="form-section-header">
-                  <i class="pi pi-filter"></i>
-                  <span>Фільтр акаунтів</span>
-                </div>
-                <div class="form-group">
-                  <label class="form-label">{{ t('autoComments.filterByGroup') }}</label>
-                  <Select
-                    v-model="selectedGroupId"
-                    :options="[{ id: null, name: t('groups.allAccounts') }, ...groupStore.groups]"
-                    option-label="name"
-                    option-value="id"
-                    class="w-full"
-                  />
-                </div>
-              </div>
-
-              <div class="form-section">
-                <div class="form-section-header">
-                  <i class="pi pi-users"></i>
-                  <span>Вибір акаунтів</span>
-                  <span class="accounts-count">{{ availableAccounts.length }} доступно</span>
-                </div>
-                <div class="form-group">
-                  <MultiSelect
-                    v-model="selectedAccountIds"
-                    :options="accountOptions"
-                    option-label="label"
-                    option-value="value"
-                    :placeholder="t('autoComments.selectAccountsPlaceholder')"
-                    :maxSelectedLabels="5"
-                    class="w-full"
-                    display="chip"
-                    filter
-                    filterPlaceholder="Пошук акаунту..."
-                  />
-                </div>
-              </div>
-
-              <div v-if="selectedAccountIds.length > 0" class="selected-accounts-preview">
-                <div class="preview-header">
-                  <span>Вибрано акаунтів: {{ selectedAccountIds.length }}</span>
-                  <Button
-                    label="Скинути"
-                    icon="pi pi-times"
-                    text
-                    size="small"
-                    @click="selectedAccountIds = []"
-                  />
-                </div>
-                <div class="accounts-chips">
-                  <span
-                    v-for="id in selectedAccountIds.slice(0, 8)"
-                    :key="id"
-                    class="account-chip"
-                  >
-                    {{ accountOptions.find(a => a.value === id)?.label || id }}
-                  </span>
-                  <span v-if="selectedAccountIds.length > 8" class="more-accounts">
-                    +{{ selectedAccountIds.length - 8 }} ще
-                  </span>
-                </div>
-              </div>
-
-              <div v-else class="no-accounts-selected">
-                <i class="pi pi-user-plus"></i>
-                <p>Акаунти не вибрані</p>
-                <span>Виберіть хоча б один акаунт для запуску завдання</span>
+                <p>{{ t('autoComments.noTemplates') }}</p>
+                <span>{{ t('autoComments.noTemplatesHint') }}</span>
               </div>
             </div>
           </div>
 
           <!-- Create Button -->
           <div class="create-action">
-            <div class="validation-summary">
-              <div :class="['validation-item', { valid: channels.length > 0 }]">
-                <i :class="channels.length > 0 ? 'pi pi-check' : 'pi pi-times'"></i>
-                <span>Канали</span>
-              </div>
-              <div :class="['validation-item', { valid: selectedTemplates.length > 0 }]">
-                <i :class="selectedTemplates.length > 0 ? 'pi pi-check' : 'pi pi-times'"></i>
-                <span>Шаблони</span>
-              </div>
-              <div :class="['validation-item', { valid: selectedAccountIds.length > 0 }]">
-                <i :class="selectedAccountIds.length > 0 ? 'pi pi-check' : 'pi pi-times'"></i>
-                <span>Акаунти</span>
-              </div>
-            </div>
-            <Button
-              :label="t('autoComments.startTask')"
-              icon="pi pi-play"
-              :loading="isCreating"
-              :disabled="channels.length === 0 || selectedTemplates.length === 0 || selectedAccountIds.length === 0"
-              class="create-task-btn"
+            <button
+              class="launch-btn"
+              :class="{ ready: channels.length > 0 && selectedTemplates.length > 0 && selectedAccountIds.length > 0, loading: isCreating }"
+              :disabled="channels.length === 0 || selectedTemplates.length === 0 || selectedAccountIds.length === 0 || isCreating"
               @click="createTask"
-            />
+            >
+              <span class="launch-btn-glow"></span>
+              <span class="launch-btn-content">
+                <i v-if="isCreating" class="pi pi-spin pi-spinner"></i>
+                <i v-else class="pi pi-play"></i>
+                <span>{{ t('autoComments.startTask') }}</span>
+              </span>
+              <span class="launch-btn-badges">
+                <span :class="['badge', { ok: channels.length > 0 }]">
+                  <i :class="channels.length > 0 ? 'pi pi-check' : 'pi pi-minus'"></i>
+                  {{ t('autoComments.badgeChannels') }}
+                </span>
+                <span :class="['badge', { ok: selectedTemplates.length > 0 }]">
+                  <i :class="selectedTemplates.length > 0 ? 'pi pi-check' : 'pi pi-minus'"></i>
+                  {{ t('autoComments.badgeTemplates') }}
+                </span>
+                <span :class="['badge', { ok: selectedAccountIds.length > 0 }]">
+                  <i :class="selectedAccountIds.length > 0 ? 'pi pi-check' : 'pi pi-minus'"></i>
+                  {{ t('autoComments.badgeAccounts', { count: selectedAccountIds.length }) }}
+                </span>
+              </span>
+            </button>
           </div>
         </div>
 
@@ -709,7 +676,7 @@ onUnmounted(() => {
             </div>
             <div class="card-header-text">
               <h2>{{ t('autoComments.tasks') }}</h2>
-              <span class="card-header-hint">{{ taskStore.tasks.length }} завдань</span>
+              <span class="card-header-hint">{{ t('autoComments.tasksCount', { count: taskStore.tasks.length }) }}</span>
             </div>
             <Button
               v-if="taskStore.tasks.length > 0"
@@ -748,7 +715,7 @@ onUnmounted(() => {
 
               <div class="task-progress-section">
                 <div class="progress-info">
-                  <span class="progress-label">Прогрес</span>
+                  <span class="progress-label">{{ t('autoComments.progress') }}</span>
                   <span class="progress-value">{{ task.completed_actions }}/{{ task.total_actions }}</span>
                 </div>
                 <div class="progress-bar-container">
@@ -766,7 +733,7 @@ onUnmounted(() => {
                   icon="pi pi-play"
                   rounded
                   class="action-btn play"
-                  v-tooltip.top="'Запустити'"
+                  v-tooltip.top="t('autoComments.tooltipStart')"
                   @click="startTask(task)"
                 />
                 <Button
@@ -774,7 +741,7 @@ onUnmounted(() => {
                   icon="pi pi-pause"
                   rounded
                   class="action-btn pause"
-                  v-tooltip.top="'Пауза'"
+                  v-tooltip.top="t('autoComments.tooltipPause')"
                   @click="pauseTask(task)"
                 />
                 <Button
@@ -782,14 +749,14 @@ onUnmounted(() => {
                   icon="pi pi-stop"
                   rounded
                   class="action-btn stop"
-                  v-tooltip.top="'Зупинити'"
+                  v-tooltip.top="t('autoComments.tooltipStop')"
                   @click="cancelTask(task)"
                 />
                 <Button
                   icon="pi pi-eye"
                   rounded
                   class="action-btn view"
-                  v-tooltip.top="'Деталі'"
+                  v-tooltip.top="t('autoComments.tooltipDetails')"
                   @click="viewTaskDetails(task)"
                 />
                 <Button
@@ -797,7 +764,7 @@ onUnmounted(() => {
                   icon="pi pi-trash"
                   rounded
                   class="action-btn delete"
-                  v-tooltip.top="'Видалити'"
+                  v-tooltip.top="t('autoComments.tooltipDelete')"
                   @click="deleteTask(task)"
                 />
               </div>
@@ -805,11 +772,16 @@ onUnmounted(() => {
           </div>
 
           <div v-else class="empty-tasks">
-            <div class="empty-icon">
-              <i class="pi pi-inbox"></i>
+            <div class="empty-visual">
+              <div class="empty-rings">
+                <span class="ring ring-1"></span>
+                <span class="ring ring-2"></span>
+                <span class="ring ring-3"></span>
+              </div>
+              <i class="pi pi-comments"></i>
             </div>
-            <h3>Немає завдань</h3>
-            <p>Створіть перше завдання, заповнивши форму зліва</p>
+            <h3>{{ t('autoComments.noTasks') }}</h3>
+            <p>{{ t('autoComments.noTasksHint') }}</p>
           </div>
         </div>
       </div>
@@ -890,190 +862,29 @@ onUnmounted(() => {
           </div>
         </template>
       </Dialog>
-
-      <!-- Task Details Dialog -->
-      <Dialog
-        v-model:visible="showTaskDetails"
-        :header="`Завдання #${selectedTask?.id}`"
-        :style="{ width: '900px', maxHeight: '90vh' }"
-        modal
-        class="task-details-dialog"
-      >
-        <div v-if="selectedTask" class="task-details">
-          <!-- Overview Section -->
-          <div class="details-section overview">
-            <div class="overview-grid">
-              <div class="overview-item">
-                <span class="overview-label">Статус</span>
-                <Tag
-                  :value="t(`autoComments.status.${selectedTask.status}`)"
-                  :severity="getStatusSeverity(selectedTask.status)"
-                  class="overview-tag"
-                />
-              </div>
-              <div class="overview-item">
-                <span class="overview-label">Ротація</span>
-                <span class="overview-value">{{ t(`autoComments.rotation.${selectedTask.config?.rotation_mode}`) }}</span>
-              </div>
-              <div class="overview-item">
-                <span class="overview-label">Прогрес</span>
-                <span class="overview-value progress-val">{{ selectedTask.completed_actions }}/{{ selectedTask.total_actions }}</span>
-              </div>
-            </div>
-
-            <div class="progress-section">
-              <div class="big-progress-bar">
-                <div
-                  class="big-progress-fill"
-                  :style="{ width: `${selectedTask.progress}%` }"
-                ></div>
-              </div>
-              <span class="progress-percent">{{ selectedTask.progress }}%</span>
-            </div>
-
-            <div v-if="selectedTask.failed_actions > 0 || selectedTask.last_error" class="error-section">
-              <div v-if="selectedTask.failed_actions > 0" class="error-stat">
-                <i class="pi pi-exclamation-triangle"></i>
-                <span>Помилок: {{ selectedTask.failed_actions }}</span>
-              </div>
-              <div v-if="selectedTask.last_error" class="error-message">
-                <span class="error-label">Остання помилка:</span>
-                <span class="error-text">{{ selectedTask.last_error }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Channels Section -->
-          <div class="details-section">
-            <div class="section-header">
-              <i class="pi pi-hashtag"></i>
-              <h3>{{ t('autoComments.targetChannels') }}</h3>
-            </div>
-            <div class="channels-grid">
-              <Tag
-                v-for="(channel, idx) in selectedTask.config?.channels || []"
-                :key="idx"
-                :value="channel"
-                severity="info"
-                class="channel-tag-large"
-              />
-            </div>
-          </div>
-
-          <!-- Target Channels Table -->
-          <div class="details-section">
-            <div class="section-header">
-              <i class="pi pi-chart-bar"></i>
-              <h3>Статистика каналів</h3>
-            </div>
-            <DataTable
-              :value="taskStore.targetChannels"
-              class="details-table"
-              :rows="5"
-              :paginator="taskStore.targetChannels.length > 5"
-            >
-              <template #empty>
-                <div class="table-empty">
-                  <i class="pi pi-info-circle"></i>
-                  <span>{{ t('autoComments.noChannels') }}</span>
-                </div>
-              </template>
-              <Column field="channel_username" :header="t('autoComments.channel')">
-                <template #body="{ data }">
-                  <span class="channel-cell">@{{ data.channel_username }}</span>
-                </template>
-              </Column>
-              <Column field="channel_title" :header="t('autoComments.title')" />
-              <Column field="status" :header="t('common.status')">
-                <template #body="{ data }">
-                  <Tag
-                    :value="data.status"
-                    :severity="getChannelStatusSeverity(data.status)"
-                  />
-                </template>
-              </Column>
-              <Column field="comments_sent" :header="t('autoComments.sent')">
-                <template #body="{ data }">
-                  <span class="sent-count">{{ data.comments_sent || 0 }}</span>
-                </template>
-              </Column>
-              <Column field="error_message" :header="t('autoComments.error')">
-                <template #body="{ data }">
-                  <span v-if="data.error_message" class="error-cell">
-                    {{ data.error_message }}
-                  </span>
-                  <span v-else class="no-error">—</span>
-                </template>
-              </Column>
-            </DataTable>
-          </div>
-
-          <!-- Task Logs -->
-          <div class="details-section">
-            <div class="section-header">
-              <i class="pi pi-history"></i>
-              <h3>{{ t('autoComments.logs') }}</h3>
-            </div>
-            <DataTable
-              :value="taskStore.taskLogs"
-              :rows="5"
-              :paginator="taskStore.taskLogs.length > 5"
-              class="details-table logs-table"
-            >
-              <template #empty>
-                <div class="table-empty">
-                  <i class="pi pi-info-circle"></i>
-                  <span>{{ t('autoComments.noLogs') }}</span>
-                </div>
-              </template>
-              <Column :header="t('autoComments.time')" style="width: 160px">
-                <template #body="{ data }">
-                  <span class="time-cell">{{ formatDate(data.created_at) }}</span>
-                </template>
-              </Column>
-              <Column field="target" :header="t('autoComments.target')">
-                <template #body="{ data }">
-                  <span class="target-cell">{{ data.target }}</span>
-                </template>
-              </Column>
-              <Column :header="t('autoComments.result')" style="width: 100px">
-                <template #body="{ data }">
-                  <div :class="['result-badge', data.success ? 'success' : 'error']">
-                    <i :class="data.success ? 'pi pi-check' : 'pi pi-times'"></i>
-                    <span>{{ data.success ? 'OK' : 'Fail' }}</span>
-                  </div>
-                </template>
-              </Column>
-              <Column :header="t('autoComments.comment')">
-                <template #body="{ data }">
-                  <span class="comment-cell">
-                    {{ data.extra_data?.comment || '—' }}
-                  </span>
-                </template>
-              </Column>
-            </DataTable>
-          </div>
-        </div>
-      </Dialog>
     </div>
   </MainLayout>
 </template>
 
 <style scoped>
-/* Page Layout */
+/* Page Layout — viewport-constrained, no page scroll */
 .autocomments-page {
   width: 100%;
-  padding: 0;
+  height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-/* Page Header */
+/* Page Header — always visible */
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 28px;
-  padding-bottom: 20px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
 }
 
 .header-content {
@@ -1112,6 +923,97 @@ onUnmounted(() => {
   margin: 0;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* Control Panel */
+.control-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  padding: 8px 12px 8px 16px;
+}
+
+.control-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #52525b;
+  flex-shrink: 0;
+}
+
+.control-status.active .status-dot {
+  background: #22c55e;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+  animation: dot-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes dot-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(34, 197, 94, 0.5); }
+  50% { box-shadow: 0 0 14px rgba(34, 197, 94, 0.8); }
+}
+
+.status-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: #a1a1aa;
+  white-space: nowrap;
+}
+
+.control-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.ctrl-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: none;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ctrl-btn i {
+  font-size: 13px;
+}
+
+.ctrl-start {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(34, 197, 94, 0.1));
+  color: #4ade80;
+}
+
+.ctrl-start:hover {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.35), rgba(34, 197, 94, 0.2));
+  transform: translateY(-1px);
+}
+
+.ctrl-stop {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(239, 68, 68, 0.1));
+  color: #f87171;
+}
+
+.ctrl-stop:hover {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.35), rgba(239, 68, 68, 0.2));
+  transform: translateY(-1px);
+}
+
 .header-stats {
   display: flex;
   gap: 12px;
@@ -1139,11 +1041,19 @@ onUnmounted(() => {
   color: #71717a;
 }
 
-/* Page Grid */
+/* Account Picker — between header and grid */
+.account-picker {
+  flex-shrink: 0;
+  margin-bottom: 16px;
+}
+
+/* Page Grid — fills remaining height */
 .page-grid {
   display: grid;
   grid-template-columns: 480px 1fr;
   gap: 24px;
+  flex: 1;
+  min-height: 0;
 }
 
 @media (max-width: 1280px) {
@@ -1159,20 +1069,24 @@ onUnmounted(() => {
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 20px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .card-header {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 20px 24px;
+  gap: 12px;
+  padding: 16px 20px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
 }
 
 .card-header-icon {
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   background: linear-gradient(135deg, rgba(168, 85, 247, 0.15) 0%, rgba(168, 85, 247, 0.05) 100%);
   display: flex;
   align-items: center;
@@ -1180,7 +1094,7 @@ onUnmounted(() => {
 }
 
 .card-header-icon i {
-  font-size: 18px;
+  font-size: 15px;
   color: #a855f7;
 }
 
@@ -1212,16 +1126,17 @@ onUnmounted(() => {
 .custom-tabs {
   display: flex;
   gap: 4px;
-  padding: 16px 24px;
-  background: rgba(0, 0, 0, 0.2);
+  padding: 10px 20px;
+  background: rgba(0, 0, 0, 0.15);
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  flex-shrink: 0;
 }
 
 .tab-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
+  gap: 7px;
+  padding: 8px 14px;
   border: none;
   background: transparent;
   color: #71717a;
@@ -1246,32 +1161,52 @@ onUnmounted(() => {
   background: rgba(168, 85, 247, 0.12);
 }
 
-/* Tab Content */
+/* Tab Content — scrollable */
 .tab-content {
-  padding: 24px;
+  padding: 16px 20px;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.tab-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.tab-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tab-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+}
+
+.tab-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .tab-panel {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 14px;
 }
 
 /* Form Sections */
 .form-section {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.015);
   border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: 14px;
-  padding: 18px;
+  border-radius: 12px;
+  padding: 14px 16px;
 }
 
 .form-section-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
 }
 
 .form-section-header i {
@@ -1285,15 +1220,6 @@ onUnmounted(() => {
   color: #e4e4e7;
 }
 
-.accounts-count {
-  margin-left: auto;
-  font-size: 11px;
-  font-weight: 500;
-  color: #a855f7;
-  background: rgba(168, 85, 247, 0.1);
-  padding: 4px 10px;
-  border-radius: 20px;
-}
 
 /* Form Groups */
 .form-group {
@@ -1373,7 +1299,7 @@ onUnmounted(() => {
 .template-actions-bar {
   display: flex;
   gap: 10px;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 .create-template-btn {
@@ -1383,17 +1309,14 @@ onUnmounted(() => {
 .templates-grid {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-height: 280px;
-  overflow-y: auto;
-  padding-right: 8px;
+  gap: 8px;
 }
 
 .template-card {
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 12px;
-  padding: 14px;
+  padding: 12px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -1412,7 +1335,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .template-checkbox {
@@ -1451,121 +1374,146 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.empty-templates,
-.no-accounts-selected {
+.empty-templates {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 40px 20px;
+  padding: 30px 20px;
   text-align: center;
 }
 
-.empty-templates i,
-.no-accounts-selected i {
-  font-size: 40px;
+.empty-templates i {
+  font-size: 36px;
   color: #3f3f46;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
-.empty-templates p,
-.no-accounts-selected p {
-  font-size: 14px;
+.empty-templates p {
+  font-size: 13px;
   font-weight: 500;
   color: #71717a;
   margin: 0 0 4px 0;
 }
 
-.empty-templates span,
-.no-accounts-selected span {
+.empty-templates span {
   font-size: 12px;
   color: #52525b;
 }
 
-/* Selected Accounts Preview */
-.selected-accounts-preview {
-  background: rgba(168, 85, 247, 0.05);
-  border: 1px solid rgba(168, 85, 247, 0.2);
-  border-radius: 12px;
-  padding: 14px;
-  margin-top: 12px;
-}
-
-.preview-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.preview-header span {
-  font-size: 12px;
-  font-weight: 500;
-  color: #a855f7;
-}
-
-.accounts-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.account-chip {
-  background: rgba(168, 85, 247, 0.15);
-  color: #c4b5fd;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.more-accounts {
-  color: #a855f7;
-  font-size: 11px;
-  font-weight: 500;
-  padding: 4px 8px;
-}
-
-/* Create Action */
+/* Create Action — sticky at bottom */
 .create-action {
-  padding: 20px 24px;
-  background: rgba(0, 0, 0, 0.2);
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  padding: 16px 20px;
+  flex-shrink: 0;
 }
 
-.validation-summary {
+/* Launch Button */
+.launch-btn {
+  width: 100%;
+  position: relative;
   display: flex;
-  gap: 12px;
-  margin-bottom: 14px;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 24px 14px;
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(168, 85, 247, 0.08) 0%, rgba(59, 130, 246, 0.06) 100%);
+  cursor: not-allowed;
+  opacity: 0.5;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
 }
 
-.validation-item {
+.launch-btn.ready {
+  cursor: pointer;
+  opacity: 1;
+  border-color: rgba(168, 85, 247, 0.4);
+  background: linear-gradient(145deg, rgba(168, 85, 247, 0.12) 0%, rgba(59, 130, 246, 0.08) 100%);
+}
+
+.launch-btn.ready:hover {
+  border-color: rgba(168, 85, 247, 0.6);
+  background: linear-gradient(145deg, rgba(168, 85, 247, 0.18) 0%, rgba(59, 130, 246, 0.12) 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 32px rgba(168, 85, 247, 0.2), 0 0 0 1px rgba(168, 85, 247, 0.1);
+}
+
+.launch-btn.ready:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(168, 85, 247, 0.15);
+}
+
+.launch-btn-glow {
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle at center, rgba(168, 85, 247, 0.06) 0%, transparent 70%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.launch-btn.ready:hover .launch-btn-glow {
+  opacity: 1;
+}
+
+.launch-btn-content {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #52525b;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #a855f7;
+  letter-spacing: 0.02em;
+  position: relative;
+  z-index: 1;
 }
 
-.validation-item i {
-  font-size: 12px;
+.launch-btn-content i {
+  font-size: 16px;
 }
 
-.validation-item.valid {
-  color: #22c55e;
+.launch-btn.ready .launch-btn-content {
+  color: #c084fc;
 }
 
-.create-task-btn {
-  width: 100%;
-  height: 48px;
-  font-size: 14px;
+.launch-btn-badges {
+  display: flex;
+  gap: 8px;
+  position: relative;
+  z-index: 1;
+}
+
+.badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 8px;
+  font-size: 10px;
   font-weight: 600;
+  color: #52525b;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  transition: all 0.2s;
+}
+
+.badge i {
+  font-size: 9px;
+}
+
+.badge.ok {
+  color: #4ade80;
+  background: rgba(34, 197, 94, 0.08);
+  border-color: rgba(34, 197, 94, 0.15);
 }
 
 /* Tasks Card */
 .tasks-card {
-  display: flex;
-  flex-direction: column;
+  min-height: 0;
 }
 
 .tasks-list {
@@ -1573,8 +1521,22 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 12px;
   padding: 20px 24px;
-  max-height: calc(100vh - 320px);
+  flex: 1;
   overflow-y: auto;
+  min-height: 0;
+}
+
+.tasks-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.tasks-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tasks-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
 }
 
 .task-item {
@@ -1748,36 +1710,70 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 80px 40px;
+  flex: 1;
+  padding: 40px;
   text-align: center;
 }
 
-.empty-icon {
-  width: 80px;
-  height: 80px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+.empty-visual {
+  position: relative;
+  width: 96px;
+  height: 96px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
-.empty-icon i {
-  font-size: 32px;
-  color: #3f3f46;
+.empty-visual > i {
+  font-size: 28px;
+  color: rgba(168, 85, 247, 0.25);
+  position: relative;
+  z-index: 1;
+}
+
+.empty-rings {
+  position: absolute;
+  inset: 0;
+}
+
+.ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(168, 85, 247, 0.08);
+}
+
+.ring-1 {
+  inset: 0;
+  animation: ring-breathe 4s ease-in-out infinite;
+}
+
+.ring-2 {
+  inset: 12px;
+  border-color: rgba(168, 85, 247, 0.12);
+  animation: ring-breathe 4s ease-in-out infinite 0.5s;
+}
+
+.ring-3 {
+  inset: 24px;
+  border-color: rgba(168, 85, 247, 0.06);
+  animation: ring-breathe 4s ease-in-out infinite 1s;
+}
+
+@keyframes ring-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.5; }
+  50% { transform: scale(1.08); opacity: 1; }
 }
 
 .empty-tasks h3 {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   color: #71717a;
   margin: 0 0 6px 0;
 }
 
 .empty-tasks p {
-  font-size: 13px;
+  font-size: 12px;
   color: #52525b;
   margin: 0;
 }
@@ -1876,238 +1872,6 @@ onUnmounted(() => {
   gap: 10px;
 }
 
-/* Task Details Dialog */
-.task-details {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-.details-section {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 14px;
-  padding: 20px;
-}
-
-.details-section.overview {
-  background: linear-gradient(135deg, rgba(168, 85, 247, 0.08) 0%, rgba(59, 130, 246, 0.05) 100%);
-  border-color: rgba(168, 85, 247, 0.2);
-}
-
-.overview-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
-  margin-bottom: 20px;
-}
-
-.overview-item {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.overview-label {
-  font-size: 11px;
-  font-weight: 500;
-  color: #71717a;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.overview-value {
-  font-size: 14px;
-  font-weight: 600;
-  color: #fafafa;
-}
-
-.overview-value.progress-val {
-  color: #a855f7;
-}
-
-.overview-tag {
-  width: fit-content;
-}
-
-.progress-section {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.big-progress-bar {
-  flex: 1;
-  height: 10px;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 5px;
-  overflow: hidden;
-}
-
-.big-progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #a855f7 0%, #7c3aed 100%);
-  border-radius: 5px;
-  transition: width 0.3s ease;
-}
-
-.progress-percent {
-  font-size: 16px;
-  font-weight: 700;
-  color: #a855f7;
-  min-width: 50px;
-  text-align: right;
-}
-
-.error-section {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(239, 68, 68, 0.2);
-}
-
-.error-stat {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #f87171;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.error-stat i {
-  font-size: 14px;
-}
-
-.error-message {
-  margin-top: 8px;
-  padding: 10px 12px;
-  background: rgba(239, 68, 68, 0.1);
-  border-radius: 8px;
-}
-
-.error-label {
-  font-size: 11px;
-  color: #f87171;
-  display: block;
-  margin-bottom: 4px;
-}
-
-.error-text {
-  font-size: 12px;
-  color: #fca5a5;
-}
-
-.section-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.section-header i {
-  font-size: 16px;
-  color: #a855f7;
-}
-
-.section-header h3 {
-  font-size: 14px;
-  font-weight: 600;
-  color: #fafafa;
-  margin: 0;
-}
-
-.channels-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.channel-tag-large {
-  padding: 6px 14px;
-  font-size: 12px;
-}
-
-/* Details Tables */
-.details-table {
-  background: transparent;
-}
-
-.table-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 30px;
-  color: #52525b;
-  font-size: 13px;
-}
-
-.table-empty i {
-  font-size: 16px;
-}
-
-.channel-cell {
-  font-weight: 500;
-  color: #a855f7;
-}
-
-.sent-count {
-  font-weight: 600;
-  color: #22c55e;
-}
-
-.error-cell {
-  font-size: 12px;
-  color: #f87171;
-}
-
-.no-error {
-  color: #52525b;
-}
-
-.time-cell {
-  font-size: 12px;
-  color: #71717a;
-  font-family: 'SF Mono', 'Fira Code', monospace;
-}
-
-.target-cell {
-  font-weight: 500;
-  color: #e4e4e7;
-}
-
-.result-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.result-badge.success {
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
-}
-
-.result-badge.error {
-  background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
-}
-
-.comment-cell {
-  font-size: 12px;
-  color: #a1a1aa;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  max-width: 250px;
-}
-
 /* Override PrimeVue styles */
 :deep(.p-dialog) {
   background: #141417;
@@ -2132,27 +1896,6 @@ onUnmounted(() => {
   padding: 16px 24px;
 }
 
-:deep(.p-datatable) {
-  background: transparent;
-}
-
-:deep(.p-datatable .p-datatable-thead > tr > th) {
-  background: rgba(255, 255, 255, 0.02);
-  border-color: rgba(255, 255, 255, 0.06);
-}
-
-:deep(.p-datatable .p-datatable-tbody > tr) {
-  background: transparent;
-}
-
-:deep(.p-datatable .p-datatable-tbody > tr > td) {
-  border-color: rgba(255, 255, 255, 0.04);
-}
-
-:deep(.p-datatable .p-datatable-tbody > tr:hover) {
-  background: rgba(255, 255, 255, 0.02);
-}
-
 :deep(.p-inputnumber-buttons-horizontal .p-button) {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.08);
@@ -2169,15 +1912,15 @@ onUnmounted(() => {
   color: #c4b5fd;
 }
 
-:deep(.p-tooltip) {
-  background: #1f1f23;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+:deep(.p-inputtext),
+:deep(.p-dropdown),
+:deep(.p-multiselect),
+:deep(.p-inputnumber) {
+  width: 100%;
+  max-width: 100%;
 }
 
-:deep(.p-tooltip .p-tooltip-text) {
-  background: transparent;
-  color: #e4e4e7;
-  font-size: 11px;
-  padding: 6px 10px;
+:deep(.p-inputnumber-input) {
+  width: 100%;
 }
 </style>

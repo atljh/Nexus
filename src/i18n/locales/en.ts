@@ -27,7 +27,8 @@ export default {
     optional: 'optional',
     color: 'Color',
     back: 'Back',
-    done: 'Done'
+    done: 'Done',
+    or: 'or'
   },
 
   nav: {
@@ -182,6 +183,9 @@ export default {
       selectSessionFiles: 'Please select session files',
       selectJsonFiles: 'Please select JSON files',
       batchCheckComplete: 'Batch check complete: {valid} valid, {invalid} invalid',
+      batchCheckValid: '{count} valid',
+      batchCheckFrozen: '{count} frozen',
+      batchCheckInvalid: '{count} invalid',
       proxyCheckComplete: 'Proxy check: {working}/{total} working',
       noProxiesToCheck: 'No proxies assigned to selected accounts',
       bulk2FAComplete: '2FA set: {succeeded} succeeded, {failed} failed',
@@ -485,9 +489,11 @@ export default {
 
   autoLikes: {
     settings: 'Settings',
+    subtitle: 'Automatic reactions on channel posts',
     createTask: 'Create Task',
+    createTaskHint: 'Configure settings and start a task',
     channel: 'Channel',
-    channelPlaceholder: "{'@'}channel or https://t.me/channel",
+    channelPlaceholder: "{'@'}channel or https://t.me/channel/post_id",
     mode: 'Mode',
     modes: {
       single: 'Single Post',
@@ -496,7 +502,27 @@ export default {
     postId: 'Post ID',
     postIdPlaceholder: 'Post number (empty = latest)',
     reaction: 'Reaction',
+    reactions: 'Reactions',
+    selectReactions: 'Select reactions',
+    emojiMode: 'Emoji Mode',
+    emojiModes: {
+      single: 'Single emoji',
+      random: 'Random',
+      all: 'All emojis'
+    },
+    emojiModeHints: {
+      single: 'First emoji from the list for all accounts',
+      random: 'Random emoji for each account',
+      all: 'All emojis from each account'
+    },
     totalReactions: 'Total Reactions',
+    concurrent: 'Concurrent',
+    limits: 'Limits',
+    delay: 'Delay between actions',
+    sec: 'sec',
+    targetChannel: 'Target channel / post',
+    linkParsed: 'Link parsed: {channel}',
+    linkParsedWithPost: 'Link parsed: {channel} / post #{postId}',
     minDelay: 'Min Delay',
     maxDelay: 'Max Delay',
     filterByGroup: 'Filter by Group',
@@ -505,7 +531,9 @@ export default {
     available: 'available',
     startTask: 'Create & Start',
     tasks: 'Tasks',
+    tasksCount: '{count} tasks',
     noTasks: 'No tasks yet',
+    noTasksHint: 'Fill out the form on the left and start',
     progress: 'Progress',
     taskDetails: 'Task Details',
     failed: 'Failed',
@@ -518,6 +546,24 @@ export default {
     target: 'Target',
     result: 'Result',
     message: 'Message',
+    badgeChannel: 'Channel',
+    badgeAccounts: '{count} acc.',
+    controlStatus: {
+      running: '{count} active',
+      pending: '{count} pend.',
+      none: 'no active'
+    },
+    controlStart: 'Start',
+    controlStop: 'Stop',
+    tasksStarted: '{count} tasks started',
+    tasksStopped: 'All tasks stopped',
+    statsActive: 'Active',
+    statsCompleted: 'Completed',
+    tooltipStart: 'Start',
+    tooltipPause: 'Pause',
+    tooltipStop: 'Stop',
+    tooltipDetails: 'Details',
+    tooltipDelete: 'Delete',
     status: {
       pending: 'pending',
       running: 'running',
@@ -528,6 +574,7 @@ export default {
     },
     errors: {
       channelRequired: 'Please enter a channel',
+      reactionsRequired: 'Select at least one reaction',
       accountsRequired: 'Select at least one account'
     },
     messages: {
@@ -541,13 +588,16 @@ export default {
   autoComments: {
     subtitle: 'Automatic commenting on channel posts',
     createTask: 'Create Task',
+    createTaskHint: 'Configure settings and start a task',
     settings: 'Settings',
     templates: 'Templates',
     accounts: 'Accounts',
     channels: 'Channels',
     channelsPlaceholder: "Enter {'@'}channel and press Enter",
     channelsHint: 'Add multiple channels with Enter or comma',
+    targetChannels: 'Target Channels',
     mode: 'Mode',
+    operatingMode: 'Operating Mode',
     modes: {
       single: 'Single Post',
       monitoring: 'Monitor New Posts'
@@ -559,6 +609,9 @@ export default {
     },
     commentsPerAccount: 'Comments Per Account',
     totalComments: 'Total Comments',
+    limits: 'Limits',
+    delay: 'Delay between actions',
+    sec: 'sec',
     minDelay: 'Min Delay',
     maxDelay: 'Max Delay',
     filterByGroup: 'Filter by Group',
@@ -568,7 +621,9 @@ export default {
     selectTemplates: 'Select Templates',
     selectTemplatesPlaceholder: 'Choose comment templates',
     customTemplates: 'Custom Templates',
+    customComments: 'Custom Comments',
     customTemplatesPlaceholder: 'Enter comment text',
+    customTemplatesHint: 'Enter comment text and press Enter',
     createTemplate: 'Create Template',
     loadDefaults: 'Load Defaults',
     templateName: 'Template Name',
@@ -577,14 +632,17 @@ export default {
     templateContentPlaceholder: '{Great|Awesome|Nice}! {Very|Super} {useful|interesting}!',
     spintaxHint: 'Use {option1|option2|option3} for random variations',
     preview: 'Preview variations:',
+    noTemplates: 'No templates created',
+    noTemplatesHint: 'Create a template or load defaults',
     startTask: 'Create & Start',
     tasks: 'Tasks',
+    tasksCount: '{count} tasks',
     noTasks: 'No tasks yet',
+    noTasksHint: 'Fill out the form on the left and start',
     progress: 'Progress',
     taskDetails: 'Task Details',
     failed: 'Failed',
     lastError: 'Last Error',
-    targetChannels: 'Target Channels',
     noChannels: 'No channels',
     channel: 'Channel',
     title: 'Title',
@@ -596,6 +654,25 @@ export default {
     target: 'Target',
     result: 'Result',
     comment: 'Comment',
+    badgeChannels: 'Channels',
+    badgeTemplates: 'Templates',
+    badgeAccounts: '{count} acc.',
+    controlStatus: {
+      running: '{count} active',
+      pending: '{count} pend.',
+      none: 'no active'
+    },
+    controlStart: 'Start',
+    controlStop: 'Stop',
+    tasksStarted: '{count} tasks started',
+    tasksStopped: 'All tasks stopped',
+    statsActive: 'Active',
+    statsCompleted: 'Completed',
+    tooltipStart: 'Start',
+    tooltipPause: 'Pause',
+    tooltipStop: 'Stop',
+    tooltipDetails: 'Details',
+    tooltipDelete: 'Delete',
     status: {
       pending: 'pending',
       running: 'running',
@@ -619,6 +696,20 @@ export default {
       templateDeleted: 'Template deleted',
       defaultsLoaded: 'Default templates loaded'
     }
+  },
+
+  accountPicker: {
+    title: 'Select Accounts',
+    selected: '{count} selected',
+    available: 'Available',
+    selectedPanel: 'Selected',
+    searchPlaceholder: 'ID, phone, username...',
+    allGroups: 'All groups',
+    addAll: 'Add all',
+    removeAll: 'Remove all',
+    allAdded: 'All added',
+    notFound: 'Not found',
+    noAccountsSelected: 'No accounts selected'
   },
 
   webviewer: {

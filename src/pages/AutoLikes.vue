@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
@@ -10,10 +10,10 @@ import Select from 'primevue/select'
 import MultiSelect from 'primevue/multiselect'
 import Tag from 'primevue/tag'
 import { useToast } from 'primevue/usetoast'
+import { AccountPicker } from '@/components/shared'
 
 import { useTaskStore } from '@/stores/useTaskStore'
 import { useAccountStore } from '@/stores/useAccountStore'
-import { useGroupStore } from '@/stores/useGroupStore'
 import type { Task } from '@/types'
 import { REACTION_EMOJIS } from '@/types'
 
@@ -25,7 +25,6 @@ const { t } = useI18n()
 const toast = useToast()
 const taskStore = useTaskStore()
 const accountStore = useAccountStore()
-const groupStore = useGroupStore()
 
 // Form state
 const channel = ref('')
@@ -37,41 +36,47 @@ const minDelay = ref(30)
 const maxDelay = ref(120)
 const maxConcurrent = ref(1)
 const selectedAccountIds = ref<number[]>([])
-const selectedGroupId = ref<number | null>(null)
+const parsedFromLink = ref(false)
 
 // UI state
 const isCreating = ref(false)
-const activeTab = ref(0)
 
-// Tabs
-const tabs = computed(() => [
-  { label: t('autoLikes.settings'), icon: 'pi pi-cog' },
-  { label: t('autoLikes.selectAccounts'), icon: 'pi pi-users' }
-])
-
-// Emoji mode options
-const emojiModeOptions = [
-  { value: 'single', label: 'Один эмодзи' },
-  { value: 'random', label: 'Случайный' },
-  { value: 'all', label: 'Все эмодзи' }
-]
-
-// Filter accounts by group and valid status
-const availableAccounts = computed(() => {
-  let accounts = accountStore.accounts.filter(a => a.status === 'valid')
-  if (selectedGroupId.value) {
-    accounts = accounts.filter(a => a.group_id === selectedGroupId.value)
+// Parse t.me links: https://t.me/channel/12345 → channel + postId
+function parseTelegramLink(input: string): { channel: string; postId: number | null } | null {
+  const match = input.match(/(?:https?:\/\/)?t\.me\/([a-zA-Z0-9_]+)(?:\/(\d+))?/)
+  if (match) {
+    return {
+      channel: match[1],
+      postId: match[2] ? parseInt(match[2], 10) : null
+    }
   }
-  return accounts
+  return null
+}
+
+// Watch channel input for link pasting
+let skipWatch = false
+watch(channel, (val) => {
+  if (skipWatch) {
+    skipWatch = false
+    return
+  }
+  const parsed = parseTelegramLink(val)
+  if (parsed) {
+    skipWatch = true
+    channel.value = '@' + parsed.channel
+    if (parsed.postId) {
+      postId.value = parsed.postId
+    }
+    parsedFromLink.value = true
+  }
 })
 
-// Formatted account options for multiselect
-const accountOptions = computed(() =>
-  availableAccounts.value.map(a => ({
-    value: a.id,
-    label: a.username ? `@${a.username}` : a.phone || `ID: ${a.id}`
-  }))
-)
+// Emoji mode options
+const emojiModeOptions = computed(() => [
+  { value: 'single', label: t('autoLikes.emojiModes.single') },
+  { value: 'random', label: t('autoLikes.emojiModes.random') },
+  { value: 'all', label: t('autoLikes.emojiModes.all') }
+])
 
 // Task status badge severity
 function getStatusSeverity(status: string): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
@@ -86,7 +91,7 @@ function getStatusSeverity(status: string): 'success' | 'info' | 'warn' | 'dange
   }
 }
 
-// Create task
+// Create task and auto-start
 async function createTask() {
   if (!channel.value.trim()) {
     toast.add({
@@ -102,7 +107,7 @@ async function createTask() {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: 'Выберите хотя бы одну реакцию',
+      detail: t('autoLikes.errors.reactionsRequired'),
       life: 3000
     })
     return
@@ -135,12 +140,23 @@ async function createTask() {
     })
 
     if (task) {
-      toast.add({
-        severity: 'success',
-        summary: t('common.success'),
-        detail: t('autoLikes.messages.taskCreated'),
-        life: 3000
-      })
+      // Auto-start the created task
+      const started = await taskStore.startTask(task.id)
+      if (started) {
+        toast.add({
+          severity: 'success',
+          summary: t('common.success'),
+          detail: t('autoLikes.messages.taskStarted'),
+          life: 3000
+        })
+      } else {
+        toast.add({
+          severity: 'warn',
+          summary: t('common.warning'),
+          detail: t('autoLikes.messages.taskCreated'),
+          life: 3000
+        })
+      }
     }
   } catch (e) {
     toast.add({
@@ -154,14 +170,43 @@ async function createTask() {
   }
 }
 
-// Task actions
-async function startTask(task: Task) {
-  await taskStore.startTask(task.id)
+// Computed task counts
+const runningTasks = computed(() => taskStore.tasks.filter(t => t.status === 'running'))
+const pendingTasks = computed(() => taskStore.tasks.filter(t => t.status === 'pending' || t.status === 'paused'))
+// Batch actions
+async function startAllPending() {
+  for (const task of pendingTasks.value) {
+    await taskStore.startTask(task.id)
+  }
   toast.add({
     severity: 'info',
-    summary: t('autoLikes.messages.taskStarted'),
+    summary: t('autoLikes.tasksStarted', { count: pendingTasks.value.length }),
     life: 2000
   })
+}
+
+async function stopAllRunning() {
+  for (const task of runningTasks.value) {
+    await taskStore.cancelTask(task.id)
+  }
+  toast.add({
+    severity: 'info',
+    summary: t('autoLikes.tasksStopped'),
+    life: 2000
+  })
+}
+
+// Task actions
+async function startTask(task: Task) {
+  if (task.status === 'running') return
+  const ok = await taskStore.startTask(task.id)
+  if (ok) {
+    toast.add({
+      severity: 'info',
+      summary: t('autoLikes.messages.taskStarted'),
+      life: 2000
+    })
+  }
 }
 
 async function pauseTask(task: Task) {
@@ -193,8 +238,7 @@ async function refreshTasks() {
 onMounted(async () => {
   await Promise.all([
     taskStore.fetchTasks('likes'),
-    accountStore.fetchAccounts(),
-    groupStore.fetchGroups()
+    accountStore.fetchAccounts()
   ])
 
   if (taskStore.hasRunningTasks) {
@@ -218,20 +262,57 @@ onUnmounted(() => {
           </div>
           <div class="header-text">
             <h1>{{ t('nav.autoLikes') }}</h1>
-            <p class="header-subtitle">Автоматические реакции на посты в каналах</p>
+            <p class="header-subtitle">{{ t('autoLikes.subtitle') }}</p>
           </div>
         </div>
-        <div class="header-stats">
-          <div class="stat-card">
-            <span class="stat-value">{{ taskStore.tasks.filter(t => t.status === 'running').length }}</span>
-            <span class="stat-label">Активные</span>
+        <div class="header-right">
+          <!-- Control panel -->
+          <div v-if="taskStore.tasks.length > 0" class="control-panel">
+            <div class="control-status" :class="{ active: runningTasks.length > 0 }">
+              <span class="status-dot"></span>
+              <span class="status-text">
+                <template v-if="runningTasks.length > 0">{{ t('autoLikes.controlStatus.running', { count: runningTasks.length }) }}</template>
+                <template v-else-if="pendingTasks.length > 0">{{ t('autoLikes.controlStatus.pending', { count: pendingTasks.length }) }}</template>
+                <template v-else>{{ t('autoLikes.controlStatus.none') }}</template>
+              </span>
+            </div>
+            <div class="control-buttons">
+              <button
+                v-if="pendingTasks.length > 0 && runningTasks.length === 0"
+                class="ctrl-btn ctrl-start"
+                @click="startAllPending"
+              >
+                <i class="pi pi-play"></i>
+                <span>{{ t('autoLikes.controlStart') }}</span>
+              </button>
+              <button
+                v-if="runningTasks.length > 0"
+                class="ctrl-btn ctrl-stop"
+                @click="stopAllRunning"
+              >
+                <i class="pi pi-stop-circle"></i>
+                <span>{{ t('autoLikes.controlStop') }}</span>
+              </button>
+            </div>
           </div>
-          <div class="stat-card">
-            <span class="stat-value">{{ taskStore.tasks.filter(t => t.status === 'completed').length }}</span>
-            <span class="stat-label">Завершены</span>
+          <div class="header-stats">
+            <div class="stat-card">
+              <span class="stat-value">{{ runningTasks.length }}</span>
+              <span class="stat-label">{{ t('autoLikes.statsActive') }}</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-value">{{ taskStore.tasks.filter(t => t.status === 'completed').length }}</span>
+              <span class="stat-label">{{ t('autoLikes.statsCompleted') }}</span>
+            </div>
           </div>
         </div>
       </div>
+
+      <!-- Account Picker — full width, collapsible -->
+      <AccountPicker
+        v-model="selectedAccountIds"
+        accent-color="#ec4899"
+      />
 
       <div class="page-grid">
         <!-- Create Task Card -->
@@ -242,31 +323,17 @@ onUnmounted(() => {
             </div>
             <div class="card-header-text">
               <h2>{{ t('autoLikes.createTask') }}</h2>
-              <span class="card-header-hint">Настройте параметры и запустите задачу</span>
+              <span class="card-header-hint">{{ t('autoLikes.createTaskHint') }}</span>
             </div>
           </div>
 
-          <!-- Custom Tabs -->
-          <div class="custom-tabs">
-            <button
-              v-for="(tab, index) in tabs"
-              :key="index"
-              :class="['tab-btn', { active: activeTab === index }]"
-              @click="activeTab = index"
-            >
-              <i :class="tab.icon"></i>
-              <span>{{ tab.label }}</span>
-            </button>
-          </div>
-
-          <!-- Tab Content -->
+          <!-- Form Content -->
           <div class="tab-content">
-            <!-- Settings Tab -->
-            <div v-if="activeTab === 0" class="tab-panel">
+            <div class="tab-panel">
               <div class="form-section">
                 <div class="form-section-header">
                   <i class="pi pi-hashtag"></i>
-                  <span>Целевой канал</span>
+                  <span>{{ t('autoLikes.targetChannel') }}</span>
                 </div>
                 <div class="form-group">
                   <InputText
@@ -274,13 +341,17 @@ onUnmounted(() => {
                     :placeholder="t('autoLikes.channelPlaceholder')"
                     class="w-full"
                   />
+                  <small v-if="parsedFromLink" class="parsed-link-hint">
+                    <i class="pi pi-check-circle"></i>
+                    {{ postId ? t('autoLikes.linkParsedWithPost', { channel, postId }) : t('autoLikes.linkParsed', { channel }) }}
+                  </small>
                 </div>
               </div>
 
               <div class="form-section">
                 <div class="form-section-header">
                   <i class="pi pi-cog"></i>
-                  <span>Реакции</span>
+                  <span>{{ t('autoLikes.reactions') }}</span>
                 </div>
                 <div class="form-group">
                   <label class="form-label">
@@ -292,7 +363,7 @@ onUnmounted(() => {
                     :options="reactionOptions"
                     option-label="label"
                     option-value="value"
-                    placeholder="Выберите реакции"
+                    :placeholder="t('autoLikes.selectReactions')"
                     :maxSelectedLabels="5"
                     class="w-full"
                     display="chip"
@@ -301,7 +372,7 @@ onUnmounted(() => {
                 <div class="form-group" style="margin-top: 14px">
                   <label class="form-label">
                     <i class="pi pi-sliders-h"></i>
-                    Режим эмодзи
+                    {{ t('autoLikes.emojiMode') }}
                   </label>
                   <Select
                     v-model="emojiMode"
@@ -311,9 +382,7 @@ onUnmounted(() => {
                     class="w-full"
                   />
                   <small class="emoji-mode-hint">
-                    <template v-if="emojiMode === 'single'">Первый эмодзи из списка для всех аккаунтов</template>
-                    <template v-else-if="emojiMode === 'random'">Случайный эмодзи для каждого аккаунта</template>
-                    <template v-else>Все эмодзи от каждого аккаунта</template>
+                    {{ t(`autoLikes.emojiModeHints.${emojiMode}`) }}
                   </small>
                 </div>
 
@@ -331,7 +400,7 @@ onUnmounted(() => {
               <div class="form-section">
                 <div class="form-section-header">
                   <i class="pi pi-chart-bar"></i>
-                  <span>Лимиты</span>
+                  <span>{{ t('autoLikes.limits') }}</span>
                 </div>
                 <div class="form-grid-2">
                   <div class="form-group">
@@ -348,7 +417,7 @@ onUnmounted(() => {
                     />
                   </div>
                   <div class="form-group">
-                    <label class="form-label">Параллельно</label>
+                    <label class="form-label">{{ t('autoLikes.concurrent') }}</label>
                     <InputNumber
                       v-model="maxConcurrent"
                       :min="1"
@@ -366,7 +435,7 @@ onUnmounted(() => {
               <div class="form-section">
                 <div class="form-section-header">
                   <i class="pi pi-clock"></i>
-                  <span>Задержка между действиями</span>
+                  <span>{{ t('autoLikes.delay') }}</span>
                 </div>
                 <div class="delay-inputs">
                   <div class="form-group">
@@ -378,7 +447,7 @@ onUnmounted(() => {
                         :max="3600"
                         class="w-full"
                       />
-                      <span class="input-suffix">сек</span>
+                      <span class="input-suffix">{{ t('autoLikes.sec') }}</span>
                     </div>
                   </div>
                   <div class="delay-separator">
@@ -393,107 +462,40 @@ onUnmounted(() => {
                         :max="3600"
                         class="w-full"
                       />
-                      <span class="input-suffix">сек</span>
+                      <span class="input-suffix">{{ t('autoLikes.sec') }}</span>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            <!-- Accounts Tab -->
-            <div v-if="activeTab === 1" class="tab-panel">
-              <div class="form-section">
-                <div class="form-section-header">
-                  <i class="pi pi-filter"></i>
-                  <span>Фильтр аккаунтов</span>
-                </div>
-                <div class="form-group">
-                  <label class="form-label">{{ t('autoLikes.filterByGroup') }}</label>
-                  <Select
-                    v-model="selectedGroupId"
-                    :options="[{ id: null, name: t('groups.allAccounts') }, ...groupStore.groups]"
-                    option-label="name"
-                    option-value="id"
-                    class="w-full"
-                  />
-                </div>
-              </div>
-
-              <div class="form-section">
-                <div class="form-section-header">
-                  <i class="pi pi-users"></i>
-                  <span>Выбор аккаунтов</span>
-                  <span class="accounts-count">{{ availableAccounts.length }} доступно</span>
-                </div>
-                <div class="form-group">
-                  <MultiSelect
-                    v-model="selectedAccountIds"
-                    :options="accountOptions"
-                    option-label="label"
-                    option-value="value"
-                    :placeholder="t('autoLikes.selectAccountsPlaceholder')"
-                    :maxSelectedLabels="5"
-                    class="w-full"
-                    display="chip"
-                    filter
-                    filterPlaceholder="Поиск аккаунта..."
-                  />
-                </div>
-              </div>
-
-              <div v-if="selectedAccountIds.length > 0" class="selected-accounts-preview">
-                <div class="preview-header">
-                  <span>Выбрано аккаунтов: {{ selectedAccountIds.length }}</span>
-                  <Button
-                    label="Сбросить"
-                    icon="pi pi-times"
-                    text
-                    size="small"
-                    @click="selectedAccountIds = []"
-                  />
-                </div>
-                <div class="accounts-chips">
-                  <span
-                    v-for="id in selectedAccountIds.slice(0, 8)"
-                    :key="id"
-                    class="account-chip"
-                  >
-                    {{ accountOptions.find(a => a.value === id)?.label || id }}
-                  </span>
-                  <span v-if="selectedAccountIds.length > 8" class="more-accounts">
-                    +{{ selectedAccountIds.length - 8 }} ещё
-                  </span>
-                </div>
-              </div>
-
-              <div v-else class="no-accounts-selected">
-                <i class="pi pi-user-plus"></i>
-                <p>Аккаунты не выбраны</p>
-                <span>Выберите хотя бы один аккаунт для запуска задачи</span>
-              </div>
             </div>
           </div>
 
           <!-- Create Button -->
           <div class="create-action">
-            <div class="validation-summary">
-              <div :class="['validation-item', { valid: channel.trim().length > 0 }]">
-                <i :class="channel.trim().length > 0 ? 'pi pi-check' : 'pi pi-times'"></i>
-                <span>Канал</span>
-              </div>
-              <div :class="['validation-item', { valid: selectedAccountIds.length > 0 }]">
-                <i :class="selectedAccountIds.length > 0 ? 'pi pi-check' : 'pi pi-times'"></i>
-                <span>Аккаунты</span>
-              </div>
-            </div>
-            <Button
-              :label="t('autoLikes.startTask')"
-              icon="pi pi-play"
-              :loading="isCreating"
-              :disabled="!channel || selectedAccountIds.length === 0"
-              class="create-task-btn"
+            <button
+              class="launch-btn"
+              :class="{ ready: channel.trim() && selectedAccountIds.length > 0, loading: isCreating }"
+              :disabled="!channel.trim() || selectedAccountIds.length === 0 || isCreating"
               @click="createTask"
-            />
+            >
+              <span class="launch-btn-glow"></span>
+              <span class="launch-btn-content">
+                <i v-if="isCreating" class="pi pi-spin pi-spinner"></i>
+                <i v-else class="pi pi-play"></i>
+                <span>{{ t('autoLikes.startTask') }}</span>
+              </span>
+              <span class="launch-btn-badges">
+                <span :class="['badge', { ok: channel.trim().length > 0 }]">
+                  <i :class="channel.trim().length > 0 ? 'pi pi-check' : 'pi pi-minus'"></i>
+                  {{ t('autoLikes.badgeChannel') }}
+                </span>
+                <span :class="['badge', { ok: selectedAccountIds.length > 0 }]">
+                  <i :class="selectedAccountIds.length > 0 ? 'pi pi-check' : 'pi pi-minus'"></i>
+                  {{ t('autoLikes.badgeAccounts', { count: selectedAccountIds.length }) }}
+                </span>
+              </span>
+            </button>
           </div>
         </div>
 
@@ -505,7 +507,7 @@ onUnmounted(() => {
             </div>
             <div class="card-header-text">
               <h2>{{ t('autoLikes.tasks') }}</h2>
-              <span class="card-header-hint">{{ taskStore.tasks.length }} задач</span>
+              <span class="card-header-hint">{{ t('autoLikes.tasksCount', { count: taskStore.tasks.length }) }}</span>
             </div>
             <Button
               v-if="taskStore.tasks.length > 0"
@@ -540,7 +542,7 @@ onUnmounted(() => {
 
               <div class="task-progress-section">
                 <div class="progress-info">
-                  <span class="progress-label">Прогресс</span>
+                  <span class="progress-label">{{ t('autoLikes.progress') }}</span>
                   <span class="progress-value">{{ task.completed_actions }}/{{ task.total_actions }}</span>
                 </div>
                 <div class="progress-bar-container">
@@ -558,7 +560,7 @@ onUnmounted(() => {
                   icon="pi pi-play"
                   rounded
                   class="action-btn play"
-                  v-tooltip.top="'Запустить'"
+                  v-tooltip.top="t('autoLikes.tooltipStart')"
                   @click="startTask(task)"
                 />
                 <Button
@@ -566,7 +568,7 @@ onUnmounted(() => {
                   icon="pi pi-pause"
                   rounded
                   class="action-btn pause"
-                  v-tooltip.top="'Пауза'"
+                  v-tooltip.top="t('autoLikes.tooltipPause')"
                   @click="pauseTask(task)"
                 />
                 <Button
@@ -574,14 +576,14 @@ onUnmounted(() => {
                   icon="pi pi-stop"
                   rounded
                   class="action-btn stop"
-                  v-tooltip.top="'Остановить'"
+                  v-tooltip.top="t('autoLikes.tooltipStop')"
                   @click="cancelTask(task)"
                 />
                 <Button
                   icon="pi pi-eye"
                   rounded
                   class="action-btn view"
-                  v-tooltip.top="'Детали'"
+                  v-tooltip.top="t('autoLikes.tooltipDetails')"
                   @click="viewTaskDetails(task)"
                 />
                 <Button
@@ -589,7 +591,7 @@ onUnmounted(() => {
                   icon="pi pi-trash"
                   rounded
                   class="action-btn delete"
-                  v-tooltip.top="'Удалить'"
+                  v-tooltip.top="t('autoLikes.tooltipDelete')"
                   @click="deleteTask(task)"
                 />
               </div>
@@ -597,11 +599,16 @@ onUnmounted(() => {
           </div>
 
           <div v-else class="empty-tasks">
-            <div class="empty-icon">
-              <i class="pi pi-inbox"></i>
+            <div class="empty-visual">
+              <div class="empty-rings">
+                <span class="ring ring-1"></span>
+                <span class="ring ring-2"></span>
+                <span class="ring ring-3"></span>
+              </div>
+              <i class="pi pi-heart"></i>
             </div>
-            <h3>Нет задач</h3>
-            <p>Создайте первую задачу, заполнив форму слева</p>
+            <h3>{{ t('autoLikes.noTasks') }}</h3>
+            <p>{{ t('autoLikes.noTasksHint') }}</p>
           </div>
         </div>
       </div>
@@ -610,20 +617,24 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* Page Layout */
+/* Page Layout — viewport-constrained, no page scroll */
 .autolikes-page {
   width: 100%;
-  padding: 0;
+  height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-/* Page Header */
+/* Page Header — always visible */
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 28px;
-  padding-bottom: 20px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
 }
 
 .header-content {
@@ -662,6 +673,97 @@ onUnmounted(() => {
   margin: 0;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* Control Panel */
+.control-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  padding: 8px 12px 8px 16px;
+}
+
+.control-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #52525b;
+  flex-shrink: 0;
+}
+
+.control-status.active .status-dot {
+  background: #22c55e;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+  animation: dot-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes dot-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(34, 197, 94, 0.5); }
+  50% { box-shadow: 0 0 14px rgba(34, 197, 94, 0.8); }
+}
+
+.status-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: #a1a1aa;
+  white-space: nowrap;
+}
+
+.control-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.ctrl-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: none;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ctrl-btn i {
+  font-size: 13px;
+}
+
+.ctrl-start {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(34, 197, 94, 0.1));
+  color: #4ade80;
+}
+
+.ctrl-start:hover {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.35), rgba(34, 197, 94, 0.2));
+  transform: translateY(-1px);
+}
+
+.ctrl-stop {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(239, 68, 68, 0.1));
+  color: #f87171;
+}
+
+.ctrl-stop:hover {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.35), rgba(239, 68, 68, 0.2));
+  transform: translateY(-1px);
+}
+
 .header-stats {
   display: flex;
   gap: 12px;
@@ -689,11 +791,19 @@ onUnmounted(() => {
   color: #71717a;
 }
 
-/* Page Grid */
+/* Account Picker — between header and grid */
+.account-picker {
+  flex-shrink: 0;
+  margin-bottom: 16px;
+}
+
+/* Page Grid — fills remaining height */
 .page-grid {
   display: grid;
   grid-template-columns: 480px 1fr;
   gap: 24px;
+  flex: 1;
+  min-height: 0;
 }
 
 @media (max-width: 1280px) {
@@ -709,20 +819,24 @@ onUnmounted(() => {
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 20px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .card-header {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 20px 24px;
+  gap: 12px;
+  padding: 16px 20px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
 }
 
 .card-header-icon {
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   background: linear-gradient(135deg, rgba(236, 72, 153, 0.15) 0%, rgba(236, 72, 153, 0.05) 100%);
   display: flex;
   align-items: center;
@@ -730,7 +844,7 @@ onUnmounted(() => {
 }
 
 .card-header-icon i {
-  font-size: 18px;
+  font-size: 15px;
   color: #ec4899;
 }
 
@@ -758,70 +872,52 @@ onUnmounted(() => {
   color: #71717a;
 }
 
-/* Custom Tabs */
-.custom-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 16px 24px;
-  background: rgba(0, 0, 0, 0.2);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-.tab-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
-  border: none;
-  background: transparent;
-  color: #71717a;
-  font-size: 13px;
-  font-weight: 500;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.tab-btn i {
-  font-size: 14px;
-}
-
-.tab-btn:hover {
-  color: #a1a1aa;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.tab-btn.active {
-  color: #ec4899;
-  background: rgba(236, 72, 153, 0.12);
-}
-
-/* Tab Content */
+/* Form Content — scrollable */
 .tab-content {
-  padding: 24px;
+  padding: 16px 20px;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.tab-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.tab-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tab-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+}
+
+.tab-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .tab-panel {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 14px;
 }
 
 /* Form Sections */
 .form-section {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.015);
   border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: 14px;
-  padding: 18px;
+  border-radius: 12px;
+  padding: 14px 16px;
 }
 
 .form-section-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
 }
 
 .form-section-header i {
@@ -835,20 +931,24 @@ onUnmounted(() => {
   color: #e4e4e7;
 }
 
-.accounts-count {
-  margin-left: auto;
-  font-size: 11px;
-  font-weight: 500;
-  color: #ec4899;
-  background: rgba(236, 72, 153, 0.1);
-  padding: 4px 10px;
-  border-radius: 20px;
-}
 
 .emoji-mode-hint {
   font-size: 11px;
   color: #71717a;
   margin-top: 4px;
+}
+
+.parsed-link-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #22c55e;
+  margin-top: 4px;
+}
+
+.parsed-link-hint i {
+  font-size: 12px;
 }
 
 /* Form Groups */
@@ -912,117 +1012,119 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
-/* Selected Accounts Preview */
-.selected-accounts-preview {
-  background: rgba(236, 72, 153, 0.05);
-  border: 1px solid rgba(236, 72, 153, 0.2);
-  border-radius: 12px;
-  padding: 14px;
-  margin-top: 12px;
+/* Create Action — sticky at bottom */
+.create-action {
+  padding: 16px 20px;
+  flex-shrink: 0;
 }
 
-.preview-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.preview-header span {
-  font-size: 12px;
-  font-weight: 500;
-  color: #ec4899;
-}
-
-.accounts-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.account-chip {
-  background: rgba(236, 72, 153, 0.15);
-  color: #f9a8d4;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.more-accounts {
-  color: #ec4899;
-  font-size: 11px;
-  font-weight: 500;
-  padding: 4px 8px;
-}
-
-.no-accounts-selected {
+/* Launch Button */
+.launch-btn {
+  width: 100%;
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 40px 20px;
-  text-align: center;
+  gap: 10px;
+  padding: 16px 24px 14px;
+  border: 1px solid rgba(236, 72, 153, 0.25);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(236, 72, 153, 0.08) 0%, rgba(168, 85, 247, 0.06) 100%);
+  cursor: not-allowed;
+  opacity: 0.5;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
 }
 
-.no-accounts-selected i {
-  font-size: 40px;
-  color: #3f3f46;
-  margin-bottom: 12px;
+.launch-btn.ready {
+  cursor: pointer;
+  opacity: 1;
+  border-color: rgba(236, 72, 153, 0.4);
+  background: linear-gradient(145deg, rgba(236, 72, 153, 0.12) 0%, rgba(168, 85, 247, 0.08) 100%);
 }
 
-.no-accounts-selected p {
-  font-size: 14px;
-  font-weight: 500;
-  color: #71717a;
-  margin: 0 0 4px 0;
+.launch-btn.ready:hover {
+  border-color: rgba(236, 72, 153, 0.6);
+  background: linear-gradient(145deg, rgba(236, 72, 153, 0.18) 0%, rgba(168, 85, 247, 0.12) 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 32px rgba(236, 72, 153, 0.2), 0 0 0 1px rgba(236, 72, 153, 0.1);
 }
 
-.no-accounts-selected span {
-  font-size: 12px;
-  color: #52525b;
+.launch-btn.ready:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(236, 72, 153, 0.15);
 }
 
-/* Create Action */
-.create-action {
-  padding: 20px 24px;
-  background: rgba(0, 0, 0, 0.2);
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+.launch-btn-glow {
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle at center, rgba(236, 72, 153, 0.06) 0%, transparent 70%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
 }
 
-.validation-summary {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 14px;
+.launch-btn.ready:hover .launch-btn-glow {
+  opacity: 1;
 }
 
-.validation-item {
+.launch-btn-content {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #52525b;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #ec4899;
+  letter-spacing: 0.02em;
+  position: relative;
+  z-index: 1;
 }
 
-.validation-item i {
-  font-size: 12px;
+.launch-btn-content i {
+  font-size: 16px;
 }
 
-.validation-item.valid {
-  color: #22c55e;
+.launch-btn.ready .launch-btn-content {
+  color: #f472b6;
 }
 
-.create-task-btn {
-  width: 100%;
-  height: 48px;
-  font-size: 14px;
+.launch-btn-badges {
+  display: flex;
+  gap: 8px;
+  position: relative;
+  z-index: 1;
+}
+
+.badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 8px;
+  font-size: 10px;
   font-weight: 600;
+  color: #52525b;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  transition: all 0.2s;
+}
+
+.badge i {
+  font-size: 9px;
+}
+
+.badge.ok {
+  color: #4ade80;
+  background: rgba(34, 197, 94, 0.08);
+  border-color: rgba(34, 197, 94, 0.15);
 }
 
 /* Tasks Card */
 .tasks-card {
-  display: flex;
-  flex-direction: column;
+  min-height: 0;
 }
 
 .tasks-list {
@@ -1030,8 +1132,9 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 12px;
   padding: 20px 24px;
-  max-height: calc(100vh - 320px);
+  flex: 1;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .task-item {
@@ -1205,36 +1308,70 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 80px 40px;
+  flex: 1;
+  padding: 40px;
   text-align: center;
 }
 
-.empty-icon {
-  width: 80px;
-  height: 80px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+.empty-visual {
+  position: relative;
+  width: 96px;
+  height: 96px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
-.empty-icon i {
-  font-size: 32px;
-  color: #3f3f46;
+.empty-visual > i {
+  font-size: 28px;
+  color: rgba(236, 72, 153, 0.25);
+  position: relative;
+  z-index: 1;
+}
+
+.empty-rings {
+  position: absolute;
+  inset: 0;
+}
+
+.ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(236, 72, 153, 0.08);
+}
+
+.ring-1 {
+  inset: 0;
+  animation: ring-breathe 4s ease-in-out infinite;
+}
+
+.ring-2 {
+  inset: 12px;
+  border-color: rgba(236, 72, 153, 0.12);
+  animation: ring-breathe 4s ease-in-out infinite 0.5s;
+}
+
+.ring-3 {
+  inset: 24px;
+  border-color: rgba(236, 72, 153, 0.06);
+  animation: ring-breathe 4s ease-in-out infinite 1s;
+}
+
+@keyframes ring-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.5; }
+  50% { transform: scale(1.08); opacity: 1; }
 }
 
 .empty-tasks h3 {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   color: #71717a;
   margin: 0 0 6px 0;
 }
 
 .empty-tasks p {
-  font-size: 13px;
+  font-size: 12px;
   color: #52525b;
   margin: 0;
 }
