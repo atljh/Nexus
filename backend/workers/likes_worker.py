@@ -9,6 +9,7 @@ import asyncio
 import itertools
 import random
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Callable, Any, Tuple
@@ -350,6 +351,21 @@ class LikesWorker:
         else:  # single
             return [reactions[0]]
 
+    # ── Link parsing ──
+
+    @staticmethod
+    def _parse_channel(channel: str, post_id: Optional[int] = None) -> tuple[str, Optional[int]]:
+        """
+        Parse channel input — supports @channel, username, and t.me links.
+        Returns (channel, post_id).
+        """
+        m = re.match(r'(?:https?://)?t\.me/([a-zA-Z0-9_]+)(?:/(\d+))?', channel)
+        if m:
+            channel = m.group(1)
+            if m.group(2) and not post_id:
+                post_id = int(m.group(2))
+        return channel, post_id
+
     # ── Main execution ──
 
     async def execute(
@@ -383,6 +399,8 @@ class LikesWorker:
             config = task.config
             channel = config.get("channel", "")
             post_id = config.get("post_id")
+            # Parse t.me links (e.g. https://t.me/channel/12345)
+            channel, post_id = self._parse_channel(channel, post_id)
 
             # Backward compat: old "reaction" (str) → new "reactions" (list)
             reactions = config.get("reactions")

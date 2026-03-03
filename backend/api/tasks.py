@@ -576,17 +576,22 @@ async def start_task(task_id: int, db: Session = Depends(get_db)):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
+    # Already running in queue — just return current state
+    if task_queue.is_running(task_id):
+        if task.status == "paused":
+            await task_queue.resume(task_id)
+            task.status = "running"
+            db.commit()
+            db.refresh(task)
+        return task.to_dict()
+
+    # Stale running status (queue lost after restart) — reset to pending
+    if task.status == "running":
+        task.status = "pending"
+        db.commit()
+
     if task.status not in ["pending", "paused"]:
         raise HTTPException(status_code=400, detail=f"Cannot start task with status: {task.status}")
-
-    # Check if already running in queue
-    if task_queue.is_running(task_id):
-        # Resume if paused
-        await task_queue.resume(task_id)
-        task.status = "running"
-        db.commit()
-        db.refresh(task)
-        return task.to_dict()
 
     # Start the worker based on task type
     if task.task_type == "likes":

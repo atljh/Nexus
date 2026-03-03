@@ -4,7 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from database.database import init_db
+from database.database import init_db, SessionLocal
+from database.models import Task
 from api.router import api_router
 
 
@@ -13,6 +14,19 @@ async def lifespan(app: FastAPI):
     # Startup
     await init_db()
     print("[Backend] Database initialized")
+
+    # Reset stale running tasks (lost after restart)
+    db = SessionLocal()
+    try:
+        stale = db.query(Task).filter(Task.status == "running").all()
+        if stale:
+            for t in stale:
+                t.status = "pending"
+            db.commit()
+            print(f"[Backend] Reset {len(stale)} stale running tasks to pending")
+    finally:
+        db.close()
+
     yield
     # Shutdown
     print("[Backend] Shutting down")
