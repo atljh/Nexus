@@ -741,9 +741,10 @@ class CommentsWorker:
                 logger.error(f"Task {self.task_id} not found")
                 return
 
-            task.status = "running"
-            task.started_at = datetime.now(timezone.utc)
-            db.commit()
+            if task.status != "running":
+                task.status = "running"
+                task.started_at = datetime.now(timezone.utc)
+                db.commit()
 
             accounts = list(task.accounts)
             if not accounts:

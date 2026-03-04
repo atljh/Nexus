@@ -607,6 +607,13 @@ async def start_task(task_id: int, db: Session = Depends(get_db)):
     if task.status not in ["pending", "paused"]:
         raise HTTPException(status_code=400, detail=f"Cannot start task with status: {task.status}")
 
+    # Set status to running before launching the worker
+    # (worker runs in background via asyncio.create_task and won't commit in time for response)
+    task.status = "running"
+    if not task.started_at:
+        task.started_at = datetime.now(timezone.utc)
+    db.commit()
+
     # Start the worker based on task type
     if task.task_type == "likes":
         await start_likes_task(task_id)
@@ -615,7 +622,6 @@ async def start_task(task_id: int, db: Session = Depends(get_db)):
     else:
         raise HTTPException(status_code=400, detail=f"Unknown task type: {task.task_type}")
 
-    db.refresh(task)
     return task.to_dict()
 
 
