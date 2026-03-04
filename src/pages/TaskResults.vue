@@ -136,19 +136,16 @@ function formatDate(date: string | null): string {
   })
 }
 
-// Format relative time
-function formatRelativeTime(date: string | null): string {
-  if (!date) return '—'
-
-  const now = Date.now()
-  const time = new Date(date).getTime()
-  const diff = now - time
-
-  if (diff < 60000) return t('taskResults.time.justNow')
-  if (diff < 3600000) return t('taskResults.time.minutesAgo', { count: Math.floor(diff / 60000) })
-  if (diff < 86400000) return t('taskResults.time.hoursAgo', { count: Math.floor(diff / 3600000) })
-  return t('taskResults.time.daysAgo', { count: Math.floor(diff / 86400000) })
+// Format log timestamp (HH:MM:SS)
+function formatLogTime(date: string | null): string {
+  if (!date) return '--:--:--'
+  return new Date(date).toLocaleTimeString('uk-UA', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
 }
+
 
 // Channel status severity
 function getChannelStatusSeverity(status: string): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
@@ -201,11 +198,24 @@ function showConfirm(action: 'cancel' | 'delete' | 'restart') {
   showConfirmDialog.value = true
 }
 
+async function restartTask() {
+  if (!task.value) return
+  const result = await taskStore.restartTask(task.value.id)
+  if (result) {
+    toast.add({ severity: 'success', summary: t('taskResults.messages.restarted'), life: 2000 })
+    showConfirmDialog.value = false
+    confirmAction.value = null
+    await loadTask()
+  }
+}
+
 function executeConfirmAction() {
   if (confirmAction.value === 'cancel') {
     cancelTask()
   } else if (confirmAction.value === 'delete') {
     deleteTask()
+  } else if (confirmAction.value === 'restart') {
+    restartTask()
   }
 }
 
@@ -329,6 +339,13 @@ watch(() => task.value?.status, (newStatus) => {
               :label="t('taskResults.actions.stop')"
               class="action-btn stop"
               @click="showConfirm('cancel')"
+            />
+            <Button
+              v-if="task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'"
+              icon="pi pi-refresh"
+              :label="t('taskResults.actions.restart')"
+              class="action-btn restart"
+              @click="showConfirm('restart')"
             />
             <Button
               v-if="task.status !== 'running'"
@@ -587,22 +604,14 @@ watch(() => task.value?.status, (newStatus) => {
                 <div
                   v-for="log in filteredLogs"
                   :key="log.id"
-                  :class="['log-item', { success: log.success, error: !log.success }]"
+                  :class="['log-line', { success: log.success, error: !log.success }]"
                 >
-                  <div class="log-status">
-                    <i :class="log.success ? 'pi pi-check' : 'pi pi-times'"></i>
-                  </div>
-                  <div class="log-content">
-                    <div class="log-main">
-                      <span class="log-target">{{ log.target }}</span>
-                      <span class="log-time">{{ formatRelativeTime(log.created_at) }}</span>
-                    </div>
-                    <span v-if="log.message" class="log-message">{{ log.message }}</span>
-                    <span v-if="log.error" class="log-error">{{ log.error }}</span>
-                    <span v-if="log.extra_data?.comment" class="log-comment">
-                      "{{ log.extra_data.comment }}"
-                    </span>
-                  </div>
+                  <span class="log-ts">{{ formatLogTime(log.created_at) }}</span>
+                  <span :class="log.success ? 'log-ok' : 'log-fail'">{{ log.success ? 'OK' : 'ERR' }}</span>
+                  <span v-if="log.target" class="log-target">{{ log.target }}</span>
+                  <span v-if="log.message" class="log-msg">{{ log.message }}</span>
+                  <span v-if="log.error" class="log-err">{{ log.error }}</span>
+                  <span v-if="log.extra_data?.comment" class="log-comment">"{{ log.extra_data.comment }}"</span>
                 </div>
 
                 <div v-if="filteredLogs.length === 0" class="logs-empty">
@@ -630,15 +639,18 @@ watch(() => task.value?.status, (newStatus) => {
       <!-- Confirm Dialog -->
       <Dialog
         v-model:visible="showConfirmDialog"
-        :header="confirmAction === 'delete' ? 'Видалити завдання?' : 'Зупинити завдання?'"
+        :header="confirmAction === 'delete' ? 'Видалити завдання?' : confirmAction === 'restart' ? 'Перезапустити завдання?' : 'Зупинити завдання?'"
         :style="{ width: '400px' }"
         modal
         class="confirm-dialog"
       >
         <div class="confirm-content">
-          <i :class="['confirm-icon', 'pi', confirmAction === 'delete' ? 'pi-trash' : 'pi-stop-circle']"></i>
+          <i :class="['confirm-icon', 'pi', confirmAction === 'delete' ? 'pi-trash' : confirmAction === 'restart' ? 'pi-refresh' : 'pi-stop-circle']"></i>
           <p v-if="confirmAction === 'delete'">
             Ви впевнені, що хочете видалити це завдання? Цю дію неможливо скасувати.
+          </p>
+          <p v-else-if="confirmAction === 'restart'">
+            Скинути прогрес і журнал дій? Завдання повернеться у статус "очікує".
           </p>
           <p v-else>
             Ви впевнені, що хочете зупинити виконання цього завдання?
@@ -652,8 +664,8 @@ watch(() => task.value?.status, (newStatus) => {
             @click="showConfirmDialog = false"
           />
           <Button
-            :label="confirmAction === 'delete' ? 'Видалити' : 'Зупинити'"
-            :severity="confirmAction === 'delete' ? 'danger' : 'warn'"
+            :label="confirmAction === 'delete' ? 'Видалити' : confirmAction === 'restart' ? 'Перезапустити' : 'Зупинити'"
+            :severity="confirmAction === 'delete' ? 'danger' : confirmAction === 'restart' ? 'info' : 'warn'"
             @click="executeConfirmAction"
           />
         </template>
@@ -779,6 +791,16 @@ watch(() => task.value?.status, (newStatus) => {
 
 .action-btn.stop:hover {
   background: rgba(239, 68, 68, 0.25);
+}
+
+.action-btn.restart {
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
+}
+
+.action-btn.restart:hover {
+  background: rgba(59, 130, 246, 0.25);
 }
 
 .action-btn.delete {
@@ -1311,91 +1333,67 @@ watch(() => task.value?.status, (newStatus) => {
 /* Logs List */
 .logs-list {
   flex: 1;
-  padding: 16px;
+  padding: 12px 16px;
   overflow-y: auto;
   max-height: 600px;
+  font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
-.log-item {
+.log-line {
   display: flex;
-  gap: 12px;
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: 10px;
-  margin-bottom: 8px;
-  border-left: 3px solid transparent;
+  gap: 8px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.log-item.success {
-  border-left-color: #22c55e;
+.log-line:hover {
+  background: rgba(255, 255, 255, 0.04);
 }
 
-.log-item.error {
-  border-left-color: #ef4444;
-  background: rgba(239, 68, 68, 0.05);
+.log-line.error {
+  background: rgba(239, 68, 68, 0.06);
 }
 
-.log-status {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.log-ts {
+  color: #52525b;
   flex-shrink: 0;
 }
 
-.log-item.success .log-status {
-  background: rgba(34, 197, 94, 0.15);
+.log-ok {
   color: #4ade80;
+  font-weight: 600;
+  flex-shrink: 0;
+  min-width: 26px;
 }
 
-.log-item.error .log-status {
-  background: rgba(239, 68, 68, 0.15);
+.log-fail {
   color: #f87171;
-}
-
-.log-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.log-main {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 4px;
+  font-weight: 600;
+  flex-shrink: 0;
+  min-width: 26px;
 }
 
 .log-target {
-  font-size: 13px;
-  font-weight: 500;
   color: #e4e4e7;
+  flex-shrink: 0;
 }
 
-.log-time {
-  font-size: 11px;
-  color: #52525b;
-}
-
-.log-message {
-  font-size: 12px;
+.log-msg {
   color: #a1a1aa;
-  display: block;
 }
 
-.log-error {
-  font-size: 12px;
+.log-err {
   color: #f87171;
-  display: block;
 }
 
 .log-comment {
-  font-size: 12px;
   color: #a855f7;
   font-style: italic;
-  display: block;
-  margin-top: 4px;
 }
 
 .logs-empty {
