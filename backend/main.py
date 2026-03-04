@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
+from datetime import datetime, timezone
+
 from database.database import init_db, SessionLocal
 from database.models import Task
 from api.router import api_router
@@ -20,10 +22,23 @@ async def lifespan(app: FastAPI):
     try:
         stale = db.query(Task).filter(Task.status == "running").all()
         if stale:
+            now = datetime.now(timezone.utc)
             for t in stale:
-                t.status = "pending"
+                done = t.completed_actions + t.failed_actions
+                if done >= t.total_actions:
+                    # All actions were processed before crash — mark completed
+                    t.status = "completed"
+                    t.completed_at = now
+                elif done > 0:
+                    # Partially done — mark cancelled (can't resume connections)
+                    t.status = "cancelled"
+                    t.completed_at = now
+                    t.last_error = "Interrupted by app restart"
+                else:
+                    # Not started yet — back to pending
+                    t.status = "pending"
             db.commit()
-            print(f"[Backend] Reset {len(stale)} stale running tasks to pending")
+            print(f"[Backend] Reset {len(stale)} stale running tasks")
     finally:
         db.close()
 

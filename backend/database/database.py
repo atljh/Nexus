@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
 
@@ -26,6 +26,14 @@ async_session = async_sessionmaker(
 
 # Sync engine and session (for workers)
 sync_engine = create_engine(SYNC_DATABASE_URL, echo=False)
+
+
+# Enable SQLite foreign keys for both engines
+@event.listens_for(sync_engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 SessionLocal = sessionmaker(
     bind=sync_engine,

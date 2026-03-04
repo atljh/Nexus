@@ -12,6 +12,15 @@ def _is_loaded(obj, attr_name: str) -> bool:
     return attr_name in insp.dict
 
 
+def _utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    """Convert UTC datetime to ISO format with Z suffix."""
+    if dt is None:
+        return None
+    # Strip tzinfo to avoid double suffix (e.g. +00:00Z)
+    naive = dt.replace(tzinfo=None) if dt.tzinfo else dt
+    return naive.isoformat() + "Z"
+
+
 # Many-to-many relationship table for accounts and tags
 account_tags = Table(
     "account_tags",
@@ -41,7 +50,7 @@ class AccountGroup(Base):
             "name": self.name,
             "color": self.color,
             "accounts_count": accounts_count,
-            "created_at": self.created_at.isoformat()
+            "created_at": _utc_iso(self.created_at)
         }
 
 
@@ -105,8 +114,8 @@ class Proxy(Base):
             "geo": self.geo,
             "external_ip": self.external_ip,
             "accounts_count": accounts_count,
-            "last_checked_at": self.last_checked_at.isoformat() if self.last_checked_at else None,
-            "created_at": self.created_at.isoformat()
+            "last_checked_at": _utc_iso(self.last_checked_at),
+            "created_at": _utc_iso(self.created_at)
         }
 
     def get_connection_string(self):
@@ -194,24 +203,24 @@ class Account(Base):
             "status": self.status,
             "spamblock": self.spamblock,
             "geo": self.geo,
-            "register_time": self.register_time.isoformat() if self.register_time else None,
+            "register_time": _utc_iso(self.register_time),
             "api_id": self.api_id,
             "api_hash": self.api_hash,
             "device_fingerprint": self.device_fingerprint,
-            "fingerprint_locked_at": self.fingerprint_locked_at.isoformat() if self.fingerprint_locked_at else None,
+            "fingerprint_locked_at": _utc_iso(self.fingerprint_locked_at),
             "has_2fa": self.has_2fa,
             "password_hint": self.password_hint,
             "two_fa_password": self._decrypt_2fa_password(),
-            "two_fa_set_at": self.two_fa_set_at.isoformat() if self.two_fa_set_at else None,
+            "two_fa_set_at": _utc_iso(self.two_fa_set_at),
             "metadata": self.extra_data,
             "proxy": proxy_dict,
             "proxy_id": self.proxy_id,
             "group": group_dict,
             "group_id": self.group_id,
             "tags": tags_list,
-            "last_checked_at": self.last_checked_at.isoformat() if self.last_checked_at else None,
-            "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
-            "created_at": self.created_at.isoformat()
+            "last_checked_at": _utc_iso(self.last_checked_at),
+            "last_used_at": _utc_iso(self.last_used_at),
+            "created_at": _utc_iso(self.created_at)
         }
 
     def _decrypt_2fa_password(self) -> Optional[str]:
@@ -275,6 +284,7 @@ class Task(Base):
         backref="tasks"
     )
     logs: Mapped[List["TaskLog"]] = relationship(back_populates="task", cascade="all, delete-orphan")
+    target_channels: Mapped[List["TargetChannel"]] = relationship(back_populates="task", cascade="all, delete-orphan")
 
     def to_dict(self):
         accounts_count = 0
@@ -293,11 +303,11 @@ class Task(Base):
             "max_delay": self.max_delay,
             "max_concurrent": self.max_concurrent,
             "last_error": self.last_error,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
-            "created_at": self.created_at.isoformat(),
+            "started_at": _utc_iso(self.started_at),
+            "completed_at": _utc_iso(self.completed_at),
+            "created_at": _utc_iso(self.created_at),
             "accounts_count": accounts_count,
-            "progress": round(self.completed_actions / self.total_actions * 100, 1) if self.total_actions > 0 else 0
+            "progress": min(100.0, round((self.completed_actions + self.failed_actions) / self.total_actions * 100, 1)) if self.total_actions > 0 else 0
         }
 
 
@@ -337,7 +347,7 @@ class TaskLog(Base):
             "message": self.message,
             "error": self.error,
             "extra_data": self.extra_data,
-            "created_at": self.created_at.isoformat()
+            "created_at": _utc_iso(self.created_at)
         }
 
 
@@ -357,7 +367,7 @@ class CommentTemplate(Base):
             "name": self.name,
             "content": self.content,
             "is_default": self.is_default,
-            "created_at": self.created_at.isoformat()
+            "created_at": _utc_iso(self.created_at)
         }
 
 
@@ -382,6 +392,9 @@ class TargetChannel(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+    # Relationships
+    task: Mapped["Task"] = relationship(back_populates="target_channels")
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -394,7 +407,7 @@ class TargetChannel(Base):
             "error_message": self.error_message,
             "last_post_id": self.last_post_id,
             "comments_sent": self.comments_sent,
-            "created_at": self.created_at.isoformat()
+            "created_at": _utc_iso(self.created_at)
         }
 
 
@@ -472,7 +485,7 @@ class AccountBlacklist(Base):
             "reason": self.reason,
             "module_name": self.module_name,
             "error_message": self.error_message,
-            "created_at": self.created_at.isoformat(),
+            "created_at": _utc_iso(self.created_at),
         }
 
 
@@ -519,7 +532,7 @@ class CommentHistory(Base):
             "ai_generated": self.ai_generated,
             "ai_model": self.ai_model,
             "ai_prompt_name": self.ai_prompt_name,
-            "created_at": self.created_at.isoformat(),
+            "created_at": _utc_iso(self.created_at),
         }
 
 
@@ -547,5 +560,5 @@ class AIPromptTemplate(Base):
             "temperature": self.temperature,
             "max_length": self.max_length,
             "is_default": self.is_default,
-            "created_at": self.created_at.isoformat(),
+            "created_at": _utc_iso(self.created_at),
         }
