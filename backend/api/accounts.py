@@ -1824,7 +1824,7 @@ async def parse_import_files(
 @router.post("/import/parse-tdata")
 async def parse_tdata_folder(
     tdata_files: List[UploadFile] = File(default=[]),
-    # Paths are sent as form fields: path_0, path_1, etc.
+    session: AsyncSession = Depends(get_session),
 ):
     """
     Parse tdata folder files (uploaded as individual files with paths).
@@ -1847,13 +1847,15 @@ async def parse_tdata_folder(
 
     try:
         # Group files by their tdata root path
-        # Path format: "parent/account1/tdata/key_data" -> group by "parent/account1/tdata"
+        # Supports:
+        #   1) Standard: "parent/account1/tdata/key_data" -> group by "parent/account1/tdata"
+        #   2) Non-standard names: "tdata-1/key_data", "tdata-9/D877.../map0" -> group by "tdata-1", "tdata-9"
         tdata_groups: dict[str, list[tuple[UploadFile, str]]] = {}
 
         for file in tdata_files:
             filename = file.filename or ""
             normalized = filename.replace('\\', '/')
-            # Find tdata path in filename
+            # Strategy 1: path contains /tdata/ subfolder (standard structure)
             match = re.search(r'^(.*?/tdata|tdata)/', normalized)
             if match:
                 tdata_root = match.group(1)
@@ -1866,29 +1868,30 @@ async def parse_tdata_folder(
                     tdata_groups[tdata_root] = []
                 tdata_groups[tdata_root].append((file, rel_path))
 
-        # Fallback: selected folder IS a tdata folder (not named "tdata")
-        # Detect by presence of key_data/key_datas among uploaded files
+        # Fallback: folders are tdata themselves but named differently (tdata-1, tdata-9, etc.)
+        # Group files by their top-level folder, then validate each group has key_data
         if not tdata_groups:
-            has_key_data = any(
-                (f.filename or "").replace('\\', '/').split('/')[-1] in ("key_data", "key_datas")
-                for f in tdata_files
-            )
-            if has_key_data:
-                # Determine root folder name from first file
-                root_folder = None
-                for f in tdata_files:
-                    normalized = (f.filename or "").replace('\\', '/')
-                    parts = normalized.split('/')
-                    if len(parts) >= 2:
-                        root_folder = parts[0]
-                        break
-                if root_folder:
-                    for f in tdata_files:
-                        normalized = (f.filename or "").replace('\\', '/')
-                        prefix = root_folder + '/'
-                        if normalized.startswith(prefix):
-                            rel_path = normalized[len(prefix):]
-                            tdata_groups.setdefault(root_folder, []).append((f, rel_path))
+            # Collect all files grouped by their root folder
+            root_groups: dict[str, list[tuple[UploadFile, str]]] = {}
+            for f in tdata_files:
+                normalized = (f.filename or "").replace('\\', '/')
+                parts = normalized.split('/')
+                if len(parts) >= 2:
+                    root = parts[0]
+                    rel_path = '/'.join(parts[1:])
+                    root_groups.setdefault(root, []).append((f, rel_path))
+                else:
+                    # Single file without folder — skip
+                    pass
+
+            # Only include groups that have key_data/key_datas (valid tdata folders)
+            for root, group_files in root_groups.items():
+                has_key = any(
+                    rp.split('/')[-1] in ("key_data", "key_datas")
+                    for _, rp in group_files
+                )
+                if has_key:
+                    tdata_groups[root] = group_files
 
         if not tdata_groups:
             return {
@@ -1964,10 +1967,47 @@ async def parse_tdata_folder(
             "error": f"Failed to process tdata folders: {str(e)}"
         })
 
+    # Deduplicate within batch (same tdata uploaded multiple times)
+    seen_sessions: set[str] = set()
+    unique_accounts = []
+    for acc in parsed_accounts:
+        ss = acc["session_string"]
+        if ss in seen_sessions:
+            errors.append({
+                "file": acc["source_file"],
+                "error": "Duplicate account in batch (same session)"
+            })
+            continue
+        seen_sessions.add(ss)
+        unique_accounts.append(acc)
+
+    # Check DB for already existing accounts with same session_string
+    if unique_accounts:
+        existing_sessions = set()
+        for acc in unique_accounts:
+            result = await session.execute(
+                select(Account.session_string).where(
+                    Account.session_string == acc["session_string"]
+                )
+            )
+            if result.scalar_one_or_none():
+                existing_sessions.add(acc["session_string"])
+
+        final_accounts = []
+        for acc in unique_accounts:
+            if acc["session_string"] in existing_sessions:
+                errors.append({
+                    "file": acc["source_file"],
+                    "error": "Account already exists in database"
+                })
+            else:
+                final_accounts.append(acc)
+        unique_accounts = final_accounts
+
     return {
-        "accounts": parsed_accounts,
+        "accounts": unique_accounts,
         "errors": errors,
-        "total_parsed": len(parsed_accounts),
+        "total_parsed": len(unique_accounts),
         "total_errors": len(errors)
     }
 

@@ -283,48 +283,62 @@ function handleFileSelect(event: Event) {
 function handleFolderSelect(event: Event) {
   const input = event.target as HTMLInputElement
   if (input.files && input.files.length > 0) {
-    // Filter tdata-relevant files from selected folder (can contain multiple tdata folders)
     const files = Array.from(input.files)
 
-    // Strategy 1: path contains /tdata/ subfolder
-    let tdataRelevant = files.filter(f => {
+    // Group files by their top-level subfolder (relative to selected folder)
+    // webkitRelativePath: "selected_folder/subfolder/file" or "selected_folder/file"
+    const folderGroups = new Map<string, File[]>()
+    for (const f of files) {
       const path = (f.webkitRelativePath || f.name).replace(/\\/g, '/')
-      const hasTdata = path.startsWith('tdata/') || path.includes('/tdata/')
-      const isRelevantFile = path.includes('key_data') || /[0-9A-F]{16}/.test(path)
-      return hasTdata && isRelevantFile
+      const parts = path.split('/')
+      // parts[0] is the selected folder, parts[1] is the subfolder or file
+      if (parts.length >= 3) {
+        // File is inside a subfolder: group by subfolder name
+        const subfolder = parts[1]
+        if (!folderGroups.has(subfolder)) folderGroups.set(subfolder, [])
+        folderGroups.get(subfolder)!.push(f)
+      } else if (parts.length === 2) {
+        // File is directly in the selected folder — use root key
+        if (!folderGroups.has('__root__')) folderGroups.set('__root__', [])
+        folderGroups.get('__root__')!.push(f)
+      }
+    }
+
+    // Detect tdata folders: any group that contains key_data/key_datas
+    let tdataRelevant: File[] = []
+    let tdataCount = 0
+
+    // Check if the selected folder itself is a tdata folder (key_data at root level)
+    const rootFiles = folderGroups.get('__root__') || []
+    const rootIsTdata = rootFiles.some(f => {
+      const name = f.name.toLowerCase()
+      return name === 'key_data' || name === 'key_datas'
     })
 
-    // Strategy 2: selected folder IS a tdata folder (named differently, e.g. tdata_unauth)
-    // Detect by presence of key_data/key_datas at root level
-    if (tdataRelevant.length === 0) {
-      const hasKeyData = files.some(f => {
-        const path = (f.webkitRelativePath || f.name).replace(/\\/g, '/')
-        const parts = path.split('/')
-        return parts.length === 2 && (parts[1] === 'key_data' || parts[1] === 'key_datas')
-      })
-      if (hasKeyData) {
-        tdataRelevant = files.filter(f => {
-          const path = (f.webkitRelativePath || f.name).replace(/\\/g, '/')
-          return path.includes('key_data') || /[0-9A-F]{16}/.test(path)
+    if (rootIsTdata) {
+      // The entire selected folder is one tdata — include all files
+      tdataRelevant = files
+      tdataCount = 1
+    } else {
+      // Check each subfolder for key_data
+      for (const [key, groupFiles] of folderGroups) {
+        if (key === '__root__') continue
+        const hasTdata = groupFiles.some(f => {
+          const name = f.name.toLowerCase()
+          return name === 'key_data' || name === 'key_datas'
         })
+        if (hasTdata) {
+          tdataRelevant.push(...groupFiles)
+          tdataCount++
+        }
       }
     }
 
     if (tdataRelevant.length > 0) {
-      // Count unique tdata folders found
-      const tdataFolders = new Set<string>()
-      tdataRelevant.forEach(f => {
-        const path = (f.webkitRelativePath || f.name).replace(/\\/g, '/')
-        // Match tdata at start or as subfolder
-        const match = path.match(/^(tdata|.+\/tdata)\//)
-        if (match) tdataFolders.add(match[1])
-      })
-
-      const count = tdataFolders.size || 1
       toast.add({
         severity: 'info',
         summary: t('accounts.importFlow.tdataFound'),
-        detail: t('accounts.importFlow.tdataFoundCount', { count }),
+        detail: t('accounts.importFlow.tdataFoundCount', { count: tdataCount }),
         life: 3000
       })
 
@@ -347,68 +361,116 @@ async function handleFileDrop(event: DragEvent) {
   if (parsing.value || !event.dataTransfer) return
 
   const items = event.dataTransfer.items
-  const files: File[] = []
-  const folderFiles: File[] = []
+  const regularFiles: File[] = []
 
-  // Process items to detect folders vs files
+  // Two-pass approach:
+  // 1) Collect ALL files from each top-level entry, grouped by top-level folder
+  // 2) Determine which folders are tdata (contain key_data), include ALL their files
   if (items && items.length > 0) {
-    const processEntry = async (entry: FileSystemEntry, path = ''): Promise<void> => {
+    // Map: top-level entry name -> all files inside it
+    const topLevelGroups = new Map<string, File[]>()
+    const topLevelFiles: File[] = [] // files dropped directly (not in folders)
+
+    const readAllFiles = async (entry: FileSystemEntry, path = ''): Promise<File[]> => {
+      const result: File[] = []
       if (entry.isFile) {
         const fileEntry = entry as FileSystemFileEntry
-        const file = await new Promise<File>((resolve) => {
-          fileEntry.file((f) => {
-            // Attach relative path
-            Object.defineProperty(f, 'webkitRelativePath', {
-              value: path + f.name,
-              writable: false
-            })
-            resolve(f)
-          })
+        const file = await new Promise<File>((resolve, reject) => {
+          fileEntry.file(
+            (f) => {
+              Object.defineProperty(f, 'webkitRelativePath', {
+                value: path + f.name,
+                writable: false
+              })
+              resolve(f)
+            },
+            (err) => reject(err)
+          )
         })
-        // Check if it's a tdata-related file
-        const fullPath = path + file.name
-        if (fullPath.includes('key_data') ||
-            fullPath.includes('key_datas') ||
-            /D877F783D5D3EF8C/.test(fullPath) ||
-            /[0-9A-F]{16}/.test(file.name)) {
-          folderFiles.push(file)
-        } else if (file.name.endsWith('.session') || file.name.endsWith('.json') || file.name.endsWith('.zip')) {
-          files.push(file)
-        }
+        result.push(file)
       } else if (entry.isDirectory) {
         const dirEntry = entry as FileSystemDirectoryEntry
         const reader = dirEntry.createReader()
-        const entries = await new Promise<FileSystemEntry[]>((resolve) => {
-          reader.readEntries((e) => resolve(e))
-        })
-        for (const childEntry of entries) {
-          await processEntry(childEntry, path + entry.name + '/')
+        let allEntries: FileSystemEntry[] = []
+        let batch: FileSystemEntry[]
+        do {
+          batch = await new Promise<FileSystemEntry[]>((resolve, reject) => {
+            reader.readEntries(
+              (e) => resolve(e),
+              (err) => reject(err)
+            )
+          })
+          allEntries = allEntries.concat(batch)
+        } while (batch.length > 0)
+        for (const childEntry of allEntries) {
+          const childFiles = await readAllFiles(childEntry, path + entry.name + '/')
+          result.push(...childFiles)
+        }
+      }
+      return result
+    }
+
+    // IMPORTANT: Collect all entries synchronously FIRST!
+    // DataTransfer.items is cleared after the first await in Chromium/Electron.
+    const entries: FileSystemEntry[] = []
+    for (let i = 0; i < items.length; i++) {
+      const entry = items[i].webkitGetAsEntry()
+      if (entry) entries.push(entry)
+    }
+
+    // Now process entries asynchronously
+    for (const entry of entries) {
+      try {
+        if (entry.isDirectory) {
+          const files = await readAllFiles(entry)
+          topLevelGroups.set(entry.name, files)
+        } else {
+          const files = await readAllFiles(entry)
+          topLevelFiles.push(...files)
+        }
+      } catch (err) {
+        addImportLog('error', `Ошибка чтения: ${entry.name} - ${err}`)
+      }
+    }
+
+    // Classify each top-level folder: tdata (has key_data) or not
+    const allTdataFiles: File[] = []
+    for (const [, groupFiles] of topLevelGroups) {
+      const hasTdata = groupFiles.some(f => {
+        const name = f.name.toLowerCase()
+        return name === 'key_data' || name === 'key_datas'
+      })
+      if (hasTdata) {
+        allTdataFiles.push(...groupFiles)
+      } else {
+        // Not a tdata folder — check individual files
+        for (const f of groupFiles) {
+          if (f.name.endsWith('.session') || f.name.endsWith('.json') || f.name.endsWith('.zip')) {
+            regularFiles.push(f)
+          }
         }
       }
     }
 
-    for (let i = 0; i < items.length; i++) {
-      const entry = items[i].webkitGetAsEntry()
-      if (entry) {
-        await processEntry(entry)
+    // Check top-level files (not in folders)
+    for (const f of topLevelFiles) {
+      if (f.name.endsWith('.session') || f.name.endsWith('.json') || f.name.endsWith('.zip')) {
+        regularFiles.push(f)
       }
     }
-  }
 
-  // Process both types if found
-  if (folderFiles.length > 0 || files.length > 0) {
-    // Process tdata files if found
-    if (folderFiles.length > 0) {
-      tdataFiles.value = folderFiles
+    // Process tdata files
+    if (allTdataFiles.length > 0) {
+      tdataFiles.value = allTdataFiles
       await parseTdataFolder()
     }
-    // Process regular files (session/json/zip) if found
-    if (files.length > 0) {
-      await addFiles(files)
+    // Process regular files
+    if (regularFiles.length > 0) {
+      await addFiles(regularFiles)
     }
   }
   // Fallback to simple file list
-  else if (event.dataTransfer.files.length > 0) {
+  if (regularFiles.length === 0 && tdataFiles.value.length === 0 && event.dataTransfer.files.length > 0) {
     await addFiles(Array.from(event.dataTransfer.files))
   }
 }
@@ -463,6 +525,9 @@ async function parseTdataFolder() {
       newAccounts.forEach((acc: any, i: number) => {
         addImportLog('info', `Аккаунт ${i + 1}: ${acc.source_file || 'tdata'}, session=${!!acc.session_string}`)
       })
+    } else if (result.errors?.length > 0) {
+      // All accounts were duplicates or had errors — already shown as toasts above
+      addImportLog('warn', `Все ${result.total_errors} аккаунт(ов) пропущены (дубликаты или ошибки)`)
     } else {
       addImportLog('warn', 'Не удалось распарсить аккаунты')
       toast.add({
