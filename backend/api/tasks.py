@@ -2,8 +2,8 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session, joinedload
+from pydantic import BaseModel, Field, model_validator
+from sqlalchemy.orm import Session, subqueryload
 
 from database.database import get_db
 from database.models import (
@@ -33,6 +33,12 @@ class CreateLikesTaskRequest(BaseModel):
     max_delay: float = Field(120.0, ge=1, le=3600, description="Max delay between actions (seconds)")
     max_concurrent: int = Field(1, ge=1, le=10, description="Max concurrent executions")
 
+    @model_validator(mode='after')
+    def validate_delays(self):
+        if self.min_delay > self.max_delay:
+            self.min_delay, self.max_delay = self.max_delay, self.min_delay
+        return self
+
 
 class CommentsTaskConfig(BaseModel):
     """Configuration for comments task."""
@@ -61,6 +67,12 @@ class CreateCommentsTaskRequest(BaseModel):
     total_actions: int = Field(10, ge=1, le=10000, description="Number of comments to send")
     min_delay: float = Field(30.0, ge=1, le=3600, description="Min delay between actions")
     max_delay: float = Field(120.0, ge=1, le=3600, description="Max delay between actions")
+
+    @model_validator(mode='after')
+    def validate_delays(self):
+        if self.min_delay > self.max_delay:
+            self.min_delay, self.max_delay = self.max_delay, self.min_delay
+        return self
 
 
 class CommentTemplateRequest(BaseModel):
@@ -160,7 +172,7 @@ async def get_tasks(
     db: Session = Depends(get_db)
 ):
     """Get all tasks with optional filters."""
-    query = db.query(Task).options(joinedload(Task.accounts))
+    query = db.query(Task).options(subqueryload(Task.accounts))
 
     if task_type:
         query = query.filter(Task.task_type == task_type)
@@ -174,7 +186,7 @@ async def get_tasks(
 @router.get("/active", response_model=List[TaskResponse])
 async def get_active_tasks(db: Session = Depends(get_db)):
     """Get all active (running or pending) tasks."""
-    tasks = db.query(Task).options(joinedload(Task.accounts)).filter(
+    tasks = db.query(Task).options(subqueryload(Task.accounts)).filter(
         Task.status.in_(["pending", "running"])
     ).order_by(Task.created_at.desc()).all()
     return [task.to_dict() for task in tasks]
@@ -433,8 +445,8 @@ async def create_likes_task(request: CreateLikesTaskRequest, db: Session = Depen
 
     # Normalize channel
     channel = request.config.channel.strip()
-    if channel.startswith("https://t.me/"):
-        channel = "@" + channel.replace("https://t.me/", "").split("/")[0]
+    if channel.startswith("https://t.me/") or channel.startswith("http://t.me/"):
+        channel = "@" + channel.split("t.me/")[1].split("/")[0]
     elif not channel.startswith("@"):
         channel = "@" + channel
 
@@ -442,7 +454,9 @@ async def create_likes_task(request: CreateLikesTaskRequest, db: Session = Depen
     if request.config.emoji_mode not in ("single", "random", "all"):
         raise HTTPException(status_code=400, detail="emoji_mode must be 'single', 'random', or 'all'")
 
-    # Create task
+    # Create task — each account sends one reaction, so total = accounts count
+    total = len(accounts)
+
     task = Task(
         task_type="likes",
         status="pending",
@@ -452,7 +466,7 @@ async def create_likes_task(request: CreateLikesTaskRequest, db: Session = Depen
             "reactions": request.config.reactions,
             "emoji_mode": request.config.emoji_mode,
         },
-        total_actions=request.total_actions,
+        total_actions=total,
         min_delay=request.min_delay,
         max_delay=request.max_delay,
         max_concurrent=request.max_concurrent
@@ -482,8 +496,8 @@ async def create_comments_task(request: CreateCommentsTaskRequest, db: Session =
     channels = []
     for ch in request.config.channels:
         ch = ch.strip()
-        if ch.startswith("https://t.me/"):
-            ch = "@" + ch.replace("https://t.me/", "").split("/")[0]
+        if ch.startswith("https://t.me/") or ch.startswith("http://t.me/"):
+            ch = "@" + ch.split("t.me/")[1].split("/")[0]
         elif not ch.startswith("@"):
             ch = "@" + ch
         channels.append(ch)
@@ -533,7 +547,7 @@ async def create_comments_task(request: CreateCommentsTaskRequest, db: Session =
 @router.get("/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: int, db: Session = Depends(get_db)):
     """Get a specific task by ID."""
-    task = db.query(Task).options(joinedload(Task.accounts)).filter(Task.id == task_id).first()
+    task = db.query(Task).options(subqueryload(Task.accounts)).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task.to_dict()
@@ -572,7 +586,7 @@ async def start_task(task_id: int, db: Session = Depends(get_db)):
     from workers.comments_worker import start_comments_task
     from workers.task_queue import task_queue
 
-    task = db.query(Task).options(joinedload(Task.accounts)).filter(Task.id == task_id).first()
+    task = db.query(Task).options(subqueryload(Task.accounts)).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 

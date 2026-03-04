@@ -70,6 +70,9 @@ REACTIONS_MAP = {
 }
 
 
+SKIP_ACCOUNT_STATUSES = {"banned", "spamblock", "session_expired", "invalid", "deactivated"}
+
+
 class LikesWorker:
     """
     Worker for executing likes (reactions) tasks.
@@ -103,6 +106,11 @@ class LikesWorker:
             # Delay between connections to avoid suspicion
             if i > 0:
                 await asyncio.sleep(random.uniform(0.5, 1.5))
+
+            if account.status in SKIP_ACCOUNT_STATUSES:
+                logger.warning(f"Account {account.id}: status {account.status}, skipping")
+                self._failed_accounts.add(account.id)
+                continue
 
             if not account.session_string:
                 logger.warning(f"Account {account.id}: no session string, skipping")
@@ -523,6 +531,7 @@ class LikesWorker:
                 # Phase 5: Send reactions with round-robin
                 completed = task.completed_actions
                 failed = task.failed_actions
+                done_accounts: set = set()  # accounts that already reacted
                 account_cycle = itertools.cycle(active_ids)
 
                 while completed + failed < task.total_actions:
@@ -535,33 +544,35 @@ class LikesWorker:
 
                     await pause_event.wait()
 
-                    # Get next active account (skip failed and rate-limited)
-                    account_id = next(account_cycle)
-                    attempts = 0
-                    while (
-                        account_id in self._failed_accounts
-                        or self._is_account_rate_limited(account_id)
-                    ):
-                        account_id = next(account_cycle)
-                        attempts += 1
-                        if attempts >= len(active_ids):
-                            # All accounts failed or rate-limited
-                            all_failed = all(
-                                aid in self._failed_accounts for aid in active_ids
-                            )
-                            if all_failed:
-                                task.status = "failed"
-                                task.last_error = "All accounts excluded from rotation"
-                                task.completed_at = datetime.now(timezone.utc)
-                                db.commit()
-                                return
-                            # All rate-limited — wait a bit and retry
-                            logger.info("All accounts rate-limited, cooling down 60s")
-                            await asyncio.sleep(60)
+                    # Find next available account (skip failed, done, rate-limited)
+                    account_id = None
+                    for _ in range(len(active_ids)):
+                        candidate = next(account_cycle)
+                        if (
+                            candidate not in self._failed_accounts
+                            and candidate not in done_accounts
+                            and not self._is_account_rate_limited(candidate)
+                        ):
+                            account_id = candidate
                             break
+
+                    if account_id is None:
+                        # No available account right now
+                        all_exhausted = all(
+                            aid in self._failed_accounts or aid in done_accounts
+                            for aid in active_ids
+                        )
+                        if all_exhausted:
+                            logger.info(f"Task {self.task_id}: all accounts exhausted")
+                            break
+                        # Some accounts are just rate-limited — wait and retry
+                        logger.info("All accounts rate-limited, cooling down 60s")
+                        await asyncio.sleep(60)
+                        continue
 
                     # Pick reaction(s) for this action
                     emojis = self._pick_reaction(filtered_reactions, emoji_mode, completed)
+                    account_had_success = False
 
                     for emoji in emojis:
                         if completed + failed >= task.total_actions:
@@ -592,6 +603,7 @@ class LikesWorker:
                             completed += 1
                             task.completed_actions = completed
                             self._record_account_action(account_id)
+                            account_had_success = True
                             if account:
                                 account.last_used_at = datetime.now(timezone.utc)
                         else:
@@ -612,6 +624,10 @@ class LikesWorker:
                                 )
                             except Exception as e:
                                 logger.warning(f"Progress callback error: {e}")
+
+                    # Mark account as done after processing all emojis
+                    if account_had_success:
+                        done_accounts.add(account_id)
 
                     # Delay between actions
                     if completed + failed < task.total_actions:

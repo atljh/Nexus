@@ -260,8 +260,8 @@ class CommentsWorker:
         """Initialize target channels in database."""
         targets = []
         for channel in channels:
-            if channel.startswith("https://t.me/"):
-                channel = "@" + channel.replace("https://t.me/", "").split("/")[0]
+            if channel.startswith("https://t.me/") or channel.startswith("http://t.me/"):
+                channel = "@" + channel.split("t.me/")[1].split("/")[0]
             elif not channel.startswith("@"):
                 channel = "@" + channel
 
@@ -1047,6 +1047,11 @@ class CommentsWorker:
             await pause_event.wait()
 
             async with handler_lock:
+                if cancel_event.is_set():
+                    return
+                if task.total_actions > 0 and completed >= task.total_actions:
+                    return
+
                 chat = await event.get_chat()
                 channel_title = getattr(chat, 'title', '')
                 channel_username = getattr(chat, 'username', '')
@@ -1112,6 +1117,9 @@ class CommentsWorker:
                         self._account_comment_count.get(commenting_account.id, 0) + 1
                     self._record_account_action(commenting_account.id)
                 else:
+                    task.failed_actions += 1
+                    if result.error:
+                        task.last_error = result.error
                     # FLOOD_WAIT / SLOW_MODE — sleep before next action
                     if result.wait_seconds:
                         wait = min(result.wait_seconds, 300)
@@ -1159,7 +1167,7 @@ class CommentsWorker:
             # Remove event handler to prevent memory leak
             monitor_client.client.remove_event_handler(handler)
 
-        task.status = "completed" if completed > 0 else "cancelled"
+        task.status = "completed" if completed >= task.total_actions else "cancelled"
         task.completed_at = datetime.now(timezone.utc)
         db.commit()
         logger.info(f"Task {self.task_id} monitoring ended: {completed} comments sent")
