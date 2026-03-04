@@ -565,6 +565,7 @@ export default {
     tooltipStop: 'Stop',
     tooltipDetails: 'Details',
     tooltipDelete: 'Delete',
+    tooltipRestart: 'Restart',
     status: {
       pending: 'pending',
       running: 'running',
@@ -674,6 +675,7 @@ export default {
     tooltipStop: 'Stop',
     tooltipDetails: 'Details',
     tooltipDelete: 'Delete',
+    tooltipRestart: 'Restart',
     status: {
       pending: 'pending',
       running: 'running',
@@ -788,7 +790,11 @@ export default {
       pause: 'Pause',
       stop: 'Stop',
       delete: 'Delete',
+      restart: 'Restart',
       actionsOf: '{completed} of {total} actions done'
+    },
+    messages: {
+      restarted: 'Task restarted'
     },
     emojiModes: {
       single: 'Single',

@@ -291,6 +291,23 @@ export const useTaskStore = defineStore('task', () => {
     }
   }
 
+  async function restartTask(taskId: number): Promise<Task | null> {
+    try {
+      const response = await window.api.post(`/api/tasks/${taskId}/restart`, {}) as TaskResponse
+      const index = tasks.value.findIndex(t => t.id === taskId)
+      if (index >= 0) {
+        tasks.value[index] = response
+      }
+      if (currentTask.value?.id === taskId) {
+        currentTask.value = response
+      }
+      return response
+    } catch (e) {
+      console.error('Failed to restart task:', e)
+      return null
+    }
+  }
+
   // Polling for real-time updates
   function startPolling(intervalMs = 2000) {
     if (pollingInterval.value) return
@@ -355,6 +372,7 @@ export const useTaskStore = defineStore('task', () => {
     pauseTask,
     cancelTask,
     deleteTask,
+    restartTask,
     startPolling,
     stopPolling,
     $reset,

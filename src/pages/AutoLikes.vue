@@ -217,6 +217,17 @@ async function cancelTask(task: Task) {
   await taskStore.cancelTask(task.id)
 }
 
+async function restartTask(task: Task) {
+  const result = await taskStore.restartTask(task.id)
+  if (result) {
+    toast.add({
+      severity: 'success',
+      summary: t('taskResults.messages.restarted'),
+      life: 2000
+    })
+  }
+}
+
 async function deleteTask(task: Task) {
   await taskStore.deleteTask(task.id)
   toast.add({
@@ -565,6 +576,14 @@ onUnmounted(() => {
                   class="action-btn stop"
                   v-tooltip.top="t('autoLikes.tooltipStop')"
                   @click="cancelTask(task)"
+                />
+                <Button
+                  v-if="task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'"
+                  icon="pi pi-refresh"
+                  rounded
+                  class="action-btn restart"
+                  v-tooltip.top="t('autoLikes.tooltipRestart')"
+                  @click="restartTask(task)"
                 />
                 <Button
                   icon="pi pi-eye"
@@ -1281,6 +1300,12 @@ onUnmounted(() => {
   background: rgba(239, 68, 68, 0.15);
   border-color: rgba(239, 68, 68, 0.5);
   color: #ef4444;
+}
+
+.action-btn.restart:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.5);
+  color: #3b82f6;
 }
 
 .action-btn.view:hover {

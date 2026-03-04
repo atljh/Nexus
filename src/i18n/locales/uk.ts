@@ -565,6 +565,7 @@ export default {
     tooltipStop: 'Зупинити',
     tooltipDetails: 'Деталі',
     tooltipDelete: 'Видалити',
+    tooltipRestart: 'Перезапустити',
     status: {
       pending: 'очікує',
       running: 'виконується',
@@ -674,6 +675,7 @@ export default {
     tooltipStop: 'Зупинити',
     tooltipDetails: 'Деталі',
     tooltipDelete: 'Видалити',
+    tooltipRestart: 'Перезапустити',
     status: {
       pending: 'очікує',
       running: 'виконується',
@@ -788,7 +790,11 @@ export default {
       pause: 'Пауза',
       stop: 'Зупинити',
       delete: 'Видалити',
+      restart: 'Перезапустити',
       actionsOf: '{completed} з {total} дій виконано'
+    },
+    messages: {
+      restarted: 'Завдання перезапущено'
     },
     emojiModes: {
       single: 'Один',

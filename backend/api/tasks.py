@@ -646,6 +646,44 @@ async def pause_task(task_id: int, db: Session = Depends(get_db)):
     return task.to_dict()
 
 
+@router.post("/{task_id}/restart", response_model=TaskResponse)
+async def restart_task(task_id: int, db: Session = Depends(get_db)):
+    """Restart a completed/failed/cancelled task — reset counters and set to pending."""
+    task = db.query(Task).options(subqueryload(Task.accounts)).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status not in ["completed", "failed", "cancelled"]:
+        raise HTTPException(status_code=400, detail=f"Cannot restart task with status: {task.status}")
+
+    # Reset counters
+    task.completed_actions = 0
+    task.failed_actions = 0
+    task.progress = 0
+    task.last_error = None
+    task.started_at = None
+    task.completed_at = None
+    task.status = "pending"
+
+    # Recalculate total_actions for likes (accounts may have changed status)
+    if task.task_type == "likes":
+        valid_accounts = [a for a in task.accounts if a.status == "valid"]
+        task.total_actions = len(valid_accounts) if valid_accounts else len(task.accounts)
+
+    # Delete old logs
+    db.query(TaskLog).filter(TaskLog.task_id == task_id).delete()
+
+    # Reset target channels for comments tasks
+    if task.task_type == "comments":
+        db.query(TargetChannel).filter(TargetChannel.task_id == task_id).update(
+            {"comments_sent": 0, "status": "pending", "error_message": None}
+        )
+
+    db.commit()
+    db.refresh(task)
+    return task.to_dict()
+
+
 @router.post("/{task_id}/cancel", response_model=TaskResponse)
 async def cancel_task(task_id: int, db: Session = Depends(get_db)):
     """Cancel a task."""
