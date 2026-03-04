@@ -257,7 +257,7 @@ export interface CreateLikesTaskParams {
     emoji_mode: 'single' | 'random' | 'all'
   }
   account_ids: number[]
-  total_actions: number
+  total_actions?: number  // ignored by backend — auto-calculated from account count
   min_delay: number
   max_delay: number
   max_concurrent: number

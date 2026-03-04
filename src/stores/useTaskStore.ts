@@ -79,7 +79,9 @@ export const useTaskStore = defineStore('task', () => {
     try {
       const response = await window.api.get('/api/tasks/active') as TasksResponse
       const active = Array.isArray(response) ? response : (response.data || [])
-      // Update only active tasks in the list
+      const activeIds = new Set(active.map(t => t.id))
+
+      // Update active tasks in the list
       for (const activeTask of active) {
         const index = tasks.value.findIndex(t => t.id === activeTask.id)
         if (index >= 0) {
@@ -87,6 +89,15 @@ export const useTaskStore = defineStore('task', () => {
         } else {
           tasks.value.unshift(activeTask)
         }
+      }
+
+      // Detect tasks that were running but disappeared from active list
+      // (they completed, failed, or were cancelled on the backend)
+      const vanished = tasks.value.filter(
+        t => (t.status === 'running' || t.status === 'pending') && !activeIds.has(t.id)
+      )
+      for (const task of vanished) {
+        await fetchTask(task.id)
       }
     } catch (e) {
       console.error('Failed to fetch active tasks:', e)

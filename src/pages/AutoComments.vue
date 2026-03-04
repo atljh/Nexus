@@ -173,18 +173,20 @@ const pendingTasks = computed(() => taskStore.tasks.filter(t => t.status === 'pe
 
 // Batch actions
 async function startAllPending() {
-  for (const task of pendingTasks.value) {
+  const tasks = [...pendingTasks.value]
+  for (const task of tasks) {
     await taskStore.startTask(task.id)
   }
   toast.add({
     severity: 'info',
-    summary: t('autoComments.tasksStarted', { count: pendingTasks.value.length }),
+    summary: t('autoComments.tasksStarted', { count: tasks.length }),
     life: 2000
   })
 }
 
 async function stopAllRunning() {
-  for (const task of runningTasks.value) {
+  const tasks = [...runningTasks.value]
+  for (const task of tasks) {
     await taskStore.cancelTask(task.id)
   }
   toast.add({
@@ -236,9 +238,9 @@ async function deleteTemplate(template: CommentTemplate) {
   }
 }
 
-function loadDefaultTemplates() {
+async function loadDefaultTemplates() {
   for (const template of DEFAULT_COMMENT_TEMPLATES) {
-    taskStore.createTemplate(template.name, template.content)
+    await taskStore.createTemplate(template.name, template.content)
   }
   toast.add({
     severity: 'success',
@@ -716,7 +718,7 @@ onUnmounted(() => {
               <div class="task-progress-section">
                 <div class="progress-info">
                   <span class="progress-label">{{ t('autoComments.progress') }}</span>
-                  <span class="progress-value">{{ task.completed_actions }}/{{ task.total_actions }}</span>
+                  <span class="progress-value">{{ task.completed_actions + task.failed_actions }}/{{ task.total_actions }}</span>
                 </div>
                 <div class="progress-bar-container">
                   <div

@@ -31,7 +31,6 @@ const channel = ref('')
 const postId = ref<number | null>(null)
 const selectedReactions = ref<string[]>(['👍'])
 const emojiMode = ref<'single' | 'random' | 'all'>('single')
-const totalActions = ref(10)
 const minDelay = ref(30)
 const maxDelay = ref(120)
 const maxConcurrent = ref(1)
@@ -133,7 +132,6 @@ async function createTask() {
         emoji_mode: emojiMode.value
       },
       account_ids: selectedAccountIds.value,
-      total_actions: totalActions.value,
       min_delay: minDelay.value,
       max_delay: maxDelay.value,
       max_concurrent: maxConcurrent.value
@@ -175,18 +173,20 @@ const runningTasks = computed(() => taskStore.tasks.filter(t => t.status === 'ru
 const pendingTasks = computed(() => taskStore.tasks.filter(t => t.status === 'pending' || t.status === 'paused'))
 // Batch actions
 async function startAllPending() {
-  for (const task of pendingTasks.value) {
+  const tasks = [...pendingTasks.value]
+  for (const task of tasks) {
     await taskStore.startTask(task.id)
   }
   toast.add({
     severity: 'info',
-    summary: t('autoLikes.tasksStarted', { count: pendingTasks.value.length }),
+    summary: t('autoLikes.tasksStarted', { count: tasks.length }),
     life: 2000
   })
 }
 
 async function stopAllRunning() {
-  for (const task of runningTasks.value) {
+  const tasks = [...runningTasks.value]
+  for (const task of tasks) {
     await taskStore.cancelTask(task.id)
   }
   toast.add({
@@ -404,19 +404,6 @@ onUnmounted(() => {
                 </div>
                 <div class="form-grid-2">
                   <div class="form-group">
-                    <label class="form-label">{{ t('autoLikes.totalReactions') }}</label>
-                    <InputNumber
-                      v-model="totalActions"
-                      :min="1"
-                      :max="10000"
-                      class="w-full"
-                      showButtons
-                      buttonLayout="horizontal"
-                      decrementButtonClass="decrement-btn"
-                      incrementButtonClass="increment-btn"
-                    />
-                  </div>
-                  <div class="form-group">
                     <label class="form-label">{{ t('autoLikes.concurrent') }}</label>
                     <InputNumber
                       v-model="maxConcurrent"
@@ -543,7 +530,7 @@ onUnmounted(() => {
               <div class="task-progress-section">
                 <div class="progress-info">
                   <span class="progress-label">{{ t('autoLikes.progress') }}</span>
-                  <span class="progress-value">{{ task.completed_actions }}/{{ task.total_actions }}</span>
+                  <span class="progress-value">{{ task.completed_actions + task.failed_actions }}/{{ task.total_actions }}</span>
                 </div>
                 <div class="progress-bar-container">
                   <div

@@ -28,7 +28,8 @@ export default {
     color: 'Колір',
     back: 'Назад',
     done: 'Готово',
-    or: 'або'
+    or: 'або',
+    configuration: 'Конфігурація'
   },
 
   nav: {
@@ -729,6 +730,73 @@ export default {
     proxyNotWorking: 'Проксі не працює. Перевірте або замініть проксі перед відкриттям WebK.',
     notValid: 'Статус акаунту не валідний',
     openInWebK: 'Відкрити у WebK'
+  },
+
+  taskResults: {
+    title: 'Результати завдання',
+    taskType: {
+      likes: 'Авто-лайки',
+      comments: 'Авто-коментарі'
+    },
+    status: {
+      pending: 'Очікує',
+      running: 'Виконується',
+      paused: 'Призупинено',
+      completed: 'Завершено',
+      failed: 'Помилка',
+      cancelled: 'Скасовано'
+    },
+    stats: {
+      success: 'Успішно',
+      errors: 'Помилки',
+      successRate: 'Успішність',
+      duration: 'Тривалість',
+      avgSpeed: 'Сер. час/дія',
+      accounts: 'Акаунтів'
+    },
+    config: {
+      channel: 'Канал',
+      reactions: 'Реакції',
+      emojiMode: 'Режим емоджі',
+      postId: 'ID поста',
+      delay: 'Затримка',
+      createdAt: 'Створено',
+      startedAt: 'Запущено',
+      completedAt: 'Завершено'
+    },
+    logs: {
+      title: 'Журнал виконання',
+      entries: '{count} записів',
+      all: 'Всі',
+      successful: 'Успішні',
+      failed: 'Помилки',
+      search: 'Пошук...'
+    },
+    time: {
+      justNow: 'щойно',
+      minutesAgo: '{count} хв тому',
+      hoursAgo: '{count} год тому',
+      daysAgo: '{count} дн тому',
+      seconds: 'сек',
+      minutes: 'хв',
+      hours: 'год',
+      lessThanSecond: '< 1 сек',
+      completedIn: 'Завершено за {time}'
+    },
+    actions: {
+      start: 'Запустити',
+      pause: 'Пауза',
+      stop: 'Зупинити',
+      delete: 'Видалити',
+      actionsOf: '{completed} з {total} дій виконано'
+    },
+    emojiModes: {
+      single: 'Один',
+      random: 'Випадковий',
+      all: 'Всі'
+    },
+    notFound: 'Завдання не знайдено',
+    loadError: 'Помилка завантаження'
   },
 
   errors: {

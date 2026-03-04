@@ -28,7 +28,8 @@ export default {
     color: 'Color',
     back: 'Back',
     done: 'Done',
-    or: 'or'
+    or: 'or',
+    configuration: 'Configuration'
   },
 
   nav: {
@@ -729,6 +730,73 @@ export default {
     proxyNotWorking: 'Proxy is not working. Check or replace the proxy before opening WebK.',
     notValid: 'Account status is not valid',
     openInWebK: 'Open in WebK'
+  },
+
+  taskResults: {
+    title: 'Task Results',
+    taskType: {
+      likes: 'Auto-Likes',
+      comments: 'Auto-Comments'
+    },
+    status: {
+      pending: 'Pending',
+      running: 'Running',
+      paused: 'Paused',
+      completed: 'Completed',
+      failed: 'Failed',
+      cancelled: 'Cancelled'
+    },
+    stats: {
+      success: 'Successful',
+      errors: 'Errors',
+      successRate: 'Success Rate',
+      duration: 'Duration',
+      avgSpeed: 'Avg. time/action',
+      accounts: 'Accounts'
+    },
+    config: {
+      channel: 'Channel',
+      reactions: 'Reactions',
+      emojiMode: 'Emoji Mode',
+      postId: 'Post ID',
+      delay: 'Delay',
+      createdAt: 'Created',
+      startedAt: 'Started',
+      completedAt: 'Completed'
+    },
+    logs: {
+      title: 'Execution Log',
+      entries: '{count} entries',
+      all: 'All',
+      successful: 'Successful',
+      failed: 'Errors',
+      search: 'Search...'
+    },
+    time: {
+      justNow: 'just now',
+      minutesAgo: '{count} min ago',
+      hoursAgo: '{count} hr ago',
+      daysAgo: '{count} d ago',
+      seconds: 's',
+      minutes: 'min',
+      hours: 'hr',
+      lessThanSecond: '< 1s',
+      completedIn: 'Completed in {time}'
+    },
+    actions: {
+      start: 'Start',
+      pause: 'Pause',
+      stop: 'Stop',
+      delete: 'Delete',
+      actionsOf: '{completed} of {total} actions done'
+    },
+    emojiModes: {
+      single: 'Single',
+      random: 'Random',
+      all: 'All'
+    },
+    notFound: 'Task not found',
+    loadError: 'Failed to load task'
   },
 
   errors: {

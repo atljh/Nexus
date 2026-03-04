@@ -14,7 +14,7 @@ import type { Task } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
-useI18n()
+const { t } = useI18n()
 const toast = useToast()
 const taskStore = useTaskStore()
 
@@ -55,7 +55,7 @@ const filteredLogs = computed(() => {
 // Task type label
 const taskTypeLabel = computed(() => {
   if (!task.value) return ''
-  return task.value.task_type === 'likes' ? 'Авто-лайки' : 'Авто-коментарі'
+  return t(`taskResults.taskType.${task.value.task_type}`)
 })
 
 // Task status info
@@ -63,12 +63,12 @@ const statusInfo = computed(() => {
   if (!task.value) return { label: '', severity: 'secondary' as const, icon: 'pi-question' }
 
   const statusMap: Record<string, { label: string; severity: 'success' | 'info' | 'warn' | 'danger' | 'secondary'; icon: string }> = {
-    pending: { label: 'Очікує', severity: 'warn', icon: 'pi-clock' },
-    running: { label: 'Виконується', severity: 'info', icon: 'pi-spin pi-spinner' },
-    paused: { label: 'Призупинено', severity: 'warn', icon: 'pi-pause' },
-    completed: { label: 'Завершено', severity: 'success', icon: 'pi-check-circle' },
-    failed: { label: 'Помилка', severity: 'danger', icon: 'pi-times-circle' },
-    cancelled: { label: 'Скасовано', severity: 'secondary', icon: 'pi-ban' }
+    pending: { label: t('taskResults.status.pending'), severity: 'warn', icon: 'pi-clock' },
+    running: { label: t('taskResults.status.running'), severity: 'info', icon: 'pi-spin pi-spinner' },
+    paused: { label: t('taskResults.status.paused'), severity: 'warn', icon: 'pi-pause' },
+    completed: { label: t('taskResults.status.completed'), severity: 'success', icon: 'pi-check-circle' },
+    failed: { label: t('taskResults.status.failed'), severity: 'danger', icon: 'pi-times-circle' },
+    cancelled: { label: t('taskResults.status.cancelled'), severity: 'secondary', icon: 'pi-ban' }
   }
 
   return statusMap[task.value.status] || { label: task.value.status, severity: 'secondary', icon: 'pi-question' }
@@ -78,8 +78,9 @@ const statusInfo = computed(() => {
 const stats = computed(() => {
   if (!task.value) return null
 
-  const successRate = task.value.completed_actions > 0
-    ? Math.round((task.value.completed_actions - task.value.failed_actions) / task.value.completed_actions * 100)
+  const totalDone = task.value.completed_actions + task.value.failed_actions
+  const successRate = totalDone > 0
+    ? Math.round(task.value.completed_actions / totalDone * 100)
     : 0
 
   const duration = task.value.started_at
@@ -104,18 +105,22 @@ const stats = computed(() => {
 
 // Format duration
 function formatDuration(ms: number): string {
-  if (ms < 1000) return '< 1 сек'
+  if (ms < 1000) return t('taskResults.time.lessThanSecond')
 
   const seconds = Math.floor(ms / 1000)
   const minutes = Math.floor(seconds / 60)
   const hours = Math.floor(minutes / 60)
 
+  const s = t('taskResults.time.seconds')
+  const m = t('taskResults.time.minutes')
+  const h = t('taskResults.time.hours')
+
   if (hours > 0) {
-    return `${hours} год ${minutes % 60} хв`
+    return `${hours} ${h} ${minutes % 60} ${m}`
   } else if (minutes > 0) {
-    return `${minutes} хв ${seconds % 60} сек`
+    return `${minutes} ${m} ${seconds % 60} ${s}`
   }
-  return `${seconds} сек`
+  return `${seconds} ${s}`
 }
 
 // Format date
@@ -139,10 +144,10 @@ function formatRelativeTime(date: string | null): string {
   const time = new Date(date).getTime()
   const diff = now - time
 
-  if (diff < 60000) return 'щойно'
-  if (diff < 3600000) return `${Math.floor(diff / 60000)} хв тому`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)} год тому`
-  return `${Math.floor(diff / 86400000)} дн тому`
+  if (diff < 60000) return t('taskResults.time.justNow')
+  if (diff < 3600000) return t('taskResults.time.minutesAgo', { count: Math.floor(diff / 60000) })
+  if (diff < 86400000) return t('taskResults.time.hoursAgo', { count: Math.floor(diff / 3600000) })
+  return t('taskResults.time.daysAgo', { count: Math.floor(diff / 86400000) })
 }
 
 // Channel status severity
@@ -218,7 +223,7 @@ async function loadTask() {
     }
   } catch (e) {
     console.error('Failed to load task:', e)
-    toast.add({ severity: 'error', summary: 'Помилка завантаження', life: 3000 })
+    toast.add({ severity: 'error', summary: t('taskResults.loadError'), life: 3000 })
   } finally {
     loading.value = false
   }
@@ -243,60 +248,15 @@ function stopPolling() {
   }
 }
 
-// Load test data for demo
-function loadTestData() {
-  task.value = {
-    id: taskId.value,
-    task_type: 'comments',
-    status: 'running',
-    config: {
-      channels: ['@durov', '@telegram', '@tech_news'],
-      templates: ['{Чудово|Супер}! {Дякую за пост|Цікава інформація}!', '{👍|🔥|💯}'],
-      rotation_mode: 'random',
-      comments_per_account: 10,
-      mode: 'single'
-    },
-    total_actions: 100,
-    completed_actions: 67,
-    failed_actions: 5,
-    progress: 67,
-    min_delay: 60,
-    max_delay: 300,
-    max_concurrent: 3,
-    accounts_count: 5,
-    created_at: new Date(Date.now() - 7200000).toISOString(),
-    started_at: new Date(Date.now() - 6800000).toISOString(),
-    completed_at: null,
-    last_error: null
-  }
-
-  // @ts-ignore - Setting test data directly
-  taskStore.taskLogs = [
-    { id: 1, task_id: taskId.value, account_id: 1, action_type: 'comment', target: '@durov/123', success: true, message: 'Коментар відправлено', error: null, extra_data: { comment: 'Супер! Дякую за пост!' }, created_at: new Date(Date.now() - 60000).toISOString() },
-    { id: 2, task_id: taskId.value, account_id: 2, action_type: 'comment', target: '@telegram/456', success: true, message: 'Коментар відправлено', error: null, extra_data: { comment: '🔥' }, created_at: new Date(Date.now() - 120000).toISOString() },
-    { id: 3, task_id: taskId.value, account_id: 3, action_type: 'comment', target: '@tech_news/789', success: false, message: null, error: 'FloodWait: 300 seconds', extra_data: null, created_at: new Date(Date.now() - 180000).toISOString() },
-    { id: 4, task_id: taskId.value, account_id: 1, action_type: 'comment', target: '@durov/124', success: true, message: 'Коментар відправлено', error: null, extra_data: { comment: 'Чудово! Цікава інформація!' }, created_at: new Date(Date.now() - 240000).toISOString() },
-    { id: 5, task_id: taskId.value, account_id: 4, action_type: 'comment', target: '@telegram/457', success: false, message: null, error: 'Comments are disabled', extra_data: null, created_at: new Date(Date.now() - 300000).toISOString() },
-    { id: 6, task_id: taskId.value, account_id: 2, action_type: 'comment', target: '@durov/125', success: true, message: 'Коментар відправлено', error: null, extra_data: { comment: '💯' }, created_at: new Date(Date.now() - 360000).toISOString() },
-    { id: 7, task_id: taskId.value, account_id: 5, action_type: 'comment', target: '@tech_news/790', success: true, message: 'Коментар відправлено', error: null, extra_data: { comment: 'Супер! Дякую за пост!' }, created_at: new Date(Date.now() - 420000).toISOString() },
-    { id: 8, task_id: taskId.value, account_id: 3, action_type: 'comment', target: '@telegram/458', success: true, message: 'Коментар відправлено', error: null, extra_data: { comment: 'Чудово! Цікава інформація!' }, created_at: new Date(Date.now() - 480000).toISOString() },
-  ]
-
-  // @ts-ignore - Setting test data directly
-  taskStore.targetChannels = [
-    { id: 1, task_id: taskId.value, channel_username: 'durov', channel_id: 123456, channel_title: 'Павло Дуров', status: 'joined', can_comment: true, error_message: null, comments_sent: 28, created_at: new Date().toISOString() },
-    { id: 2, task_id: taskId.value, channel_username: 'telegram', channel_id: 789012, channel_title: 'Telegram News', status: 'joined', can_comment: true, error_message: null, comments_sent: 25, created_at: new Date().toISOString() },
-    { id: 3, task_id: taskId.value, channel_username: 'tech_news', channel_id: null, channel_title: null, status: 'error', can_comment: false, error_message: 'Channel not found', comments_sent: 14, created_at: new Date().toISOString() },
-  ]
-}
-
 // Initialize
 onMounted(async () => {
   await loadTask()
 
-  // Load test data if task not found
+  // Redirect if task not found
   if (!task.value) {
-    loadTestData()
+    toast.add({ severity: 'warn', summary: t('taskResults.notFound'), life: 3000 })
+    router.replace('/auto-likes')
+    return
   }
 
   if (task.value?.status === 'running') {
@@ -344,7 +304,7 @@ watch(() => task.value?.status, (newStatus) => {
                 <span class="task-id">#{{ task.id }}</span>
                 <span class="task-type-badge">{{ taskTypeLabel }}</span>
               </div>
-              <h1>Результати завдання</h1>
+              <h1>{{ t('taskResults.title') }}</h1>
             </div>
           </div>
 
@@ -352,28 +312,28 @@ watch(() => task.value?.status, (newStatus) => {
             <Button
               v-if="task.status === 'pending' || task.status === 'paused'"
               icon="pi pi-play"
-              label="Запустити"
+              :label="t('taskResults.actions.start')"
               class="action-btn start"
               @click="startTask"
             />
             <Button
               v-if="task.status === 'running'"
               icon="pi pi-pause"
-              label="Пауза"
+              :label="t('taskResults.actions.pause')"
               class="action-btn pause"
               @click="pauseTask"
             />
             <Button
               v-if="task.status === 'running' || task.status === 'paused'"
               icon="pi pi-stop"
-              label="Зупинити"
+              :label="t('taskResults.actions.stop')"
               class="action-btn stop"
               @click="showConfirm('cancel')"
             />
             <Button
               v-if="task.status !== 'running'"
               icon="pi pi-trash"
-              label="Видалити"
+              :label="t('taskResults.actions.delete')"
               class="action-btn delete"
               @click="showConfirm('delete')"
             />
@@ -387,10 +347,10 @@ watch(() => task.value?.status, (newStatus) => {
             <div class="status-text">
               <span class="status-label">{{ statusInfo.label }}</span>
               <span v-if="task.status === 'running'" class="status-progress">
-                {{ task.completed_actions }} з {{ task.total_actions }} дій виконано
+                {{ t('taskResults.actions.actionsOf', { completed: task.completed_actions, total: task.total_actions }) }}
               </span>
               <span v-else-if="task.status === 'completed'" class="status-detail">
-                Завершено за {{ formatDuration(stats?.duration || 0) }}
+                {{ t('taskResults.time.completedIn', { time: formatDuration(stats?.duration || 0) }) }}
               </span>
               <span v-else-if="task.last_error" class="status-error">
                 {{ task.last_error }}
@@ -409,43 +369,43 @@ watch(() => task.value?.status, (newStatus) => {
           <div class="stat-card">
             <i class="pi pi-check-circle stat-icon success"></i>
             <div class="stat-content">
-              <span class="stat-value">{{ task.completed_actions - task.failed_actions }}</span>
-              <span class="stat-label">Успішно</span>
+              <span class="stat-value">{{ task.completed_actions }}</span>
+              <span class="stat-label">{{ t('taskResults.stats.success') }}</span>
             </div>
           </div>
           <div class="stat-card">
             <i class="pi pi-times-circle stat-icon danger"></i>
             <div class="stat-content">
               <span class="stat-value">{{ task.failed_actions }}</span>
-              <span class="stat-label">Помилки</span>
+              <span class="stat-label">{{ t('taskResults.stats.errors') }}</span>
             </div>
           </div>
           <div class="stat-card">
             <i class="pi pi-percentage stat-icon info"></i>
             <div class="stat-content">
               <span class="stat-value">{{ stats?.successRate || 0 }}%</span>
-              <span class="stat-label">Успішність</span>
+              <span class="stat-label">{{ t('taskResults.stats.successRate') }}</span>
             </div>
           </div>
           <div class="stat-card">
             <i class="pi pi-clock stat-icon warn"></i>
             <div class="stat-content">
               <span class="stat-value">{{ formatDuration(stats?.duration || 0) }}</span>
-              <span class="stat-label">Тривалість</span>
+              <span class="stat-label">{{ t('taskResults.stats.duration') }}</span>
             </div>
           </div>
           <div class="stat-card">
             <i class="pi pi-bolt stat-icon primary"></i>
             <div class="stat-content">
-              <span class="stat-value">{{ stats?.avgTimePerAction || 0 }}с</span>
-              <span class="stat-label">Сер. час/дія</span>
+              <span class="stat-value">{{ stats?.avgTimePerAction || 0 }}{{ t('taskResults.time.seconds') }}</span>
+              <span class="stat-label">{{ t('taskResults.stats.avgSpeed') }}</span>
             </div>
           </div>
           <div class="stat-card">
             <i class="pi pi-users stat-icon secondary"></i>
             <div class="stat-content">
               <span class="stat-value">{{ task.accounts_count || 0 }}</span>
-              <span class="stat-label">Акаунтів</span>
+              <span class="stat-label">{{ t('taskResults.stats.accounts') }}</span>
             </div>
           </div>
         </div>
@@ -458,25 +418,25 @@ watch(() => task.value?.status, (newStatus) => {
             <div class="config-card">
               <div class="card-header">
                 <i class="pi pi-cog"></i>
-                <h3>Конфігурація</h3>
+                <h3>{{ t('common.configuration') }}</h3>
               </div>
               <div class="config-content">
                 <!-- For Likes -->
                 <template v-if="task.task_type === 'likes'">
                   <div class="config-row">
-                    <span class="config-label">Канал</span>
+                    <span class="config-label">{{ t('taskResults.config.channel') }}</span>
                     <span class="config-value channel">{{ task.config?.channel }}</span>
                   </div>
                   <div class="config-row">
-                    <span class="config-label">Реакції</span>
+                    <span class="config-label">{{ t('taskResults.config.reactions') }}</span>
                     <span class="config-value emoji">{{ (task.config?.reactions || []).join(' ') }}</span>
                   </div>
                   <div v-if="task.config?.emoji_mode" class="config-row">
-                    <span class="config-label">Режим емодзі</span>
-                    <span class="config-value">{{ { single: 'Один', random: 'Випадковий', all: 'Всі' }[task.config.emoji_mode] || task.config.emoji_mode }}</span>
+                    <span class="config-label">{{ t('taskResults.config.emojiMode') }}</span>
+                    <span class="config-value">{{ t(`taskResults.emojiModes.${task.config.emoji_mode}`) }}</span>
                   </div>
                   <div v-if="task.config?.post_id" class="config-row">
-                    <span class="config-label">ID поста</span>
+                    <span class="config-label">{{ t('taskResults.config.postId') }}</span>
                     <span class="config-value">{{ task.config?.post_id }}</span>
                   </div>
                 </template>
@@ -501,7 +461,7 @@ watch(() => task.value?.status, (newStatus) => {
                   </div>
                   <div class="config-row">
                     <span class="config-label">Ротація</span>
-                    <span class="config-value">{{ task.config?.rotation_mode === 'random' ? 'Випадкова' : 'По черзі' }}</span>
+                    <span class="config-value">{{ task.config?.rotation_mode === 'random' ? t('taskResults.emojiModes.random') : 'Round-robin' }}</span>
                   </div>
                   <div class="config-row">
                     <span class="config-label">Коментарів/акаунт</span>
@@ -512,19 +472,19 @@ watch(() => task.value?.status, (newStatus) => {
                 <div class="config-divider"></div>
 
                 <div class="config-row">
-                  <span class="config-label">Затримка</span>
-                  <span class="config-value">{{ task.min_delay }} — {{ task.max_delay }} сек</span>
+                  <span class="config-label">{{ t('taskResults.config.delay') }}</span>
+                  <span class="config-value">{{ task.min_delay }} — {{ task.max_delay }} {{ t('taskResults.time.seconds') }}</span>
                 </div>
                 <div class="config-row">
-                  <span class="config-label">Створено</span>
+                  <span class="config-label">{{ t('taskResults.config.createdAt') }}</span>
                   <span class="config-value time">{{ formatDate(task.created_at) }}</span>
                 </div>
                 <div v-if="task.started_at" class="config-row">
-                  <span class="config-label">Запущено</span>
+                  <span class="config-label">{{ t('taskResults.config.startedAt') }}</span>
                   <span class="config-value time">{{ formatDate(task.started_at) }}</span>
                 </div>
                 <div v-if="task.completed_at" class="config-row">
-                  <span class="config-label">Завершено</span>
+                  <span class="config-label">{{ t('taskResults.config.completedAt') }}</span>
                   <span class="config-value time">{{ formatDate(task.completed_at) }}</span>
                 </div>
               </div>
@@ -585,8 +545,8 @@ watch(() => task.value?.status, (newStatus) => {
             <div class="logs-card">
               <div class="card-header">
                 <i class="pi pi-history"></i>
-                <h3>Журнал виконання</h3>
-                <span class="logs-count">{{ filteredLogs.length }} записів</span>
+                <h3>{{ t('taskResults.logs.title') }}</h3>
+                <span class="logs-count">{{ t('taskResults.logs.entries', { count: filteredLogs.length }) }}</span>
               </div>
 
               <div class="logs-filters">
@@ -595,21 +555,21 @@ watch(() => task.value?.status, (newStatus) => {
                     :class="['filter-tab', { active: logsFilter === 'all' }]"
                     @click="logsFilter = 'all'"
                   >
-                    Всі
+                    {{ t('taskResults.logs.all') }}
                     <span class="filter-count">{{ taskStore.taskLogs.length }}</span>
                   </button>
                   <button
                     :class="['filter-tab', { active: logsFilter === 'success' }]"
                     @click="logsFilter = 'success'"
                   >
-                    Успішні
+                    {{ t('taskResults.logs.successful') }}
                     <span class="filter-count success">{{ taskStore.taskLogs.filter(l => l.success).length }}</span>
                   </button>
                   <button
                     :class="['filter-tab', { active: logsFilter === 'failed' }]"
                     @click="logsFilter = 'failed'"
                   >
-                    Помилки
+                    {{ t('taskResults.logs.failed') }}
                     <span class="filter-count danger">{{ taskStore.taskLogs.filter(l => !l.success).length }}</span>
                   </button>
                 </div>
@@ -617,7 +577,7 @@ watch(() => task.value?.status, (newStatus) => {
                   <i class="pi pi-search"></i>
                   <InputText
                     v-model="logsSearch"
-                    placeholder="Пошук..."
+                    :placeholder="t('taskResults.logs.search')"
                     class="w-full"
                   />
                 </div>
@@ -865,6 +825,11 @@ watch(() => task.value?.status, (newStatus) => {
   border-color: rgba(245, 158, 11, 0.3);
 }
 
+.status-banner.status-cancelled {
+  background: linear-gradient(135deg, rgba(107, 114, 128, 0.1) 0%, rgba(107, 114, 128, 0.05) 100%);
+  border-color: rgba(107, 114, 128, 0.3);
+}
+
 .status-main {
   display: flex;
   align-items: center;
@@ -881,6 +846,7 @@ watch(() => task.value?.status, (newStatus) => {
 .status-banner.status-completed .status-icon { color: #22c55e; }
 .status-banner.status-failed .status-icon { color: #ef4444; }
 .status-banner.status-paused .status-icon { color: #f59e0b; }
+.status-banner.status-cancelled .status-icon { color: #6b7280; }
 
 .status-text {
   display: flex;
@@ -929,6 +895,10 @@ watch(() => task.value?.status, (newStatus) => {
   background: linear-gradient(90deg, #22c55e 0%, #16a34a 100%);
 }
 
+.status-banner.status-cancelled .progress-fill {
+  background: linear-gradient(90deg, #6b7280 0%, #4b5563 100%);
+}
+
 @keyframes progress-glow {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.7; }
@@ -944,6 +914,7 @@ watch(() => task.value?.status, (newStatus) => {
 
 .status-banner.status-running .progress-percent { color: #3b82f6; }
 .status-banner.status-completed .progress-percent { color: #22c55e; }
+.status-banner.status-cancelled .progress-percent { color: #6b7280; }
 
 /* Stats Grid */
 .stats-grid {
