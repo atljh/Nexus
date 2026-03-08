@@ -9,7 +9,11 @@ const electron = {
   webview: {
     getPreloadPath: () => ipcRenderer.invoke('webview:getPreloadPath'),
 
-    createSession: (accountId: number, proxy?: any, deviceFingerprint?: any) =>
+    createSession: (
+      accountId: number,
+      proxy?: WebViewProxyConfig,
+      deviceFingerprint?: WebViewDeviceFingerprint
+    ) =>
       ipcRenderer.invoke('webview:createSession', {
         accountId,
         proxy: proxy ? JSON.parse(JSON.stringify(proxy)) : undefined,

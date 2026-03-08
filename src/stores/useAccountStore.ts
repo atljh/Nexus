@@ -34,13 +34,28 @@ interface ImportResponse {
   account?: Account
 }
 
+type FileWithRelativePath = File & { webkitRelativePath?: string }
+
+function resolveFilePath(file: File): string {
+  return (file as FileWithRelativePath).webkitRelativePath || file.name
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === 'object' && error !== null && 'detail' in error) {
+    const detail = (error as { detail?: unknown }).detail
+    if (typeof detail === 'string' && detail) return detail
+  }
+  return fallback
+}
+
 // Helper to convert File to serializable format for IPC
 async function fileToUpload(name: string, file: File, customFilename?: string): Promise<UploadFile> {
   const buffer = await file.arrayBuffer()
   // Convert to Uint8Array for IPC serialization (ArrayBuffer can't be cloned)
   const data = new Uint8Array(buffer)
   // Use webkitRelativePath for folder uploads, or custom filename, or just file.name
-  const filename = customFilename || (file as any).webkitRelativePath || file.name
+  const filename = customFilename || resolveFilePath(file)
   return { name, data, filename }
 }
 
@@ -237,7 +252,7 @@ export const useAccountStore = defineStore('accounts', () => {
     return result
   }
 
-  function setFilter(key: keyof AccountFilters, value: any) {
+  function setFilter<K extends keyof AccountFilters>(key: K, value: AccountFilters[K]) {
     filters.value[key] = value
   }
 
@@ -399,7 +414,7 @@ export const useAccountStore = defineStore('accounts', () => {
     // Send paths as fields for folder structure reconstruction
     const fields: Record<string, string> = {}
     tdataFiles.forEach((file, index) => {
-      const filePath = (file as any).webkitRelativePath || file.name
+      const filePath = resolveFilePath(file)
       fields[`path_${index}`] = filePath
     })
 
@@ -519,8 +534,8 @@ export const useAccountStore = defineStore('accounts', () => {
       authPhone.value = data.phone
       authStep.value = 'code'
       return result
-    } catch (e: any) {
-      authError.value = e.message || e.detail || 'Failed to start authentication'
+    } catch (e: unknown) {
+      authError.value = getErrorMessage(e, 'Failed to start authentication')
       throw e
     } finally {
       authLoading.value = false
@@ -554,8 +569,8 @@ export const useAccountStore = defineStore('accounts', () => {
       }
 
       return result
-    } catch (e: any) {
-      authError.value = e.message || e.detail || 'Verification failed'
+    } catch (e: unknown) {
+      authError.value = getErrorMessage(e, 'Verification failed')
       throw e
     } finally {
       authLoading.value = false
@@ -575,8 +590,8 @@ export const useAccountStore = defineStore('accounts', () => {
         session_id: authSessionId.value,
       }) as AuthStartResponse
       return result
-    } catch (e: any) {
-      authError.value = e.message || e.detail || 'Failed to resend code'
+    } catch (e: unknown) {
+      authError.value = getErrorMessage(e, 'Failed to resend code')
       throw e
     } finally {
       authLoading.value = false

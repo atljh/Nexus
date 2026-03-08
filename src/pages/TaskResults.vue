@@ -14,7 +14,7 @@ import type { Task } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const toast = useToast()
 const taskStore = useTaskStore()
 
@@ -26,6 +26,7 @@ const logsSearch = ref('')
 const showConfirmDialog = ref(false)
 const confirmAction = ref<'cancel' | 'delete' | 'restart' | null>(null)
 const pollingInterval = ref<number | null>(null)
+const dateLocale = computed(() => (locale.value === 'uk' ? 'uk-UA' : 'en-US'))
 
 // Get task ID from route
 const taskId = computed(() => Number(route.params.id))
@@ -126,7 +127,7 @@ function formatDuration(ms: number): string {
 // Format date
 function formatDate(date: string | null): string {
   if (!date) return '—'
-  return new Date(date).toLocaleString('uk-UA', {
+  return new Date(date).toLocaleString(dateLocale.value, {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -139,12 +140,30 @@ function formatDate(date: string | null): string {
 // Format log timestamp (HH:MM:SS)
 function formatLogTime(date: string | null): string {
   if (!date) return '--:--:--'
-  return new Date(date).toLocaleTimeString('uk-UA', {
+  return new Date(date).toLocaleTimeString(dateLocale.value, {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit'
   })
 }
+
+const confirmHeader = computed(() => {
+  if (confirmAction.value === 'delete') return t('taskResults.confirm.deleteHeader')
+  if (confirmAction.value === 'restart') return t('taskResults.confirm.restartHeader')
+  return t('taskResults.confirm.cancelHeader')
+})
+
+const confirmBody = computed(() => {
+  if (confirmAction.value === 'delete') return t('taskResults.confirm.deleteBody')
+  if (confirmAction.value === 'restart') return t('taskResults.confirm.restartBody')
+  return t('taskResults.confirm.cancelBody')
+})
+
+const confirmButtonLabel = computed(() => {
+  if (confirmAction.value === 'delete') return t('taskResults.actions.delete')
+  if (confirmAction.value === 'restart') return t('taskResults.actions.restart')
+  return t('taskResults.actions.stop')
+})
 
 
 // Channel status severity
@@ -161,23 +180,35 @@ function getChannelStatusSeverity(status: string): 'success' | 'info' | 'warn' |
 // Task actions
 async function startTask() {
   if (!task.value) return
-  await taskStore.startTask(task.value.id)
-  toast.add({ severity: 'info', summary: 'Завдання запущено', life: 2000 })
+  const started = await taskStore.startTask(task.value.id)
+  if (!started) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: t('taskResults.loadError'), life: 2500 })
+    return
+  }
+  toast.add({ severity: 'info', summary: t('taskResults.messages.started'), life: 2000 })
   await loadTask()
   startPolling()
 }
 
 async function pauseTask() {
   if (!task.value) return
-  await taskStore.pauseTask(task.value.id)
-  toast.add({ severity: 'info', summary: 'Завдання призупинено', life: 2000 })
+  const paused = await taskStore.pauseTask(task.value.id)
+  if (!paused) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: t('taskResults.loadError'), life: 2500 })
+    return
+  }
+  toast.add({ severity: 'info', summary: t('taskResults.messages.paused'), life: 2000 })
   await loadTask()
 }
 
 async function cancelTask() {
   if (!task.value) return
-  await taskStore.cancelTask(task.value.id)
-  toast.add({ severity: 'info', summary: 'Завдання скасовано', life: 2000 })
+  const cancelled = await taskStore.cancelTask(task.value.id)
+  if (!cancelled) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: t('taskResults.loadError'), life: 2500 })
+    return
+  }
+  toast.add({ severity: 'info', summary: t('taskResults.messages.cancelled'), life: 2000 })
   showConfirmDialog.value = false
   confirmAction.value = null
   await loadTask()
@@ -186,11 +217,16 @@ async function cancelTask() {
 
 async function deleteTask() {
   if (!task.value) return
-  await taskStore.deleteTask(task.value.id)
-  toast.add({ severity: 'info', summary: 'Завдання видалено', life: 2000 })
+  const taskType = task.value.task_type
+  const deleted = await taskStore.deleteTask(task.value.id)
+  if (!deleted) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: t('taskResults.loadError'), life: 2500 })
+    return
+  }
+  toast.add({ severity: 'info', summary: t('taskResults.messages.deleted'), life: 2000 })
   showConfirmDialog.value = false
   confirmAction.value = null
-  router.push(task.value.task_type === 'likes' ? '/autolikes' : '/autocomments')
+  router.push(taskType === 'likes' ? '/autolikes' : '/autocomments')
 }
 
 function showConfirm(action: 'cancel' | 'delete' | 'restart') {
@@ -209,13 +245,13 @@ async function restartTask() {
   }
 }
 
-function executeConfirmAction() {
+async function executeConfirmAction() {
   if (confirmAction.value === 'cancel') {
-    cancelTask()
+    await cancelTask()
   } else if (confirmAction.value === 'delete') {
-    deleteTask()
+    await deleteTask()
   } else if (confirmAction.value === 'restart') {
-    restartTask()
+    await restartTask()
   }
 }
 
@@ -265,7 +301,7 @@ onMounted(async () => {
   // Redirect if task not found
   if (!task.value) {
     toast.add({ severity: 'warn', summary: t('taskResults.notFound'), life: 3000 })
-    router.replace('/auto-likes')
+    router.replace('/autolikes')
     return
   }
 
@@ -294,7 +330,7 @@ watch(() => task.value?.status, (newStatus) => {
       <!-- Loading State -->
       <div v-if="loading && !task" class="loading-state">
         <i class="pi pi-spin pi-spinner"></i>
-        <span>Завантаження...</span>
+        <span>{{ t('common.loading') }}</span>
       </div>
 
       <!-- Task Content -->
@@ -348,7 +384,7 @@ watch(() => task.value?.status, (newStatus) => {
               @click="showConfirm('restart')"
             />
             <Button
-              v-if="task.status !== 'running'"
+              v-if="task.status !== 'running' && task.status !== 'paused'"
               icon="pi pi-trash"
               :label="t('taskResults.actions.delete')"
               class="action-btn delete"
@@ -461,7 +497,7 @@ watch(() => task.value?.status, (newStatus) => {
                 <!-- For Comments -->
                 <template v-if="task.task_type === 'comments'">
                   <div class="config-row">
-                    <span class="config-label">Канали</span>
+                    <span class="config-label">{{ t('taskResults.config.channels') }}</span>
                     <div class="config-tags">
                       <span
                         v-for="(ch, idx) in task.config?.channels"
@@ -473,15 +509,19 @@ watch(() => task.value?.status, (newStatus) => {
                     </div>
                   </div>
                   <div class="config-row">
-                    <span class="config-label">Шаблони</span>
-                    <span class="config-value">{{ task.config?.templates?.length || 0 }} шт.</span>
+                    <span class="config-label">{{ t('taskResults.config.templates') }}</span>
+                    <span class="config-value">
+                      {{ t('taskResults.config.templatesCount', { count: task.config?.templates?.length || 0 }) }}
+                    </span>
                   </div>
                   <div class="config-row">
-                    <span class="config-label">Ротація</span>
-                    <span class="config-value">{{ task.config?.rotation_mode === 'random' ? t('taskResults.emojiModes.random') : 'Round-robin' }}</span>
+                    <span class="config-label">{{ t('taskResults.config.rotation') }}</span>
+                    <span class="config-value">
+                      {{ task.config?.rotation_mode === 'random' ? t('taskResults.rotation.random') : t('taskResults.rotation.roundRobin') }}
+                    </span>
                   </div>
                   <div class="config-row">
-                    <span class="config-label">Коментарів/акаунт</span>
+                    <span class="config-label">{{ t('taskResults.config.commentsPerAccount') }}</span>
                     <span class="config-value">{{ task.config?.comments_per_account }}</span>
                   </div>
                 </template>
@@ -511,7 +551,7 @@ watch(() => task.value?.status, (newStatus) => {
             <div v-if="task.task_type === 'comments' && taskStore.targetChannels.length > 0" class="channels-card">
               <div class="card-header">
                 <i class="pi pi-hashtag"></i>
-                <h3>Цільові канали</h3>
+                <h3>{{ t('taskResults.channelsTitle') }}</h3>
               </div>
               <div class="channels-list">
                 <div
@@ -520,7 +560,7 @@ watch(() => task.value?.status, (newStatus) => {
                   class="channel-item"
                 >
                   <div class="channel-main">
-                    <span class="channel-name">@{{ channel.channel_username }}</span>
+                    <span class="channel-name">{{ channel.channel_username }}</span>
                     <span v-if="channel.channel_title" class="channel-title">{{ channel.channel_title }}</span>
                   </div>
                   <div class="channel-stats">
@@ -529,7 +569,9 @@ watch(() => task.value?.status, (newStatus) => {
                       :severity="getChannelStatusSeverity(channel.status)"
                       class="channel-status"
                     />
-                    <span class="channel-sent">{{ channel.comments_sent }} коментарів</span>
+                    <span class="channel-sent">
+                      {{ t('taskResults.commentsSent', { count: channel.comments_sent }) }}
+                    </span>
                   </div>
                   <span v-if="channel.error_message" class="channel-error">
                     {{ channel.error_message }}
@@ -542,7 +584,7 @@ watch(() => task.value?.status, (newStatus) => {
             <div v-if="task.task_type === 'comments' && task.config?.templates" class="templates-card">
               <div class="card-header">
                 <i class="pi pi-file-edit"></i>
-                <h3>Шаблони коментарів</h3>
+                <h3>{{ t('taskResults.templatesTitle') }}</h3>
               </div>
               <div class="templates-list">
                 <div
@@ -616,7 +658,7 @@ watch(() => task.value?.status, (newStatus) => {
 
                 <div v-if="filteredLogs.length === 0" class="logs-empty">
                   <i class="pi pi-inbox"></i>
-                  <span>Немає записів</span>
+                  <span>{{ t('taskResults.noLogs') }}</span>
                 </div>
               </div>
             </div>
@@ -627,10 +669,10 @@ watch(() => task.value?.status, (newStatus) => {
       <!-- Not Found State -->
       <div v-else class="not-found-state">
         <i class="pi pi-exclamation-triangle"></i>
-        <h2>Завдання не знайдено</h2>
-        <p>Завдання з ID {{ taskId }} не існує або було видалено</p>
+        <h2>{{ t('taskResults.notFound') }}</h2>
+        <p>{{ t('taskResults.notFoundDescription', { id: taskId }) }}</p>
         <Button
-          label="Повернутися"
+          :label="t('common.back')"
           icon="pi pi-arrow-left"
           @click="router.back()"
         />
@@ -639,32 +681,24 @@ watch(() => task.value?.status, (newStatus) => {
       <!-- Confirm Dialog -->
       <Dialog
         v-model:visible="showConfirmDialog"
-        :header="confirmAction === 'delete' ? 'Видалити завдання?' : confirmAction === 'restart' ? 'Перезапустити завдання?' : 'Зупинити завдання?'"
+        :header="confirmHeader"
         :style="{ width: '400px' }"
         modal
         class="confirm-dialog"
       >
         <div class="confirm-content">
           <i :class="['confirm-icon', 'pi', confirmAction === 'delete' ? 'pi-trash' : confirmAction === 'restart' ? 'pi-refresh' : 'pi-stop-circle']"></i>
-          <p v-if="confirmAction === 'delete'">
-            Ви впевнені, що хочете видалити це завдання? Цю дію неможливо скасувати.
-          </p>
-          <p v-else-if="confirmAction === 'restart'">
-            Скинути прогрес і журнал дій? Завдання повернеться у статус "очікує".
-          </p>
-          <p v-else>
-            Ви впевнені, що хочете зупинити виконання цього завдання?
-          </p>
+          <p>{{ confirmBody }}</p>
         </div>
         <template #footer>
           <Button
-            label="Скасувати"
+            :label="t('common.cancel')"
             severity="secondary"
             outlined
             @click="showConfirmDialog = false"
           />
           <Button
-            :label="confirmAction === 'delete' ? 'Видалити' : confirmAction === 'restart' ? 'Перезапустити' : 'Зупинити'"
+            :label="confirmButtonLabel"
             :severity="confirmAction === 'delete' ? 'danger' : confirmAction === 'restart' ? 'info' : 'warn'"
             @click="executeConfirmAction"
           />

@@ -17,7 +17,7 @@ interface TasksResponse {
   [index: number]: Task
 }
 
-interface TaskResponse extends Task {}
+type TaskResponse = Task
 
 interface TaskLogsResponse {
   data?: TaskLog[]

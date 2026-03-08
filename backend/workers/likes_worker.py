@@ -534,6 +534,7 @@ class LikesWorker:
                 failed = task.failed_actions
                 done_accounts: set = set()  # accounts that already reacted
                 account_cycle = itertools.cycle(active_ids)
+                termination_reason: Optional[str] = None
 
                 while completed + failed < task.total_actions:
                     if cancel_event.is_set():
@@ -565,6 +566,7 @@ class LikesWorker:
                         )
                         if all_exhausted:
                             logger.info(f"Task {self.task_id}: all accounts exhausted")
+                            termination_reason = "All eligible accounts exhausted before reaching total actions"
                             break
                         # Some accounts are just rate-limited — wait and retry
                         logger.info("All accounts rate-limited, cooling down 60s")
@@ -636,8 +638,12 @@ class LikesWorker:
                         logger.debug(f"Waiting {delay:.1f}s before next action")
                         await asyncio.sleep(delay)
 
-                # Task completed
-                task.status = "completed"
+                if completed + failed >= task.total_actions:
+                    task.status = "completed"
+                else:
+                    task.status = "failed"
+                    if not task.last_error:
+                        task.last_error = termination_reason or "Task stopped before reaching total actions"
                 task.completed_at = datetime.now(timezone.utc)
                 db.commit()
 
@@ -665,7 +671,7 @@ class LikesWorker:
             db.close()
 
 
-async def start_likes_task(task_id: int, on_progress: Optional[Callable] = None):
+async def start_likes_task(task_id: int, on_progress: Optional[Callable] = None) -> bool:
     """
     Helper function to start a likes task.
 
@@ -677,7 +683,7 @@ async def start_likes_task(task_id: int, on_progress: Optional[Callable] = None)
 
     worker = LikesWorker(task_id=task_id, on_progress=on_progress)
 
-    await task_queue.submit(
+    return await task_queue.submit(
         task_id=task_id,
         worker_coro=worker.execute
     )

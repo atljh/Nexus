@@ -758,9 +758,14 @@ export default {
     },
     config: {
       channel: 'Channel',
+      channels: 'Channels',
       reactions: 'Reactions',
       emojiMode: 'Emoji Mode',
       postId: 'Post ID',
+      templates: 'Templates',
+      templatesCount: '{count} pcs.',
+      rotation: 'Rotation',
+      commentsPerAccount: 'Comments/account',
       delay: 'Delay',
       createdAt: 'Created',
       startedAt: 'Started',
@@ -794,14 +799,35 @@ export default {
       actionsOf: '{completed} of {total} actions done'
     },
     messages: {
+      started: 'Task started',
+      paused: 'Task paused',
+      cancelled: 'Task cancelled',
+      deleted: 'Task deleted',
       restarted: 'Task restarted'
+    },
+    rotation: {
+      random: 'Random',
+      roundRobin: 'Round-robin'
     },
     emojiModes: {
       single: 'Single',
       random: 'Random',
       all: 'All'
     },
+    channelsTitle: 'Target Channels',
+    templatesTitle: 'Comment Templates',
+    commentsSent: '{count} comments',
+    noLogs: 'No entries',
+    confirm: {
+      deleteHeader: 'Delete task?',
+      deleteBody: 'Are you sure you want to delete this task? This action cannot be undone.',
+      restartHeader: 'Restart task?',
+      restartBody: 'Reset progress and action log? Task will return to pending status.',
+      cancelHeader: 'Stop task?',
+      cancelBody: 'Are you sure you want to stop this task?'
+    },
     notFound: 'Task not found',
+    notFoundDescription: 'Task with ID {id} does not exist or has been deleted',
     loadError: 'Failed to load task'
   },
 

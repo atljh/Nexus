@@ -10,6 +10,7 @@ from database.models import (
     Task, TaskLog, Account, CommentTemplate, TargetChannel,
     AccountBlacklist, CommentHistory, AIPromptTemplate,
 )
+from utils.encryption import encryption_service
 
 router = APIRouter()
 
@@ -518,7 +519,7 @@ async def create_comments_task(request: CreateCommentsTaskRequest, db: Session =
         "ai_temperature": request.config.ai_temperature,
     }
     if request.config.ai_api_key:
-        task_config["ai_api_key"] = request.config.ai_api_key
+        task_config["ai_api_key"] = encryption_service.encrypt_if_needed(request.config.ai_api_key)
     if request.config.ai_prompt_id:
         task_config["ai_prompt_id"] = request.config.ai_prompt_id
 
@@ -593,10 +594,11 @@ async def start_task(task_id: int, db: Session = Depends(get_db)):
     # Already running in queue — just return current state
     if task_queue.is_running(task_id):
         if task.status == "paused":
-            await task_queue.resume(task_id)
-            task.status = "running"
-            db.commit()
-            db.refresh(task)
+            resumed = await task_queue.resume(task_id)
+            if resumed:
+                task.status = "running"
+                db.commit()
+                db.refresh(task)
         return task.to_dict()
 
     # Stale running status (queue lost after restart) — reset to pending
@@ -612,16 +614,35 @@ async def start_task(task_id: int, db: Session = Depends(get_db)):
     task.status = "running"
     if not task.started_at:
         task.started_at = datetime.now(timezone.utc)
+    task.last_error = None
     db.commit()
 
     # Start the worker based on task type
-    if task.task_type == "likes":
-        await start_likes_task(task_id)
-    elif task.task_type == "comments":
-        await start_comments_task(task_id)
-    else:
-        raise HTTPException(status_code=400, detail=f"Unknown task type: {task.task_type}")
+    try:
+        if task.task_type == "likes":
+            submitted = await start_likes_task(task_id)
+        elif task.task_type == "comments":
+            submitted = await start_comments_task(task_id)
+        else:
+            task.status = "pending"
+            task.last_error = f"Unknown task type: {task.task_type}"
+            db.commit()
+            raise HTTPException(status_code=400, detail=f"Unknown task type: {task.task_type}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        task.status = "pending"
+        task.last_error = f"Failed to start task: {e}"
+        db.commit()
+        raise HTTPException(status_code=500, detail="Failed to start task")
 
+    if not submitted:
+        task.status = "pending"
+        task.last_error = "Task is already running in queue"
+        db.commit()
+        raise HTTPException(status_code=409, detail="Task is already running in queue")
+
+    db.refresh(task)
     return task.to_dict()
 
 
@@ -638,7 +659,15 @@ async def pause_task(task_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Can only pause running tasks")
 
     # Pause in queue
-    await task_queue.pause(task_id)
+    paused = await task_queue.pause(task_id)
+    if not paused:
+        task.status = "pending"
+        task.last_error = "Task was not active in queue and has been reset to pending"
+        db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail="Task was not active in queue and has been reset to pending"
+        )
 
     task.status = "paused"
     db.commit()
@@ -696,8 +725,11 @@ async def cancel_task(task_id: int, db: Session = Depends(get_db)):
     if task.status in ["completed", "failed", "cancelled"]:
         raise HTTPException(status_code=400, detail="Task already finished")
 
-    # Cancel in queue
-    await task_queue.cancel(task_id)
+    # Cancel in queue when task could be active there.
+    if task.status in ["running", "paused"]:
+        cancelled = await task_queue.cancel(task_id)
+        if not cancelled:
+            task.last_error = "Task was not active in queue during cancellation"
 
     task.status = "cancelled"
     task.completed_at = datetime.now(timezone.utc)
@@ -713,8 +745,8 @@ async def delete_task(task_id: int, db: Session = Depends(get_db)):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    if task.status == "running":
-        raise HTTPException(status_code=400, detail="Cannot delete running task. Cancel it first.")
+    if task.status in ["running", "paused"]:
+        raise HTTPException(status_code=400, detail="Cannot delete active task. Cancel it first.")
 
     db.delete(task)
     db.commit()

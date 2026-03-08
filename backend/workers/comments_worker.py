@@ -242,7 +242,9 @@ class CommentsWorker:
         """Initialize AI service from task config if enabled."""
         if not config.get("ai_enabled"):
             return
-        api_key = config.get("ai_api_key", "")
+        from utils.encryption import encryption_service
+
+        api_key = encryption_service.decrypt_safe(config.get("ai_api_key", ""))
         if not api_key:
             logger.warning("AI enabled but no API key provided, falling back to spintax")
             return
@@ -842,6 +844,7 @@ class CommentsWorker:
                 completed = task.completed_actions
                 failed = task.failed_actions
                 account_index = 0
+                termination_reason: Optional[str] = None
 
                 while completed + failed < task.total_actions:
                     if cancel_event.is_set():
@@ -857,6 +860,7 @@ class CommentsWorker:
                     target = self._select_target_channel(valid_targets)
                     if not target:
                         logger.warning("No valid target channels remaining")
+                        termination_reason = "No valid target channels remaining"
                         break
 
                     # Select account (with blacklist + pool check)
@@ -868,6 +872,7 @@ class CommentsWorker:
 
                     if not account:
                         logger.warning("All accounts exhausted or blacklisted")
+                        termination_reason = "All accounts exhausted or blacklisted"
                         break
 
                     # Generate comment
@@ -949,7 +954,12 @@ class CommentsWorker:
                         delay = random.uniform(task.min_delay, task.max_delay)
                         await asyncio.sleep(delay)
 
-                task.status = "completed"
+                if completed + failed >= task.total_actions:
+                    task.status = "completed"
+                else:
+                    task.status = "failed"
+                    if not task.last_error:
+                        task.last_error = termination_reason or "Task stopped before reaching total actions"
                 task.completed_at = datetime.now(timezone.utc)
                 db.commit()
 
@@ -1174,13 +1184,13 @@ class CommentsWorker:
         logger.info(f"Task {self.task_id} monitoring ended: {completed} comments sent")
 
 
-async def start_comments_task(task_id: int, on_progress: Optional[Callable] = None):
+async def start_comments_task(task_id: int, on_progress: Optional[Callable] = None) -> bool:
     """Helper function to start a comments task."""
     from workers.task_queue import task_queue
 
     worker = CommentsWorker(task_id=task_id, on_progress=on_progress)
 
-    await task_queue.submit(
+    return await task_queue.submit(
         task_id=task_id,
         worker_coro=worker.execute
     )

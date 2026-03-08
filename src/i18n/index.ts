@@ -17,15 +17,15 @@ const i18n = createI18n({
 })
 
 export function setLocale(locale: 'en' | 'uk') {
-  // @ts-ignore - vue-i18n types issue
-  i18n.global.locale.value = locale
+  const localeRef = i18n.global.locale as unknown as { value: 'en' | 'uk' }
+  localeRef.value = locale
   localStorage.setItem('locale', locale)
   document.documentElement.lang = locale
 }
 
 export function getLocale(): 'en' | 'uk' {
-  // @ts-ignore - vue-i18n types issue
-  return i18n.global.locale.value as 'en' | 'uk'
+  const localeRef = i18n.global.locale as unknown as { value: 'en' | 'uk' }
+  return localeRef.value
 }
 
 export default i18n

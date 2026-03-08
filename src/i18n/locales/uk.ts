@@ -758,9 +758,14 @@ export default {
     },
     config: {
       channel: 'Канал',
+      channels: 'Канали',
       reactions: 'Реакції',
       emojiMode: 'Режим емоджі',
       postId: 'ID поста',
+      templates: 'Шаблони',
+      templatesCount: '{count} шт.',
+      rotation: 'Ротація',
+      commentsPerAccount: 'Коментарів/акаунт',
       delay: 'Затримка',
       createdAt: 'Створено',
       startedAt: 'Запущено',
@@ -794,14 +799,35 @@ export default {
       actionsOf: '{completed} з {total} дій виконано'
     },
     messages: {
+      started: 'Завдання запущено',
+      paused: 'Завдання призупинено',
+      cancelled: 'Завдання скасовано',
+      deleted: 'Завдання видалено',
       restarted: 'Завдання перезапущено'
+    },
+    rotation: {
+      random: 'Випадкова',
+      roundRobin: 'По колу'
     },
     emojiModes: {
       single: 'Один',
       random: 'Випадковий',
       all: 'Всі'
     },
+    channelsTitle: 'Цільові канали',
+    templatesTitle: 'Шаблони коментарів',
+    commentsSent: '{count} коментарів',
+    noLogs: 'Немає записів',
+    confirm: {
+      deleteHeader: 'Видалити завдання?',
+      deleteBody: 'Ви впевнені, що хочете видалити це завдання? Цю дію неможливо скасувати.',
+      restartHeader: 'Перезапустити завдання?',
+      restartBody: 'Скинути прогрес і журнал дій? Завдання повернеться у статус "очікує".',
+      cancelHeader: 'Зупинити завдання?',
+      cancelBody: 'Ви впевнені, що хочете зупинити виконання цього завдання?'
+    },
     notFound: 'Завдання не знайдено',
+    notFoundDescription: 'Завдання з ID {id} не існує або було видалено',
     loadError: 'Помилка завантаження'
   },
 

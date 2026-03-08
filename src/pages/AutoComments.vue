@@ -174,26 +174,52 @@ const pendingTasks = computed(() => taskStore.tasks.filter(t => t.status === 'pe
 // Batch actions
 async function startAllPending() {
   const tasks = [...pendingTasks.value]
+  let started = 0
   for (const task of tasks) {
-    await taskStore.startTask(task.id)
+    if (await taskStore.startTask(task.id)) {
+      started += 1
+    }
   }
-  toast.add({
-    severity: 'info',
-    summary: t('autoComments.tasksStarted', { count: tasks.length }),
-    life: 2000
-  })
+  if (started > 0) {
+    toast.add({
+      severity: 'info',
+      summary: t('autoComments.tasksStarted', { count: started }),
+      life: 2000
+    })
+  }
+  if (started < tasks.length) {
+    toast.add({
+      severity: 'warn',
+      summary: t('common.warning'),
+      detail: t('taskResults.loadError'),
+      life: 2500
+    })
+  }
 }
 
 async function stopAllRunning() {
   const tasks = [...runningTasks.value]
+  let stopped = 0
   for (const task of tasks) {
-    await taskStore.cancelTask(task.id)
+    if (await taskStore.cancelTask(task.id)) {
+      stopped += 1
+    }
   }
-  toast.add({
-    severity: 'info',
-    summary: t('autoComments.tasksStopped'),
-    life: 2000
-  })
+  if (stopped > 0) {
+    toast.add({
+      severity: 'info',
+      summary: t('autoComments.tasksStopped'),
+      life: 2000
+    })
+  }
+  if (stopped < tasks.length) {
+    toast.add({
+      severity: 'warn',
+      summary: t('common.warning'),
+      detail: t('taskResults.loadError'),
+      life: 2500
+    })
+  }
 }
 
 // Template management
@@ -298,15 +324,38 @@ async function startTask(task: Task) {
       summary: t('autoComments.messages.taskStarted'),
       life: 2000
     })
+    return
   }
+  toast.add({
+    severity: 'error',
+    summary: t('common.error'),
+    detail: t('taskResults.loadError'),
+    life: 2500
+  })
 }
 
 async function pauseTask(task: Task) {
-  await taskStore.pauseTask(task.id)
+  const ok = await taskStore.pauseTask(task.id)
+  if (!ok) {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: t('taskResults.loadError'),
+      life: 2500
+    })
+  }
 }
 
 async function cancelTask(task: Task) {
-  await taskStore.cancelTask(task.id)
+  const ok = await taskStore.cancelTask(task.id)
+  if (!ok) {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: t('taskResults.loadError'),
+      life: 2500
+    })
+  }
 }
 
 async function restartTask(task: Task) {
@@ -321,7 +370,16 @@ async function restartTask(task: Task) {
 }
 
 async function deleteTask(task: Task) {
-  await taskStore.deleteTask(task.id)
+  const deleted = await taskStore.deleteTask(task.id)
+  if (!deleted) {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: t('taskResults.loadError'),
+      life: 2500
+    })
+    return
+  }
   toast.add({
     severity: 'info',
     summary: t('autoComments.messages.taskDeleted'),
@@ -555,7 +613,6 @@ onUnmounted(() => {
                   </div>
                 </div>
               </div>
-
             </div>
 
             <!-- Templates Tab -->
@@ -781,7 +838,7 @@ onUnmounted(() => {
                   @click="viewTaskDetails(task)"
                 />
                 <Button
-                  v-if="task.status !== 'running'"
+                  v-if="task.status !== 'running' && task.status !== 'paused'"
                   icon="pi pi-trash"
                   rounded
                   class="action-btn delete"

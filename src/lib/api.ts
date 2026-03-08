@@ -93,5 +93,5 @@ export function installApi() {
     },
   }
 
-  ;(window as any).api = api
+  ;(window as Window & { api: Window['api'] }).api = api
 }

@@ -17,6 +17,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 TARGET=${1:-"mac"}
+HOST_OS="$(uname -s)"
 
 echo -e "${BLUE}╔════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║         Nexus Build                ║${NC}"
@@ -25,6 +26,22 @@ echo ""
 
 cd "$PROJECT_DIR"
 
+# Guard against producing Windows installer with non-Windows backend binary.
+if [ "$TARGET" = "win" ]; then
+    case "$HOST_OS" in
+        MINGW*|MSYS*|CYGWIN*|Windows_NT)
+            ;;
+        *)
+            if [ "${NEXUS_ALLOW_UNSUPPORTED_WIN_BUILD:-0}" != "1" ]; then
+                echo -e "${RED}ERROR:${NC} Windows build with bundled backend must run on a Windows host."
+                echo "Set NEXUS_ALLOW_UNSUPPORTED_WIN_BUILD=1 to bypass for UI-only/debug packaging."
+                exit 1
+            fi
+            echo -e "${YELLOW}WARNING:${NC} Building win target on $HOST_OS with override; backend binary may be incompatible."
+            ;;
+    esac
+fi
+
 # Activate Python venv
 source "$BACKEND_DIR/.venv/bin/activate"
 
@@ -32,7 +49,8 @@ echo -e "${YELLOW}[1/3]${NC} Building Python backend..."
 
 # Build Python with PyInstaller
 cd "$BACKEND_DIR"
-pyinstaller --onefile --name main \
+pyinstaller -y --onedir --name main \
+    --hidden-import=aiosqlite \
     --hidden-import=uvicorn.logging \
     --hidden-import=uvicorn.loops \
     --hidden-import=uvicorn.loops.auto \
@@ -50,7 +68,8 @@ pyinstaller --onefile --name main \
 
 # Move to backend-dist
 mkdir -p "$PROJECT_DIR/backend-dist"
-cp dist/main "$PROJECT_DIR/backend-dist/"
+rm -rf "$PROJECT_DIR/backend-dist/main"
+cp -R dist/main "$PROJECT_DIR/backend-dist/main"
 echo -e "       ${GREEN}✓${NC} Backend built"
 
 cd "$PROJECT_DIR"

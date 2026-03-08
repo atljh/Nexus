@@ -114,21 +114,21 @@ class TaskQueue:
     async def cancel(self, task_id: int) -> bool:
         """Cancel a running task."""
         async with self._lock:
-            if task_id not in self._running_tasks:
+            running = self._running_tasks.get(task_id)
+            if running is None:
                 return False
 
-            running = self._running_tasks[task_id]
             running.cancel_event.set()
             running.pause_event.set()  # Unpause so it can check cancel
 
-            # Give task time to gracefully stop
-            await asyncio.sleep(0.5)
+        # Give task time to gracefully stop without blocking queue operations.
+        await asyncio.sleep(0.5)
 
-            if not running.asyncio_task.done():
-                running.asyncio_task.cancel()
+        if not running.asyncio_task.done():
+            running.asyncio_task.cancel()
 
-            logger.info(f"Task {task_id} cancelled")
-            return True
+        logger.info(f"Task {task_id} cancelled")
+        return True
 
     async def pause(self, task_id: int) -> bool:
         """Pause a running task."""

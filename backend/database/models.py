@@ -21,6 +21,17 @@ def _utc_iso(dt: Optional[datetime]) -> Optional[str]:
     return naive.isoformat() + "Z"
 
 
+def _sanitize_task_config(config: Optional[dict]) -> dict:
+    """Redact sensitive keys before returning config to API clients."""
+    if not isinstance(config, dict):
+        return {}
+
+    safe = dict(config)
+    if "ai_api_key" in safe:
+        safe["ai_api_key"] = "***"
+    return safe
+
+
 # Many-to-many relationship table for accounts and tags
 account_tags = Table(
     "account_tags",
@@ -295,7 +306,7 @@ class Task(Base):
             "id": self.id,
             "task_type": self.task_type,
             "status": self.status,
-            "config": self.config,
+            "config": _sanitize_task_config(self.config),
             "total_actions": self.total_actions,
             "completed_actions": self.completed_actions,
             "failed_actions": self.failed_actions,

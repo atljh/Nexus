@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { spawn, ChildProcess } from 'child_process'
+import * as fs from 'fs'
 import path from 'path'
 import { webViewManager, ProxyConfig, DeviceFingerprint } from './webview-manager'
 
@@ -11,6 +12,37 @@ let intentionalStop = false
 const MAX_BACKEND_RESTARTS = 3
 
 const isDev = !app.isPackaged
+
+function resolveDevPythonPath(): string {
+  const candidates = [
+    path.join(__dirname, '../../backend/.venv/bin/python'),
+    path.join(__dirname, '../../backend/.venv/Scripts/python.exe')
+  ]
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate
+  }
+  return candidates[0]
+}
+
+function resolvePackagedBackendPath(): string {
+  const base = path.join(process.resourcesPath, 'backend/main')
+  const candidates = [
+    path.join(base, 'main'),
+    path.join(base, 'main.exe'),
+    base,
+    `${base}.exe`
+  ]
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        return candidate
+      }
+    } catch (error) {
+      console.warn('[Python] Failed to inspect backend candidate:', candidate, error)
+    }
+  }
+  return base
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -46,8 +78,8 @@ function createWindow() {
 
 function startPythonBackend() {
   const pythonPath = isDev
-    ? path.join(__dirname, '../../backend/.venv/bin/python')
-    : path.join(process.resourcesPath, 'backend/main')
+    ? resolveDevPythonPath()
+    : resolvePackagedBackendPath()
 
   const scriptPath = isDev
     ? path.join(__dirname, '../../backend/main.py')
@@ -56,11 +88,18 @@ function startPythonBackend() {
   if (isDev && scriptPath) {
     pythonProcess = spawn(pythonPath, [scriptPath], {
       cwd: path.join(__dirname, '../../backend'),
-      env: { ...process.env, PYTHONUNBUFFERED: '1' }
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: '1',
+        NEXUS_BACKEND_RELOAD: '1',
+      }
     })
   } else {
     pythonProcess = spawn(pythonPath, [], {
-      env: { ...process.env }
+      env: {
+        ...process.env,
+        NEXUS_BACKEND_RELOAD: '0',
+      }
     })
   }
 

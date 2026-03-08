@@ -4,10 +4,15 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
 
-# Database path in user's home directory
-DB_DIR = Path.home() / "Nexus"
-DB_DIR.mkdir(exist_ok=True)
-DB_PATH = DB_DIR / "nexus.db"
+# Database path (overrideable for tests/CI)
+_db_path_env = os.getenv("NEXUS_DB_PATH")
+if _db_path_env:
+    DB_PATH = Path(_db_path_env).expanduser()
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+else:
+    DB_DIR = Path.home() / "Nexus"
+    DB_DIR.mkdir(exist_ok=True)
+    DB_PATH = DB_DIR / "nexus.db"
 
 # Async database URL (for FastAPI endpoints)
 DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
