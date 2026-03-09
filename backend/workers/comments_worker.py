@@ -37,6 +37,11 @@ from database.models import (
     AccountBlacklist, CommentHistory, AIPromptTemplate,
 )
 from telegram.client import BaseClient
+from telegram.exceptions import UnauthorizedError, SessionExpiredError, ProxyError
+from telegram.account_metadata import (
+    normalize_device_fingerprint,
+    resolve_account_connection_params,
+)
 from workers.spintax import parse_spintax, DEFAULT_COMMENT_TEMPLATES
 from workers.shared import SendStatus, SendResult, ErrorClassifier
 from workers.shared.ai_service import AIService
@@ -44,7 +49,14 @@ from workers.shared.account_safety import AccountSafetyValidator
 
 logger = logging.getLogger(__name__)
 
-SKIP_ACCOUNT_STATUSES = {"banned", "spamblock", "session_expired", "invalid", "deactivated"}
+SKIP_ACCOUNT_STATUSES = {
+    "banned",
+    "spamblock",
+    "session_expired",
+    "needs_reauth",
+    "invalid",
+    "deactivated",
+}
 
 
 class CommentsWorker:
@@ -72,6 +84,54 @@ class CommentsWorker:
         self._ai_service: Optional[AIService] = None
         self._accounts_map: Dict[int, Any] = {}  # account_id -> Account (for warming multiplier)
 
+    @staticmethod
+    def _normalize_device_fingerprint(value: Optional[Any]) -> Dict[str, Any]:
+        return normalize_device_fingerprint(value)
+
+    @staticmethod
+    def _classify_connect_failure(error: Exception) -> Tuple[Optional[str], str, str]:
+        message = str(error)[:300] if str(error) else type(error).__name__
+        lower = message.lower()
+
+        if isinstance(error, UnauthorizedError) or "not authorized" in lower:
+            return "needs_reauth", "not_authorized", "Session is not authorized"
+
+        if isinstance(error, SessionExpiredError):
+            if "revok" in lower:
+                return "session_expired", "session_revoked", message
+            if "authkeyunregistered" in lower or ("key" in lower and "register" in lower):
+                return "session_expired", "auth_key_unregistered", message
+            return "session_expired", "session_expired", message
+
+        if "session" in lower and ("expir" in lower or "revok" in lower):
+            return "session_expired", "session_expired", message
+
+        if isinstance(error, (ProxyError, ConnectionError, TimeoutError, OSError)):
+            return "connection_failed", "connection_failed", message
+
+        if "timeout" in lower:
+            return "connection_failed", "timeout", message
+
+        return None, "connect_failed", message
+
+    def _record_connect_failure_log(
+        self,
+        db: Session,
+        account_id: int,
+        error_code: str,
+        error_message: str,
+    ) -> None:
+        db.add(TaskLog(
+            task_id=self.task_id,
+            account_id=account_id,
+            action_type="connect",
+            target=None,
+            success=False,
+            message="Action was not executed",
+            error=error_message,
+            extra_data={"error_code": error_code},
+        ))
+
     # ── Client pool management ──
 
     async def _connect_accounts(self, accounts: List[Account], db: Session) -> int:
@@ -85,22 +145,40 @@ class CommentsWorker:
             if not account.session_string:
                 logger.warning(f"Account {account.id}: no session string, skipping")
                 self._failed_accounts.add(account.id)
+                account.status = "invalid"
+                account.last_check_error_code = "missing_session"
+                account.last_check_error = "No session string"
+                account.last_checked_at = datetime.now(timezone.utc)
+                self._record_connect_failure_log(
+                    db,
+                    account.id,
+                    "missing_session",
+                    "No session string",
+                )
+                db.commit()
                 continue
 
             if account.status in SKIP_ACCOUNT_STATUSES:
                 logger.warning(f"Account {account.id}: status {account.status}, skipping")
                 self._failed_accounts.add(account.id)
+                self._record_connect_failure_log(
+                    db,
+                    account.id,
+                    f"status_{account.status}",
+                    f"Account skipped by status: {account.status}",
+                )
+                db.commit()
                 continue
 
             proxy = self._get_proxy_dict(account)
-            device_fp = account.device_fingerprint or {}
+            resolved_api_id, resolved_api_hash, device_fp = resolve_account_connection_params(account)
 
             client = None
             try:
                 client = BaseClient(
                     session_string=account.session_string,
-                    api_id=account.api_id,
-                    api_hash=account.api_hash,
+                    api_id=resolved_api_id,
+                    api_hash=resolved_api_hash,
                     proxy=proxy,
                     connection_retries=3,
                     timeout=15,
@@ -121,8 +199,9 @@ class CommentsWorker:
                     logger.warning(f"Account {account.id}: {w}")
 
                 # Fingerprint validation (blocks on mismatch)
+                locked_fingerprint = self._normalize_device_fingerprint(account.device_fingerprint)
                 fp_valid, fp_errors = AccountSafetyValidator.validate_fingerprint(
-                    device_fp, account.device_fingerprint
+                    device_fp, locked_fingerprint
                 )
                 if not fp_valid:
                     for e in fp_errors:
@@ -140,6 +219,14 @@ class CommentsWorker:
             except Exception as e:
                 logger.warning(f"Account {account.id}: connect failed — {e}")
                 self._failed_accounts.add(account.id)
+                new_status, error_code, error_message = self._classify_connect_failure(e)
+                if new_status:
+                    account.status = new_status
+                account.last_check_error_code = error_code
+                account.last_check_error = error_message
+                account.last_checked_at = datetime.now(timezone.utc)
+                self._record_connect_failure_log(db, account.id, error_code, error_message)
+                db.commit()
                 if client:
                     try:
                         await client.disconnect()

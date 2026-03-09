@@ -20,6 +20,8 @@ export interface Account {
   group: AccountGroup | null
   group_id: number | null
   tags: AccountTag[]
+  last_check_error_code: string | null
+  last_check_error: string | null
   last_checked_at: string | null
   last_used_at: string | null
   created_at: string
@@ -128,6 +130,7 @@ export interface ImportResult {
 
 export interface CheckResult {
   valid: boolean
+  status: AccountStatus
   user_info?: {
     telegram_id: number
     username: string | null
@@ -135,6 +138,7 @@ export interface CheckResult {
     last_name: string | null
     phone: string | null
   }
+  error_code?: string | null
   error?: string
 }
 
@@ -152,6 +156,7 @@ export interface CheckBatchResult {
     telegram_id: number | null
     username: string | null
     spamblock: boolean | null
+    error_code: string | null
     error: string | null
   }[]
 }

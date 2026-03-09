@@ -164,6 +164,26 @@ export default {
       connection_failed: 'помилка з\'єднання'
     },
 
+    checkErrors: {
+      code: 'Причина',
+      message: 'Деталі',
+      codes: {
+        not_authorized: 'Сесія не авторизована',
+        auth_key_unregistered: 'Ключ авторизації більше не дійсний',
+        auth_key_duplicated: 'Ключ авторизації дубльований',
+        session_revoked: 'Сесію відкликано',
+        session_expired: 'Сесія закінчилась',
+        connection_failed: 'Помилка з\'єднання',
+        timeout: 'Таймаут з\'єднання',
+        no_proxy_assigned: 'Проксі не призначено',
+        banned: 'Акаунт забанено',
+        deactivated: 'Акаунт деактивовано',
+        frozen: 'Акаунт заморожено',
+        phone_number_invalid: 'Некоректний номер телефону',
+        unknown_error: 'Невідома помилка'
+      }
+    },
+
     messages: {
       loadError: 'Не вдалося завантажити акаунти',
       importSuccess: 'Акаунт успішно імпортовано',
@@ -702,12 +722,12 @@ export default {
   },
 
   accountPicker: {
-    title: 'Вибір акаунтів',
+    title: 'Акаунти',
     selected: '{count} обрано',
     available: 'Доступні',
     selectedPanel: 'Обрано',
     searchPlaceholder: 'ID, телефон, username...',
-    allGroups: 'Всі групи',
+    allGroups: 'Всі',
     addAll: 'Додати все',
     removeAll: 'Видалити все',
     allAdded: 'Всі додані',
@@ -777,7 +797,40 @@ export default {
       all: 'Всі',
       successful: 'Успішні',
       failed: 'Помилки',
-      search: 'Пошук...'
+      search: 'Пошук...',
+      translate: {
+        actionNotExecuted: 'Дію не було виконано',
+        staleAutoClosed: 'Завдання автоматично закрито як застаріле до обробки цього акаунта',
+        sessionNotAuthorized: 'Сесія не авторизована',
+        noSessionString: 'Відсутній рядок сесії',
+        accountSkippedByStatus: 'Акаунт пропущено через статус: {status}',
+        reactionSent: 'Реакцію {emoji} надіслано',
+        commentSentTo: 'Коментар надіслано до {target}',
+        reactionAlreadySet: 'Реакція вже встановлена',
+        invalidReactionEmoji: 'Невалідний емоджі реакції',
+        accountCannotReactInChannel: 'Акаунт не може ставити реакції в цьому каналі',
+        channelPrivate: 'Канал приватний',
+        invalidMessageId: 'Невалідний ID повідомлення',
+        entityNotResolved: 'Не вдалося визначити сутність каналу',
+        clientNotConnected: 'Клієнт не підключений',
+        noPostsInChannel: 'У каналі немає постів',
+        cannotCommentInChannel: 'Неможливо коментувати в цьому каналі',
+        accountBannedInChannel: 'Акаунт заблоковано в каналі',
+        messageIdInvalidPost: 'Невалідний ID повідомлення: пост може не підтримувати коментарі',
+        floodWait: 'FloodWait: {seconds}с',
+        slowMode: 'SlowMode: {seconds}с',
+        noAccountsAssigned: 'До завдання не прив’язано жодного акаунта',
+        noTargetChannelsSpecified: 'Не вказано цільові канали',
+        noCommentableChannelsFound: 'Не знайдено каналів для коментування (немає прив’язаних груп обговорення)',
+        allAccountsFailedToConnect: 'Усі акаунти не змогли підключитися',
+        allAccountsFailedDuringResolution: 'Усі акаунти відпали під час резолву каналу',
+        allAccountsFailedDuringSetup: 'Усі акаунти відпали під час налаштування каналів',
+        noValidAccountsForMonitoring: 'Немає валідних акаунтів для моніторингу',
+        reactionsDisabledInChannel: 'У цьому каналі реакції вимкнені',
+        noMessagesFoundInChannel: 'У каналі не знайдено повідомлень',
+        allEligibleAccountsExhausted: 'Усі доступні акаунти вичерпано до досягнення цілі',
+        taskStoppedBeforeTotal: 'Завдання зупинено до досягнення цільової кількості дій'
+      }
     },
     time: {
       justNow: 'щойно',

@@ -169,7 +169,7 @@ onMounted(async () => {
 
 .stat-card {
   background: #111113;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 14px;
   padding: 20px;
   transition: border-color 0.2s;
@@ -237,7 +237,7 @@ onMounted(async () => {
 
 .stat-label {
   font-size: 13px;
-  color: #6b7280;
+  color: #8b8f9a;
   font-weight: 500;
   margin-top: 6px;
 }
@@ -255,7 +255,7 @@ onMounted(async () => {
   gap: 8px;
   font-size: 13px;
   font-weight: 600;
-  color: #6b7280;
+  color: #8b8f9a;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -278,7 +278,7 @@ onMounted(async () => {
   gap: 12px;
   padding: 14px 16px;
   background: #111113;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 12px;
   text-decoration: none;
   transition: all 0.15s ease;
@@ -345,7 +345,7 @@ onMounted(async () => {
 }
 
 .action-arrow {
-  color: #3f3f46;
+  color: #55555e;
   font-size: 11px;
   transition: all 0.15s ease;
 }

@@ -1225,8 +1225,8 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 
 .stat-card {
   flex: 1;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 10px;
   padding: 14px 16px;
   cursor: pointer;
@@ -1235,7 +1235,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 }
 
 .stat-card:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.1);
 }
 
@@ -1257,7 +1257,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 
 .stat-label {
   font-size: 11px;
-  color: #6b7280;
+  color: #8b8f9a;
   font-weight: 500;
   margin-top: 2px;
 }
@@ -1268,8 +1268,8 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 10px;
 }
 
@@ -1285,7 +1285,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
   width: 34px;
   height: 34px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.13);
   background: rgba(255, 255, 255, 0.04);
   color: #9ca3af;
   cursor: pointer;
@@ -1294,7 +1294,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 }
 
 .toolbar-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.13);
   color: #e5e7eb;
   border-color: rgba(255, 255, 255, 0.15);
 }
@@ -1306,7 +1306,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 
 .shown-count {
   font-size: 12px;
-  color: #6b7280;
+  color: #8b8f9a;
 }
 
 .check-progress {
@@ -1334,7 +1334,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 :deep(.filter-chip .p-dropdown) {
   border-radius: 20px;
   border-color: rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.06);
   font-size: 13px;
   height: 34px;
 }
@@ -1352,7 +1352,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 .search-icon {
   position: absolute;
   left: 12px;
-  color: #6b7280;
+  color: #8b8f9a;
   font-size: 13px;
   pointer-events: none;
 }
@@ -1364,13 +1364,13 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
   font-size: 13px;
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 /* Table */
 .table-card {
   background: linear-gradient(145deg, #161616 0%, #111111 100%);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 12px;
   padding: 0;
   overflow: hidden;
@@ -1400,14 +1400,14 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 }
 
 .empty-text {
-  color: #6b7280;
+  color: #8b8f9a;
   margin-bottom: 20px;
   font-size: 15px;
 }
 
 .row-index {
   font-size: 12px;
-  color: #6b7280;
+  color: #8b8f9a;
 }
 
 .proxy-cell {
@@ -1499,7 +1499,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 
 .last-check-text {
   font-size: 12px;
-  color: #6b7280;
+  color: #8b8f9a;
 }
 
 .actions-cell {
@@ -1516,14 +1516,14 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
   border-radius: 6px;
   border: none;
   background: transparent;
-  color: #6b7280;
+  color: #8b8f9a;
   cursor: pointer;
   transition: all 0.15s;
   font-size: 13px;
 }
 
 .action-icon:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.10);
   color: #e5e7eb;
 }
 
@@ -1538,9 +1538,9 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 }
 
 :deep(.custom-table .p-datatable-thead > tr > th) {
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.06);
-  color: #6b7280;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.10);
+  color: #8b8f9a;
   font-weight: 600;
   font-size: 11px;
   text-transform: uppercase;
@@ -1555,7 +1555,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 }
 
 :deep(.custom-table .p-datatable-tbody > tr:hover) {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 :deep(.custom-table .p-datatable-tbody > tr > td) {
@@ -1574,7 +1574,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 /* Dialog styles */
 :deep(.custom-dialog .p-dialog-header) {
   background: #161616;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 :deep(.custom-dialog .p-dialog-content) {
@@ -1615,13 +1615,13 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 
 .divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.13);
   margin: 8px 0;
 }
 
 .hint-text {
   font-size: 12px;
-  color: #6b7280;
+  color: #8b8f9a;
   margin-bottom: 8px;
 }
 
@@ -1649,7 +1649,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 
 .format-hint {
   display: block;
-  color: #6b7280;
+  color: #8b8f9a;
   font-size: 11px;
   margin-top: 6px;
 }
@@ -1683,7 +1683,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 .preview-list {
   max-height: 320px;
   overflow-y: auto;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 8px;
   margin-bottom: 16px;
 }
@@ -1702,7 +1702,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 }
 
 .preview-item:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .preview-item-disabled {
@@ -1739,7 +1739,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 
 .preview-geo {
   font-size: 12px;
-  color: #6b7280;
+  color: #8b8f9a;
   font-weight: 500;
 }
 
@@ -1751,7 +1751,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 
 .edit-check-result {
   padding: 12px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.06);
   border-radius: 8px;
   margin-top: 12px;
 }
@@ -1769,7 +1769,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 
 .check-geo {
   font-size: 13px;
-  color: #6b7280;
+  color: #8b8f9a;
   font-weight: 500;
 }
 </style>

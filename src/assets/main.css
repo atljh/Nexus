@@ -12,21 +12,21 @@
 
   /* Background colors */
   --color-bg-base: #09090b;
-  --color-bg-surface: #0f0f12;
-  --color-bg-elevated: #18181b;
-  --color-bg-hover: #1f1f23;
-  --color-bg-input: #141417;
+  --color-bg-surface: #111114;
+  --color-bg-elevated: #1a1a1e;
+  --color-bg-hover: #222228;
+  --color-bg-input: #151518;
 
   /* Border colors */
-  --color-border: rgba(255, 255, 255, 0.06);
-  --color-border-hover: rgba(255, 255, 255, 0.1);
+  --color-border: rgba(255, 255, 255, 0.10);
+  --color-border-hover: rgba(255, 255, 255, 0.18);
   --color-border-focus: rgba(168, 85, 247, 0.5);
 
   /* Text colors */
   --color-text-primary: #fafafa;
-  --color-text-secondary: #a1a1aa;
-  --color-text-muted: #71717a;
-  --color-text-disabled: #52525b;
+  --color-text-secondary: #a8a8b3;
+  --color-text-muted: #85858f;
+  --color-text-disabled: #62626c;
 
   /* Status colors */
   --color-success: #22c55e;
@@ -79,12 +79,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.10);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.18);
 }
 
 /* Selection */
@@ -130,15 +130,15 @@ a:hover {
 :root {
   /* Surface colors */
   --p-surface-0: #09090b;
-  --p-surface-50: #0f0f12;
-  --p-surface-100: #141417;
-  --p-surface-200: #18181b;
-  --p-surface-300: #1f1f23;
-  --p-surface-400: #27272a;
-  --p-surface-500: #3f3f46;
-  --p-surface-600: #52525b;
-  --p-surface-700: #71717a;
-  --p-surface-800: #a1a1aa;
+  --p-surface-50: #111114;
+  --p-surface-100: #151518;
+  --p-surface-200: #1a1a1e;
+  --p-surface-300: #222228;
+  --p-surface-400: #2c2c32;
+  --p-surface-500: #45454d;
+  --p-surface-600: #62626c;
+  --p-surface-700: #85858f;
+  --p-surface-800: #a8a8b3;
   --p-surface-900: #e4e4e7;
   --p-surface-950: #fafafa;
 
@@ -155,28 +155,28 @@ a:hover {
   --p-primary-900: #581c87;
 
   /* Form field colors */
-  --p-form-field-background: #141417;
-  --p-form-field-disabled-background: #1f1f23;
-  --p-form-field-filled-background: #141417;
-  --p-form-field-border-color: rgba(255, 255, 255, 0.08);
-  --p-form-field-hover-border-color: rgba(255, 255, 255, 0.15);
+  --p-form-field-background: #151518;
+  --p-form-field-disabled-background: #222228;
+  --p-form-field-filled-background: #151518;
+  --p-form-field-border-color: rgba(255, 255, 255, 0.12);
+  --p-form-field-hover-border-color: rgba(255, 255, 255, 0.20);
   --p-form-field-focus-border-color: #a855f7;
   --p-form-field-color: #fafafa;
-  --p-form-field-placeholder-color: #71717a;
-  --p-form-field-float-label-color: #a1a1aa;
+  --p-form-field-placeholder-color: #85858f;
+  --p-form-field-float-label-color: #a8a8b3;
 
   /* Content colors */
-  --p-content-background: #18181b;
-  --p-content-hover-background: #1f1f23;
-  --p-content-border-color: rgba(255, 255, 255, 0.08);
+  --p-content-background: #1a1a1e;
+  --p-content-hover-background: #222228;
+  --p-content-border-color: rgba(255, 255, 255, 0.12);
 
   /* Text colors */
   --p-text-color: #fafafa;
-  --p-text-muted-color: #a1a1aa;
+  --p-text-muted-color: #a8a8b3;
 
   /* Overlay colors */
-  --p-overlay-background: #18181b;
-  --p-overlay-border-color: rgba(255, 255, 255, 0.08);
+  --p-overlay-background: #1a1a1e;
+  --p-overlay-border-color: rgba(255, 255, 255, 0.12);
 
   /* Focus ring */
   --p-focus-ring-color: rgba(168, 85, 247, 0.25);
@@ -194,8 +194,8 @@ a:hover {
   border-radius: 8px;
   padding: 9px 15px;
   transition: all 0.15s ease;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
   color: #e5e7eb !important;
   font-size: 13.5px;
 }
@@ -205,13 +205,13 @@ a:hover {
 }
 
 .p-button:not(.p-button-text):not(.p-button-outlined):not(.p-button-link):not(.p-button-danger):not(.p-button-success):not(.action-btn-orange):not(.action-btn-blue):not(.action-btn-green) {
-  background: rgba(255, 255, 255, 0.04) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
   border: 1px solid rgba(255, 255, 255, 0.12) !important;
   box-shadow: none !important;
 }
 
 .p-button:not(.p-button-text):not(.p-button-outlined):not(.p-button-link):not(.p-button-danger):not(.p-button-success):not(.action-btn-orange):not(.action-btn-blue):not(.action-btn-green):hover {
-  background: rgba(255, 255, 255, 0.08) !important;
+  background: rgba(255, 255, 255, 0.12) !important;
   border-color: rgba(168, 85, 247, 0.5) !important;
 }
 
@@ -228,7 +228,7 @@ a:hover {
 }
 
 .p-button.p-button-secondary {
-  background: rgba(255, 255, 255, 0.04) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
   border: 1px solid rgba(255, 255, 255, 0.12) !important;
   box-shadow: none !important;
 }
@@ -238,7 +238,7 @@ a:hover {
 }
 
 .p-button.p-button-secondary:hover {
-  background: rgba(255, 255, 255, 0.08) !important;
+  background: rgba(255, 255, 255, 0.12) !important;
   border-color: rgba(168, 85, 247, 0.5) !important;
 }
 
@@ -280,9 +280,9 @@ input.p-inputtext,
 .p-autocomplete-input {
   border-radius: 8px !important;
   padding: 10px 14px !important;
-  background: #141417 !important;
-  background-color: #141417 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: #151518 !important;
+  background-color: #151518 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
   color: #fafafa !important;
   transition: all 0.15s ease !important;
 }
@@ -290,12 +290,12 @@ input.p-inputtext,
 .p-inputtext::placeholder,
 .p-inputnumber-input::placeholder,
 input::placeholder {
-  color: #71717a !important;
+  color: #85858f !important;
 }
 
 .p-inputtext:hover:not(:focus):not(:disabled),
 .p-inputnumber-input:hover:not(:focus):not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.15) !important;
+  border-color: rgba(255, 255, 255, 0.20) !important;
 }
 
 .p-inputtext:focus,
@@ -305,13 +305,13 @@ input::placeholder {
   border-color: #a855f7 !important;
   box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.15) !important;
   outline: none !important;
-  background: #141417 !important;
+  background: #151518 !important;
 }
 
 .p-inputtext:disabled,
 .p-inputnumber-input:disabled {
-  background: #1f1f23 !important;
-  color: #52525b !important;
+  background: #222228 !important;
+  color: #62626c !important;
   cursor: not-allowed;
 }
 
@@ -320,26 +320,26 @@ input::placeholder {
 .p-textarea.p-component,
 textarea.p-textarea {
   border-radius: 8px !important;
-  background: #141417 !important;
-  background-color: #141417 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: #151518 !important;
+  background-color: #151518 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
   color: #fafafa !important;
   padding: 10px 14px !important;
 }
 
 .p-textarea::placeholder {
-  color: #71717a !important;
+  color: #85858f !important;
 }
 
 .p-textarea:hover:not(:focus):not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.15) !important;
+  border-color: rgba(255, 255, 255, 0.20) !important;
 }
 
 .p-textarea:focus,
 .p-textarea.p-focus {
   border-color: #a855f7 !important;
   box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.15) !important;
-  background: #141417 !important;
+  background: #151518 !important;
 }
 
 /* Dropdown - Force dark theme */
@@ -348,9 +348,9 @@ textarea.p-textarea {
 .p-select,
 .p-select.p-component {
   border-radius: 8px !important;
-  background: #141417 !important;
-  background-color: #141417 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: #151518 !important;
+  background-color: #151518 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
 }
 
 .p-dropdown .p-dropdown-label,
@@ -364,12 +364,12 @@ textarea.p-textarea {
 .p-dropdown .p-dropdown-trigger,
 .p-select .p-select-dropdown {
   background: transparent !important;
-  color: #a1a1aa !important;
+  color: #a8a8b3 !important;
 }
 
 .p-dropdown:not(.p-disabled):hover,
 .p-select:not(.p-disabled):hover {
-  border-color: rgba(255, 255, 255, 0.15) !important;
+  border-color: rgba(255, 255, 255, 0.20) !important;
 }
 
 .p-dropdown:not(.p-disabled).p-focus,
@@ -383,9 +383,9 @@ textarea.p-textarea {
 .p-dropdown-panel,
 .p-select-overlay,
 .p-select-list-container {
-  background: #18181b !important;
-  background-color: #18181b !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: #1a1a1e !important;
+  background-color: #1a1a1e !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
   border-radius: 10px !important;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
   margin-top: 4px !important;
@@ -401,7 +401,7 @@ textarea.p-textarea {
 .p-select-option {
   padding: 10px 12px !important;
   border-radius: 6px !important;
-  color: #a1a1aa !important;
+  color: #a8a8b3 !important;
   background: transparent !important;
   transition: all 0.1s ease !important;
 }
@@ -410,7 +410,7 @@ textarea.p-textarea {
 .p-select-option:hover,
 .p-dropdown-item.p-focus,
 .p-select-option.p-focus {
-  background: #1f1f23 !important;
+  background: #222228 !important;
   color: #fafafa !important;
 }
 
@@ -425,9 +425,9 @@ textarea.p-textarea {
 .p-multiselect,
 .p-multiselect.p-component {
   border-radius: 8px !important;
-  background: #141417 !important;
-  background-color: #141417 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: #151518 !important;
+  background-color: #151518 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
 }
 
 .p-multiselect .p-multiselect-label {
@@ -438,11 +438,11 @@ textarea.p-textarea {
 
 .p-multiselect .p-multiselect-trigger {
   background: transparent !important;
-  color: #a1a1aa !important;
+  color: #a8a8b3 !important;
 }
 
 .p-multiselect:not(.p-disabled):hover {
-  border-color: rgba(255, 255, 255, 0.15) !important;
+  border-color: rgba(255, 255, 255, 0.20) !important;
 }
 
 .p-multiselect:not(.p-disabled).p-focus,
@@ -453,9 +453,9 @@ textarea.p-textarea {
 
 .p-multiselect-panel,
 .p-multiselect-overlay {
-  background: #18181b !important;
-  background-color: #18181b !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: #1a1a1e !important;
+  background-color: #1a1a1e !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
   border-radius: 10px !important;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
 }
@@ -470,7 +470,7 @@ textarea.p-textarea {
 .p-multiselect-option {
   padding: 10px 12px !important;
   border-radius: 6px !important;
-  color: #a1a1aa !important;
+  color: #a8a8b3 !important;
   background: transparent !important;
 }
 
@@ -478,7 +478,7 @@ textarea.p-textarea {
 .p-multiselect-option:hover,
 .p-multiselect-item.p-focus,
 .p-multiselect-option.p-focus {
-  background: #1f1f23 !important;
+  background: #222228 !important;
   color: #fafafa !important;
 }
 
@@ -505,9 +505,9 @@ textarea.p-textarea {
 .p-chips.p-component,
 .p-inputchips,
 .p-autocomplete.p-autocomplete-multiple .p-autocomplete-input-multiple {
-  background: #141417 !important;
-  background-color: #141417 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: #151518 !important;
+  background-color: #151518 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
   border-radius: 8px !important;
 }
 
@@ -716,7 +716,7 @@ textarea.p-textarea {
 /* ProgressBar */
 .p-progressbar {
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.12);
   height: 6px;
 }
 
@@ -735,7 +735,7 @@ textarea.p-textarea {
 .p-tabs .p-tablist,
 .p-tablist {
   background: transparent !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
 }
 
 .p-tabview .p-tabview-nav li .p-tabview-nav-link,
@@ -743,7 +743,7 @@ textarea.p-textarea {
 .p-tab {
   background: transparent !important;
   border-color: transparent !important;
-  color: #71717a !important;
+  color: #85858f !important;
   padding: 14px 20px !important;
   font-weight: 500 !important;
   transition: all 0.15s ease !important;
@@ -754,9 +754,9 @@ textarea.p-textarea {
 .p-tabview .p-tabview-nav li .p-tabview-nav-link:hover,
 .p-tabs .p-tab:hover,
 .p-tab:hover {
-  color: #a1a1aa !important;
+  color: #a8a8b3 !important;
   background: transparent !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
 }
 
 .p-tabview .p-tabview-nav li.p-highlight .p-tabview-nav-link,
@@ -784,7 +784,7 @@ textarea.p-textarea {
 /* Tab ink bar */
 .p-tablist-tab-list::before,
 .p-tabs .p-tablist::before {
-  background: rgba(255, 255, 255, 0.08) !important;
+  background: rgba(255, 255, 255, 0.12) !important;
 }
 
 .p-tablist-active-bar,
@@ -902,9 +902,9 @@ textarea.p-textarea {
 
 .p-inputnumber .p-inputnumber-input,
 .p-inputnumber input {
-  background: #141417 !important;
-  background-color: #141417 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: #151518 !important;
+  background-color: #151518 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
   color: #fafafa !important;
   border-radius: 8px !important;
   padding: 10px 14px !important;
@@ -914,17 +914,17 @@ textarea.p-textarea {
 .p-inputnumber input:focus {
   border-color: #a855f7 !important;
   box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.15) !important;
-  background: #141417 !important;
+  background: #151518 !important;
 }
 
 .p-inputnumber .p-inputnumber-button {
-  background: #1f1f23 !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  color: #a1a1aa !important;
+  background: #222228 !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #a8a8b3 !important;
 }
 
 .p-inputnumber .p-inputnumber-button:hover {
-  background: #27272a !important;
+  background: #2c2c32 !important;
   color: #fafafa !important;
 }
 
@@ -932,15 +932,15 @@ textarea.p-textarea {
 .p-inputgroup .p-inputtext,
 .p-inputgroup .p-inputnumber-input,
 .p-inputgroup input {
-  background: #141417 !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: #151518 !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
   color: #fafafa !important;
 }
 
 .p-inputgroup-addon {
-  background: #1f1f23 !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  color: #a1a1aa !important;
+  background: #222228 !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #a8a8b3 !important;
 }
 
 /* ============================================
@@ -1009,9 +1009,9 @@ input[type="url"],
 input[type="search"],
 textarea,
 select {
-  background: #141417 !important;
-  background-color: #141417 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: #151518 !important;
+  background-color: #151518 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
   color: #fafafa !important;
   border-radius: 8px !important;
 }
@@ -1032,7 +1032,7 @@ select:focus {
 
 input::placeholder,
 textarea::placeholder {
-  color: #71717a !important;
+  color: #85858f !important;
 }
 
 /* Remove autofill background color */
@@ -1040,7 +1040,7 @@ input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
 input:-webkit-autofill:active {
-  -webkit-box-shadow: 0 0 0 30px #141417 inset !important;
+  -webkit-box-shadow: 0 0 0 30px #151518 inset !important;
   -webkit-text-fill-color: #fafafa !important;
   caret-color: #fafafa !important;
 }

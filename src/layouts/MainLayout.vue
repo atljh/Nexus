@@ -81,8 +81,8 @@ function toggleTheme() {
 
 .sidebar {
   width: 230px;
-  background: #0c0c0e;
-  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  background: #0d0d10;
+  border-right: 1px solid rgba(255, 255, 255, 0.10);
   display: flex;
   flex-direction: column;
   position: fixed;
@@ -94,7 +94,7 @@ function toggleTheme() {
 
 .sidebar-header {
   padding: 20px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .logo {
@@ -139,7 +139,7 @@ function toggleTheme() {
   gap: 12px;
   padding: 10px 14px;
   border-radius: 8px;
-  color: #6b7280;
+  color: #8b8f9a;
   text-decoration: none;
   transition: all 0.15s ease;
   font-size: 13.5px;
@@ -148,8 +148,8 @@ function toggleTheme() {
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.04);
-  color: #9ca3af;
+  background: rgba(255, 255, 255, 0.06);
+  color: #b0b4bf;
 }
 
 .nav-item.active {
@@ -182,7 +182,7 @@ function toggleTheme() {
 
 .sidebar-footer {
   padding: 14px 18px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .theme-toggle {
@@ -190,8 +190,8 @@ function toggleTheme() {
   height: 32px;
   border-radius: 8px;
   border: none;
-  background: rgba(255, 255, 255, 0.05);
-  color: #6b7280;
+  background: rgba(255, 255, 255, 0.07);
+  color: #8b8f9a;
   cursor: pointer;
   display: flex;
   align-items: center;

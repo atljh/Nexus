@@ -147,6 +147,71 @@ function formatLogTime(date: string | null): string {
   })
 }
 
+function translateLogText(text?: string | null): string {
+  if (!text) return ''
+
+  const value = text.trim()
+
+  const exactMap: Record<string, string> = {
+    'Action was not executed': 'taskResults.logs.translate.actionNotExecuted',
+    'Task auto-closed as stale before this account was processed': 'taskResults.logs.translate.staleAutoClosed',
+    'Session is not authorized': 'taskResults.logs.translate.sessionNotAuthorized',
+    'No session string': 'taskResults.logs.translate.noSessionString',
+    'Reaction already set': 'taskResults.logs.translate.reactionAlreadySet',
+    'Invalid reaction emoji': 'taskResults.logs.translate.invalidReactionEmoji',
+    'Account cannot react in this channel': 'taskResults.logs.translate.accountCannotReactInChannel',
+    'Channel is private': 'taskResults.logs.translate.channelPrivate',
+    'Invalid message ID': 'taskResults.logs.translate.invalidMessageId',
+    'Entity not resolved': 'taskResults.logs.translate.entityNotResolved',
+    'Client not connected': 'taskResults.logs.translate.clientNotConnected',
+    'No posts in channel': 'taskResults.logs.translate.noPostsInChannel',
+    'Cannot comment in this channel': 'taskResults.logs.translate.cannotCommentInChannel',
+    'Account banned in channel': 'taskResults.logs.translate.accountBannedInChannel',
+    'Message ID invalid — post may not support comments': 'taskResults.logs.translate.messageIdInvalidPost',
+    'No accounts assigned to task': 'taskResults.logs.translate.noAccountsAssigned',
+    'No target channels specified': 'taskResults.logs.translate.noTargetChannelsSpecified',
+    'No commentable channels found (no discussion groups linked)': 'taskResults.logs.translate.noCommentableChannelsFound',
+    'All accounts failed to connect': 'taskResults.logs.translate.allAccountsFailedToConnect',
+    'All accounts failed during channel resolution': 'taskResults.logs.translate.allAccountsFailedDuringResolution',
+    'All accounts failed during channel setup': 'taskResults.logs.translate.allAccountsFailedDuringSetup',
+    'No valid accounts for monitoring': 'taskResults.logs.translate.noValidAccountsForMonitoring',
+    'Reactions are disabled in this channel': 'taskResults.logs.translate.reactionsDisabledInChannel',
+    'No messages found in channel': 'taskResults.logs.translate.noMessagesFoundInChannel',
+    'All eligible accounts exhausted before reaching total actions': 'taskResults.logs.translate.allEligibleAccountsExhausted',
+    'Task stopped before reaching total actions': 'taskResults.logs.translate.taskStoppedBeforeTotal',
+  }
+
+  const mappedKey = exactMap[value]
+  if (mappedKey) return t(mappedKey)
+
+  const reactionMatch = value.match(/^Reaction\s+(.+)\s+sent$/i)
+  if (reactionMatch) {
+    return t('taskResults.logs.translate.reactionSent', { emoji: reactionMatch[1] })
+  }
+
+  const commentSentMatch = value.match(/^Comment sent to (.+)$/i)
+  if (commentSentMatch) {
+    return t('taskResults.logs.translate.commentSentTo', { target: commentSentMatch[1] })
+  }
+
+  const floodWaitMatch = value.match(/^FloodWait:\s*(\d+)s/i)
+  if (floodWaitMatch) {
+    return t('taskResults.logs.translate.floodWait', { seconds: floodWaitMatch[1] })
+  }
+
+  const slowModeMatch = value.match(/^SlowMode:\s*(\d+)s/i)
+  if (slowModeMatch) {
+    return t('taskResults.logs.translate.slowMode', { seconds: slowModeMatch[1] })
+  }
+
+  const skippedByStatusMatch = value.match(/^Account skipped by status:\s*(.+)$/i)
+  if (skippedByStatusMatch) {
+    return t('taskResults.logs.translate.accountSkippedByStatus', { status: skippedByStatusMatch[1] })
+  }
+
+  return value
+}
+
 const confirmHeader = computed(() => {
   if (confirmAction.value === 'delete') return t('taskResults.confirm.deleteHeader')
   if (confirmAction.value === 'restart') return t('taskResults.confirm.restartHeader')
@@ -651,8 +716,8 @@ watch(() => task.value?.status, (newStatus) => {
                   <span class="log-ts">{{ formatLogTime(log.created_at) }}</span>
                   <span :class="log.success ? 'log-ok' : 'log-fail'">{{ log.success ? 'OK' : 'ERR' }}</span>
                   <span v-if="log.target" class="log-target">{{ log.target }}</span>
-                  <span v-if="log.message" class="log-msg">{{ log.message }}</span>
-                  <span v-if="log.error" class="log-err">{{ log.error }}</span>
+                  <span v-if="log.message" class="log-msg">{{ translateLogText(log.message) }}</span>
+                  <span v-if="log.error" class="log-err">{{ translateLogText(log.error) }}</span>
                   <span v-if="log.extra_data?.comment" class="log-comment">"{{ log.extra_data.comment }}"</span>
                 </div>
 
@@ -721,7 +786,7 @@ watch(() => task.value?.status, (newStatus) => {
   justify-content: center;
   gap: 16px;
   padding: 80px;
-  color: #71717a;
+  color: #8b8b95;
 }
 
 .loading-state i {
@@ -744,12 +809,12 @@ watch(() => task.value?.status, (newStatus) => {
 }
 
 .back-btn {
-  color: #71717a;
+  color: #8b8b95;
 }
 
 .back-btn:hover {
   color: #fafafa;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .header-info {
@@ -773,8 +838,8 @@ watch(() => task.value?.status, (newStatus) => {
 .task-type-badge {
   font-size: 11px;
   font-weight: 500;
-  color: #a1a1aa;
-  background: rgba(255, 255, 255, 0.05);
+  color: #ababb5;
+  background: rgba(255, 255, 255, 0.08);
   padding: 3px 10px;
   border-radius: 20px;
 }
@@ -840,7 +905,7 @@ watch(() => task.value?.status, (newStatus) => {
 .action-btn.delete {
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #71717a;
+  color: #8b8b95;
 }
 
 .action-btn.delete:hover {
@@ -902,7 +967,7 @@ watch(() => task.value?.status, (newStatus) => {
 .status-banner.status-completed .status-icon { color: #22c55e; }
 .status-banner.status-failed .status-icon { color: #ef4444; }
 .status-banner.status-paused .status-icon { color: #f59e0b; }
-.status-banner.status-cancelled .status-icon { color: #6b7280; }
+.status-banner.status-cancelled .status-icon { color: #8b8f9a; }
 
 .status-text {
   display: flex;
@@ -919,7 +984,7 @@ watch(() => task.value?.status, (newStatus) => {
 .status-progress,
 .status-detail {
   font-size: 13px;
-  color: #a1a1aa;
+  color: #ababb5;
 }
 
 .status-error {
@@ -952,7 +1017,7 @@ watch(() => task.value?.status, (newStatus) => {
 }
 
 .status-banner.status-cancelled .progress-fill {
-  background: linear-gradient(90deg, #6b7280 0%, #4b5563 100%);
+  background: linear-gradient(90deg, #8b8f9a 0%, #4b5563 100%);
 }
 
 @keyframes progress-glow {
@@ -970,7 +1035,7 @@ watch(() => task.value?.status, (newStatus) => {
 
 .status-banner.status-running .progress-percent { color: #3b82f6; }
 .status-banner.status-completed .progress-percent { color: #22c55e; }
-.status-banner.status-cancelled .progress-percent { color: #6b7280; }
+.status-banner.status-cancelled .progress-percent { color: #8b8f9a; }
 
 /* Stats Grid */
 .stats-grid {
@@ -993,8 +1058,8 @@ watch(() => task.value?.status, (newStatus) => {
 }
 
 .stat-card {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 14px;
   padding: 18px;
   display: flex;
@@ -1038,8 +1103,8 @@ watch(() => task.value?.status, (newStatus) => {
 }
 
 .stat-icon.secondary {
-  color: #a1a1aa;
-  background: rgba(255, 255, 255, 0.05);
+  color: #ababb5;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .stat-content {
@@ -1056,7 +1121,7 @@ watch(() => task.value?.status, (newStatus) => {
 
 .stat-label {
   font-size: 12px;
-  color: #71717a;
+  color: #8b8b95;
 }
 
 /* Main Grid */
@@ -1077,8 +1142,8 @@ watch(() => task.value?.status, (newStatus) => {
 .channels-card,
 .templates-card,
 .logs-card {
-  background: linear-gradient(180deg, #141417 0%, #0f0f12 100%);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, #161619 0%, #111114 100%);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 16px;
   overflow: hidden;
 }
@@ -1088,7 +1153,7 @@ watch(() => task.value?.status, (newStatus) => {
   align-items: center;
   gap: 10px;
   padding: 18px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .card-header i {
@@ -1130,7 +1195,7 @@ watch(() => task.value?.status, (newStatus) => {
 
 .config-label {
   font-size: 13px;
-  color: #71717a;
+  color: #8b8b95;
 }
 
 .config-value {
@@ -1151,7 +1216,7 @@ watch(() => task.value?.status, (newStatus) => {
 .config-value.time {
   font-family: 'SF Mono', monospace;
   font-size: 12px;
-  color: #a1a1aa;
+  color: #ababb5;
 }
 
 .config-tags {
@@ -1172,7 +1237,7 @@ watch(() => task.value?.status, (newStatus) => {
 
 .config-divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.13);
   margin: 12px 0;
 }
 
@@ -1183,7 +1248,7 @@ watch(() => task.value?.status, (newStatus) => {
 
 .channel-item {
   padding: 14px;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.04);
   border-radius: 10px;
   margin-bottom: 10px;
 }
@@ -1207,7 +1272,7 @@ watch(() => task.value?.status, (newStatus) => {
 
 .channel-title {
   font-size: 12px;
-  color: #71717a;
+  color: #8b8b95;
 }
 
 .channel-stats {
@@ -1222,7 +1287,7 @@ watch(() => task.value?.status, (newStatus) => {
 
 .channel-sent {
   font-size: 12px;
-  color: #a1a1aa;
+  color: #ababb5;
 }
 
 .channel-error {
@@ -1266,7 +1331,7 @@ watch(() => task.value?.status, (newStatus) => {
 
 .template-content {
   font-size: 12px;
-  color: #a1a1aa;
+  color: #ababb5;
   line-height: 1.5;
 }
 
@@ -1284,7 +1349,7 @@ watch(() => task.value?.status, (newStatus) => {
 
 .logs-count {
   font-size: 12px;
-  color: #71717a;
+  color: #8b8b95;
   margin-left: auto;
 }
 
@@ -1293,7 +1358,7 @@ watch(() => task.value?.status, (newStatus) => {
   align-items: center;
   gap: 16px;
   padding: 14px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .filter-tabs {
@@ -1308,7 +1373,7 @@ watch(() => task.value?.status, (newStatus) => {
   padding: 8px 14px;
   border: none;
   background: transparent;
-  color: #71717a;
+  color: #8b8b95;
   font-size: 12px;
   font-weight: 500;
   border-radius: 8px;
@@ -1317,7 +1382,7 @@ watch(() => task.value?.status, (newStatus) => {
 }
 
 .filter-tab:hover {
-  color: #a1a1aa;
+  color: #ababb5;
   background: rgba(255, 255, 255, 0.04);
 }
 
@@ -1354,7 +1419,7 @@ watch(() => task.value?.status, (newStatus) => {
   left: 12px;
   top: 50%;
   transform: translateY(-50%);
-  color: #52525b;
+  color: #6e6e78;
   font-size: 14px;
 }
 
@@ -1394,7 +1459,7 @@ watch(() => task.value?.status, (newStatus) => {
 }
 
 .log-ts {
-  color: #52525b;
+  color: #6e6e78;
   flex-shrink: 0;
 }
 
@@ -1418,7 +1483,7 @@ watch(() => task.value?.status, (newStatus) => {
 }
 
 .log-msg {
-  color: #a1a1aa;
+  color: #ababb5;
 }
 
 .log-err {
@@ -1437,7 +1502,7 @@ watch(() => task.value?.status, (newStatus) => {
   justify-content: center;
   gap: 12px;
   padding: 60px;
-  color: #52525b;
+  color: #6e6e78;
 }
 
 .logs-empty i {
@@ -1469,7 +1534,7 @@ watch(() => task.value?.status, (newStatus) => {
 
 .not-found-state p {
   font-size: 14px;
-  color: #71717a;
+  color: #8b8b95;
   margin: 0;
 }
 
@@ -1490,21 +1555,21 @@ watch(() => task.value?.status, (newStatus) => {
 
 .confirm-content p {
   font-size: 14px;
-  color: #a1a1aa;
+  color: #ababb5;
   margin: 0;
   max-width: 300px;
 }
 
 /* Dialog overrides */
 :deep(.p-dialog) {
-  background: #141417;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #161619;
+  border: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 16px;
 }
 
 :deep(.p-dialog .p-dialog-header) {
   background: transparent;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 :deep(.p-dialog .p-dialog-content) {
@@ -1513,6 +1578,6 @@ watch(() => task.value?.status, (newStatus) => {
 
 :deep(.p-dialog .p-dialog-footer) {
   background: transparent;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
 }
 </style>

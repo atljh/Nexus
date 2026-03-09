@@ -3,6 +3,7 @@ Account checker with parallel execution and detailed status detection.
 Based on GramGPT implementation.
 """
 import asyncio
+import json
 import logging
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
@@ -56,6 +57,7 @@ class AccountCheckResult:
     is_premium: bool = False
     spamblock: Optional[bool] = None
     flood_wait: bool = False
+    error_code: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -103,6 +105,23 @@ class AccountChecker:
             proxy.get("username"),
             proxy.get("password"),
         )
+
+    @staticmethod
+    def _normalize_device_fingerprint(device_fingerprint: Optional[Any]) -> Dict[str, Any]:
+        """
+        Ensure device fingerprint is a dict.
+        Some legacy rows may store JSON as plain string.
+        """
+        if isinstance(device_fingerprint, dict):
+            return device_fingerprint
+        if isinstance(device_fingerprint, str):
+            try:
+                parsed = json.loads(device_fingerprint)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                return {}
+        return {}
 
     async def check_single(
         self,
@@ -154,12 +173,13 @@ class AccountChecker:
                 timeout=self.connection_timeout,
             )
 
-            if device_fingerprint and device_fingerprint.get("device_model"):
-                client_kwargs["device_model"] = device_fingerprint.get("device_model")
-                client_kwargs["system_version"] = device_fingerprint.get("system_version")
-                client_kwargs["app_version"] = device_fingerprint.get("app_version")
-                client_kwargs["lang_code"] = device_fingerprint.get("lang_code", "en")
-                client_kwargs["system_lang_code"] = device_fingerprint.get("system_lang_code", "en")
+            normalized_fp = self._normalize_device_fingerprint(device_fingerprint)
+            if normalized_fp.get("device_model"):
+                client_kwargs["device_model"] = normalized_fp.get("device_model")
+                client_kwargs["system_version"] = normalized_fp.get("system_version")
+                client_kwargs["app_version"] = normalized_fp.get("app_version")
+                client_kwargs["lang_code"] = normalized_fp.get("lang_code", "en")
+                client_kwargs["system_lang_code"] = normalized_fp.get("system_lang_code", "en")
 
             client = TelegramClient(
                 session,
@@ -173,6 +193,7 @@ class AccountChecker:
             # Check authorization
             if not await client.is_user_authorized():
                 result.status = AccountStatus.NEEDS_REAUTH
+                result.error_code = "not_authorized"
                 result.error = "Session requires re-authorization"
                 return result
 
@@ -237,43 +258,57 @@ class AccountChecker:
 
             return result
 
-        except (AuthKeyUnregisteredError, SessionRevokedError) as e:
+        except AuthKeyUnregisteredError as e:
             result.status = AccountStatus.SESSION_EXPIRED
+            result.error_code = "auth_key_unregistered"
+            result.error = f"Session expired: {type(e).__name__}"
+
+        except SessionRevokedError as e:
+            result.status = AccountStatus.SESSION_EXPIRED
+            result.error_code = "session_revoked"
             result.error = f"Session expired: {type(e).__name__}"
 
         except UserDeactivatedError:
             result.status = AccountStatus.DEACTIVATED
+            result.error_code = "deactivated"
             result.error = "Account deactivated by user"
 
         except (UserDeactivatedBanError, PhoneNumberBannedError) as e:
             result.status = AccountStatus.BANNED
+            result.error_code = "banned"
             result.error = f"Account banned: {type(e).__name__}"
 
         except PhoneNumberInvalidError:
             result.status = AccountStatus.INVALID
+            result.error_code = "phone_number_invalid"
             result.error = "Phone number invalid"
 
         except FloodWaitError as e:
             # Account is valid but rate limited
             result.status = AccountStatus.VALID
             result.flood_wait = True
+            result.error_code = "flood_wait"
             result.error = f"Flood wait: {e.seconds}s"
 
         except ConnectionError as e:
             result.status = AccountStatus.CONNECTION_FAILED
+            result.error_code = "connection_failed"
             result.error = f"Connection failed: {str(e)}"
 
         except asyncio.TimeoutError:
             result.status = AccountStatus.CONNECTION_FAILED
+            result.error_code = "timeout"
             result.error = "Connection timeout"
 
         except Exception as e:
             error_str = str(e).lower()
             if "frozen" in error_str:
                 result.status = AccountStatus.FROZEN
+                result.error_code = "frozen"
                 result.error = f"Account frozen: {str(e)}"
             else:
                 result.status = AccountStatus.INVALID
+                result.error_code = "unknown_error"
                 result.error = f"Error: {str(e)}"
 
         finally:

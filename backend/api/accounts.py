@@ -27,6 +27,13 @@ from telegram import (
     AccountStatus,
     two_factor_manager,
     auth_service,
+    OFFICIAL_APIS,
+)
+from telegram.account_metadata import (
+    extract_api_credentials as extract_api_credentials_from_metadata,
+    extract_device_fingerprint as extract_device_fingerprint_from_metadata,
+    normalize_device_fingerprint as normalize_device_fingerprint_value,
+    resolve_account_connection_params as resolve_account_connection_params_from_metadata,
 )
 
 router = APIRouter()
@@ -106,14 +113,7 @@ def extract_api_credentials(json_data: dict) -> dict:
     Extract API credentials from JSON data.
     Supports both naming conventions: api_id/app_id, api_hash/app_hash.
     """
-    # api_id (supports api_id and app_id)
-    api_id = json_data.get("api_id") or json_data.get("app_id")
-    if api_id:
-        api_id = int(api_id)
-
-    # api_hash (supports api_hash and app_hash)
-    api_hash = json_data.get("api_hash") or json_data.get("app_hash")
-
+    api_id, api_hash = extract_api_credentials_from_metadata(json_data)
     return {
         "api_id": api_id,
         "api_hash": api_hash,
@@ -125,47 +125,7 @@ def extract_device_fingerprint(json_data: dict) -> dict:
     Extract device fingerprint from JSON data.
     Supports various naming conventions.
     """
-    # Device model
-    device_model = (
-        json_data.get("device") or
-        json_data.get("device_model") or
-        json_data.get("device_name")
-    )
-
-    # System version (SDK for Android)
-    system_version = (
-        json_data.get("sdk") or
-        json_data.get("system_version") or
-        json_data.get("android_version")
-    )
-
-    # App version
-    app_version = (
-        json_data.get("app_version") or
-        json_data.get("appVersion")
-    )
-
-    # Lang code (supports lang_code and lang_pack)
-    lang_code = (
-        json_data.get("lang_code") or
-        json_data.get("lang_pack") or
-        "en"
-    )
-
-    # System lang code
-    system_lang_code = (
-        json_data.get("system_lang_code") or
-        json_data.get("system_lang_pack") or
-        "en"
-    )
-
-    return {
-        "device_model": device_model,
-        "system_version": system_version,
-        "app_version": app_version,
-        "lang_code": lang_code,
-        "system_lang_code": system_lang_code,
-    }
+    return extract_device_fingerprint_from_metadata(json_data)
 
 
 # Country code mapping for GEO detection from phone number
@@ -179,6 +139,48 @@ COUNTRY_CODES = {
     "971": "AE", "966": "SA", "972": "IL", "20": "EG",
     "27": "ZA", "234": "NG", "254": "KE",
 }
+
+ERROR_STATUS_MAP = {
+    "banned": "banned",
+    "deactivated": "deactivated",
+    "frozen": "frozen",
+    "session_expired": "session_expired",
+    "session_revoked": "session_expired",
+    "auth_key_duplicated": "session_expired",
+    "auth_key_unregistered": "session_expired",
+    "not_authorized": "needs_reauth",
+    "connection_failed": "connection_failed",
+    "timeout": "connection_failed",
+}
+
+
+def _split_error(error: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """
+    Split error payload by `code: detail`.
+    Returns (code, detail).
+    """
+    if not error:
+        return None, None
+
+    code, separator, detail = error.partition(":")
+    normalized_code = code.strip() or None
+    normalized_detail = detail.strip() if separator else None
+    return normalized_code, normalized_detail or None
+
+
+def _set_check_error(account: Account, error_code: Optional[str], error_message: Optional[str]) -> None:
+    account.last_check_error_code = error_code
+    account.last_check_error = error_message
+
+
+def _normalize_device_fingerprint(value: Optional[object]) -> dict:
+    return normalize_device_fingerprint_value(value)
+
+
+def _resolve_account_connection_params(account: Account) -> tuple[Optional[int], Optional[str], dict]:
+    """Resolve API credentials + device params from account columns and extra_data."""
+    api_id, api_hash, device_fp = resolve_account_connection_params_from_metadata(account)
+    return api_id, api_hash, device_fp
 
 
 @router.get("")
@@ -366,34 +368,21 @@ async def check_account(
         "password": account.proxy.password,
     }
 
-    # Get device fingerprint from account
-    device_fp = account.device_fingerprint or {}
+    resolved_api_id, resolved_api_hash, device_fp = _resolve_account_connection_params(account)
 
     # Use phone for consistent device fingerprint
     unique_id = account.phone or str(account.telegram_id) or account.session_string[:32]
     is_valid, user_info, error = await validate_session(
         account.session_string,
         proxy=proxy_config,
-        api_id=account.api_id,
-        api_hash=account.api_hash,
+        api_id=resolved_api_id,
+        api_hash=resolved_api_hash,
         unique_id=unique_id,
         device_model=device_fp.get("device_model"),
         system_version=device_fp.get("system_version"),
         app_version=device_fp.get("app_version"),
         lang_code=device_fp.get("lang_code"),
     )
-
-    # Map error codes to account statuses
-    ERROR_STATUS_MAP = {
-        "banned": "banned",
-        "deactivated": "deactivated",
-        "frozen": "frozen",
-        "session_expired": "session_expired",
-        "session_revoked": "session_expired",
-        "auth_key_duplicated": "session_expired",
-        "connection_failed": "connection_failed",
-        "timeout": "connection_failed",
-    }
 
     if is_valid and user_info:
         account.telegram_id = user_info.get("telegram_id")
@@ -403,10 +392,15 @@ async def check_account(
         if user_info.get("phone"):
             account.phone = user_info.get("phone")
         account.status = "valid"
+        _set_check_error(account, None, None)
     elif error:
         # Determine status from error code
-        error_key = error.split(":")[0] if error else ""
+        error_key, error_detail = _split_error(error)
         account.status = ERROR_STATUS_MAP.get(error_key, "invalid")
+        error_message = error_detail
+        if not error_message and error_key != error:
+            error_message = error
+        _set_check_error(account, error_key, error_message)
 
         # Save user info even for frozen accounts (get_me() succeeded)
         if user_info:
@@ -418,13 +412,16 @@ async def check_account(
                 account.phone = user_info.get("phone")
     else:
         account.status = "invalid"
+        _set_check_error(account, "unknown_error", "Session is invalid")
 
     account.last_checked_at = datetime.now(timezone.utc)
     await session.commit()
 
     return {
         "valid": is_valid,
+        "status": account.status,
         "user_info": user_info,
+        "error_code": account.last_check_error_code,
         "error": error
     }
 
@@ -523,7 +520,13 @@ async def import_tdata(
                 phone=metadata.get("phone"),
                 session_string=session_string,
                 proxy_id=proxy_id,
-                status="valid"
+                status="valid",
+                api_id=metadata.get("api_id"),
+                api_hash=metadata.get("api_hash"),
+                device_fingerprint=_normalize_device_fingerprint(
+                    metadata.get("device_fingerprint")
+                ),
+                extra_data=metadata,
             )
 
             session.add(account)
@@ -605,6 +608,8 @@ async def import_json_session(
 
     for i, item in enumerate(data):
         session_string = item.get("session_string") or item.get("session")
+        api_creds = extract_api_credentials(item)
+        device_fp = extract_device_fingerprint(item)
 
         if not session_string:
             errors.append({"index": i, "error": "Missing session_string"})
@@ -621,7 +626,13 @@ async def import_json_session(
         is_valid, user_info, error = await validate_session(
             session_string,
             proxy=proxy_config,
+            api_id=api_creds.get("api_id"),
+            api_hash=api_creds.get("api_hash"),
             unique_id=unique_id,
+            device_model=device_fp.get("device_model"),
+            system_version=device_fp.get("system_version"),
+            app_version=device_fp.get("app_version"),
+            lang_code=device_fp.get("lang_code"),
         )
 
         if not is_valid:
@@ -650,7 +661,11 @@ async def import_json_session(
             phone=user_info.get("phone") or item.get("phone"),
             session_string=session_string,
             proxy_id=proxy_id,
-            status="valid"
+            status="valid",
+            api_id=api_creds.get("api_id"),
+            api_hash=api_creds.get("api_hash"),
+            device_fingerprint=device_fp,
+            extra_data=item,
         )
 
         session.add(account)
@@ -800,6 +815,7 @@ async def check_batch_accounts(
     # Prepare account data for checker
     account_data = []
     for acc in accounts_with_proxy:
+        resolved_api_id, resolved_api_hash, resolved_device_fp = _resolve_account_connection_params(acc)
         proxy_config = {
             "type": acc.proxy.type,
             "host": acc.proxy.host,
@@ -814,11 +830,10 @@ async def check_batch_accounts(
             "proxy": proxy_config,
             "phone": acc.phone,  # For consistent device fingerprint
             "telegram_id": acc.telegram_id,
-            # API credentials from account
-            "api_id": acc.api_id,
-            "api_hash": acc.api_hash,
-            # Device fingerprint from account
-            "device_fingerprint": acc.device_fingerprint,
+            # API credentials + device params resolved from account and metadata
+            "api_id": resolved_api_id,
+            "api_hash": resolved_api_hash,
+            "device_fingerprint": resolved_device_fp,
         })
 
     # Configure checker concurrency
@@ -839,6 +854,10 @@ async def check_batch_accounts(
         if check_result:
             acc.status = check_result.status.value
             acc.last_checked_at = datetime.now(timezone.utc)
+            if check_result.status == AccountStatus.VALID:
+                _set_check_error(acc, None, None)
+            else:
+                _set_check_error(acc, check_result.error_code, check_result.error)
 
             # Update user info if we got it (valid, frozen, spamblock all have user info)
             if check_result.status in (AccountStatus.VALID, AccountStatus.FROZEN, AccountStatus.SPAMBLOCK):
@@ -863,23 +882,26 @@ async def check_batch_accounts(
                 "telegram_id": acc.telegram_id,
                 "username": acc.username,
                 "spamblock": acc.spamblock,
+                "error_code": check_result.error_code,
                 "error": check_result.error
             })
-
-    await session.commit()
 
     # Mark accounts without proxy as invalid and add to results
     for acc in accounts_without_proxy:
         acc.status = "invalid"
         acc.last_checked_at = datetime.now(timezone.utc)
+        _set_check_error(acc, "no_proxy_assigned", "No proxy assigned. Assign a proxy before checking.")
         response_results.append({
             "id": acc.id,
             "status": "invalid",
             "telegram_id": acc.telegram_id,
             "username": acc.username,
             "spamblock": None,
+            "error_code": "no_proxy_assigned",
             "error": "No proxy assigned. Assign a proxy before checking."
         })
+
+    await session.commit()
 
     return {
         "checked": len(accounts_with_proxy),
@@ -1049,6 +1071,8 @@ async def import_session_json_pairs(
             first_name = json_data.get("first_name")
             last_name = json_data.get("last_name")
             geo = json_data.get("geo")
+            api_creds = extract_api_credentials(json_data)
+            device_fp = extract_device_fingerprint(json_data)
 
             # Parse spamblock - can be bool, string ("free", "banned"), or None
             spamblock_raw = json_data.get("spamblock")
@@ -1100,6 +1124,9 @@ async def import_session_json_pairs(
                 spamblock=spamblock,
                 register_time=register_time,
                 geo=geo,
+                api_id=api_creds.get("api_id"),
+                api_hash=api_creds.get("api_hash"),
+                device_fingerprint=device_fp,
             )
 
             session.add(account)
@@ -1187,13 +1214,14 @@ async def get_2fa_status(
             "username": account.proxy.username,
             "password": account.proxy.password,
         }
+    resolved_api_id, resolved_api_hash, resolved_device_fp = _resolve_account_connection_params(account)
 
     check_result = await two_factor_manager.check_2fa_status(
         account.session_string,
         proxy=proxy_config,
-        api_id=account.api_id,
-        api_hash=account.api_hash,
-        device_fingerprint=account.device_fingerprint,
+        api_id=resolved_api_id,
+        api_hash=resolved_api_hash,
+        device_fingerprint=resolved_device_fp,
         unique_id=account.phone or str(account.telegram_id),
     )
 
@@ -1243,15 +1271,16 @@ async def set_2fa(
             "username": account.proxy.username,
             "password": account.proxy.password,
         }
+    resolved_api_id, resolved_api_hash, resolved_device_fp = _resolve_account_connection_params(account)
 
     set_result = await two_factor_manager.set_2fa(
         account.session_string,
         new_password=data.password,
         hint=data.hint or "",
         proxy=proxy_config,
-        api_id=account.api_id,
-        api_hash=account.api_hash,
-        device_fingerprint=account.device_fingerprint,
+        api_id=resolved_api_id,
+        api_hash=resolved_api_hash,
+        device_fingerprint=resolved_device_fp,
         unique_id=account.phone or str(account.telegram_id),
     )
 
@@ -1301,6 +1330,7 @@ async def change_2fa(
             "username": account.proxy.username,
             "password": account.proxy.password,
         }
+    resolved_api_id, resolved_api_hash, resolved_device_fp = _resolve_account_connection_params(account)
 
     change_result = await two_factor_manager.change_2fa(
         account.session_string,
@@ -1308,9 +1338,9 @@ async def change_2fa(
         new_password=data.new_password,
         new_hint=data.new_hint or "",
         proxy=proxy_config,
-        api_id=account.api_id,
-        api_hash=account.api_hash,
-        device_fingerprint=account.device_fingerprint,
+        api_id=resolved_api_id,
+        api_hash=resolved_api_hash,
+        device_fingerprint=resolved_device_fp,
         unique_id=account.phone or str(account.telegram_id),
     )
 
@@ -1359,14 +1389,15 @@ async def remove_2fa(
             "username": account.proxy.username,
             "password": account.proxy.password,
         }
+    resolved_api_id, resolved_api_hash, resolved_device_fp = _resolve_account_connection_params(account)
 
     remove_result = await two_factor_manager.remove_2fa(
         account.session_string,
         current_password=data.current_password,
         proxy=proxy_config,
-        api_id=account.api_id,
-        api_hash=account.api_hash,
-        device_fingerprint=account.device_fingerprint,
+        api_id=resolved_api_id,
+        api_hash=resolved_api_hash,
+        device_fingerprint=resolved_device_fp,
         unique_id=account.phone or str(account.telegram_id),
     )
 
@@ -1422,6 +1453,7 @@ async def bulk_set_2fa(
                     "username": account.proxy.username,
                     "password": account.proxy.password,
                 }
+            resolved_api_id, resolved_api_hash, resolved_device_fp = _resolve_account_connection_params(account)
 
             try:
                 set_result = await two_factor_manager.set_2fa(
@@ -1429,9 +1461,9 @@ async def bulk_set_2fa(
                     new_password=data.password,
                     hint=data.hint or "",
                     proxy=proxy_config,
-                    api_id=account.api_id,
-                    api_hash=account.api_hash,
-                    device_fingerprint=account.device_fingerprint,
+                    api_id=resolved_api_id,
+                    api_hash=resolved_api_hash,
+                    device_fingerprint=resolved_device_fp,
                     unique_id=account.phone or str(account.telegram_id),
                 )
 
@@ -1564,6 +1596,12 @@ async def auth_verify(
             session_string=result.session_string,
             status="valid",
             geo=geo,
+            api_id=result.account_data.get("api_id"),
+            api_hash=result.account_data.get("api_hash"),
+            device_fingerprint=_normalize_device_fingerprint(
+                result.account_data.get("device_fingerprint")
+            ),
+            extra_data=result.account_data,
         )
 
         session.add(account)
@@ -1691,6 +1729,9 @@ async def parse_import_files(
                     "spamblock": None,
                     "register_time": None,
                     "geo": None,
+                    "api_id": OFFICIAL_APIS["desktop"]["api_id"],
+                    "api_hash": OFFICIAL_APIS["desktop"]["api_hash"],
+                    "device_fingerprint": {},
                 })
 
         except Exception as e:
@@ -1948,6 +1989,9 @@ async def parse_tdata_folder(
                             "spamblock": None,
                             "register_time": None,
                             "geo": None,
+                            "api_id": OFFICIAL_APIS["desktop"]["api_id"],
+                            "api_hash": OFFICIAL_APIS["desktop"]["api_hash"],
+                            "device_fingerprint": {},
                         })
                     except Exception as e:
                         errors.append({
@@ -2069,7 +2113,7 @@ async def verify_parsed_accounts(
         # Get API credentials and device fingerprint from JSON
         api_id = acc_data.get("api_id")
         api_hash = acc_data.get("api_hash")
-        device_fp = acc_data.get("device_fingerprint") or {}
+        device_fp = _normalize_device_fingerprint(acc_data.get("device_fingerprint"))
 
         # Validate session with Telegram
         # Use phone for consistent device fingerprinting

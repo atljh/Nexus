@@ -510,12 +510,12 @@ function handleDone() {
 .hint-text {
   display: block;
   font-size: 12px;
-  color: #6b7280;
+  color: #8b8f9a;
   margin-top: 4px;
 }
 
 .placeholder-text {
-  color: #6b7280;
+  color: #8b8f9a;
 }
 
 .proxy-option {
@@ -527,8 +527,8 @@ function handleDone() {
 
 .proxy-type {
   font-size: 11px;
-  color: #6b7280;
-  background: rgba(255, 255, 255, 0.05);
+  color: #8b8f9a;
+  background: rgba(255, 255, 255, 0.08);
   padding: 2px 8px;
   border-radius: 4px;
   text-transform: uppercase;
@@ -605,7 +605,7 @@ function handleDone() {
 
 :deep(.add-account-dialog .p-dialog-header) {
   background: #161616;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 :deep(.add-account-dialog .p-dialog-content) {
@@ -623,7 +623,7 @@ function handleDone() {
 
 :deep(.auth-stepper .p-stepper-number) {
   background: rgba(255, 255, 255, 0.1);
-  color: #6b7280;
+  color: #8b8f9a;
   border: none;
 }
 
@@ -633,7 +633,7 @@ function handleDone() {
 }
 
 :deep(.auth-stepper .p-stepper-title) {
-  color: #6b7280;
+  color: #8b8f9a;
   font-size: 12px;
 }
 

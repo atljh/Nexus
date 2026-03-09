@@ -163,7 +163,7 @@ async function checkBackend() {
 
 .loading-text {
   font-size: 14px;
-  color: #6b7280;
+  color: #8b8f9a;
 }
 
 .loading-subtext {
@@ -177,7 +177,7 @@ async function checkBackend() {
   bottom: 8px;
   right: 12px;
   font-size: 11px;
-  color: #3f3f46;
+  color: #55555e;
   font-variant-numeric: tabular-nums;
 }
 

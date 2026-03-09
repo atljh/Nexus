@@ -186,6 +186,8 @@ class Account(Base):
     )
 
     # Timestamps
+    last_check_error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    last_check_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -229,6 +231,8 @@ class Account(Base):
             "group": group_dict,
             "group_id": self.group_id,
             "tags": tags_list,
+            "last_check_error_code": self.last_check_error_code,
+            "last_check_error": self.last_check_error,
             "last_checked_at": _utc_iso(self.last_checked_at),
             "last_used_at": _utc_iso(self.last_used_at),
             "created_at": _utc_iso(self.created_at)

@@ -124,7 +124,7 @@ function changeLanguage(locale: 'en' | 'uk') {
 
 .settings-card {
   background: linear-gradient(145deg, #161616 0%, #111111 100%);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 16px;
   overflow: hidden;
   margin-bottom: 20px;
@@ -135,7 +135,7 @@ function changeLanguage(locale: 'en' | 'uk') {
   align-items: center;
   gap: 14px;
   padding: 20px 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .header-icon {
@@ -193,12 +193,12 @@ function changeLanguage(locale: 'en' | 'uk') {
 
 .setting-desc {
   font-size: 13px;
-  color: #6b7280;
+  color: #8b8f9a;
 }
 
 .setting-divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.10);
   margin: 8px 0;
 }
 
@@ -254,7 +254,7 @@ function changeLanguage(locale: 'en' | 'uk') {
 
 .about-version {
   font-size: 14px;
-  color: #6b7280;
+  color: #8b8f9a;
   margin-bottom: 4px;
 }
 

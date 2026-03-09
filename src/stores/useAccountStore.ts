@@ -157,7 +157,7 @@ export const useAccountStore = defineStore('accounts', () => {
       const result = await window.api.post(`/api/accounts/${id}/check`, {}) as CheckResult
 
       if (account) {
-        account.status = result.valid ? 'valid' : 'invalid'
+        account.status = result.status || (result.valid ? 'valid' : 'invalid')
         if (result.user_info) {
           account.telegram_id = result.user_info.telegram_id
           account.username = result.user_info.username
@@ -167,12 +167,16 @@ export const useAccountStore = defineStore('accounts', () => {
             account.phone = result.user_info.phone
           }
         }
+        account.last_check_error_code = result.error_code || null
+        account.last_check_error = result.error || null
       }
 
       return result
     } catch (error) {
       if (account) {
         account.status = 'invalid'
+        account.last_check_error_code = 'unknown_error'
+        account.last_check_error = getErrorMessage(error, 'Unknown error')
       }
       throw error
     }
@@ -303,6 +307,8 @@ export const useAccountStore = defineStore('accounts', () => {
         if (r.telegram_id) account.telegram_id = r.telegram_id
         if (r.username) account.username = r.username
         if (r.spamblock !== null) account.spamblock = r.spamblock
+        account.last_check_error_code = r.error_code || null
+        account.last_check_error = r.error || null
       }
     })
 

@@ -372,6 +372,15 @@ class AuthService:
                     "last_name": me.last_name,
                     "phone": me.phone,
                     "is_premium": getattr(me, "premium", False),
+                    "api_id": self.DEFAULT_API_ID,
+                    "api_hash": self.DEFAULT_API_HASH,
+                    "device_fingerprint": {
+                        "device_model": fingerprint.get("device_model"),
+                        "system_version": fingerprint.get("system_version"),
+                        "app_version": fingerprint.get("app_version"),
+                        "lang_code": fingerprint.get("lang_code"),
+                        "system_lang_code": fingerprint.get("system_lang_code"),
+                    },
                 },
             )
 

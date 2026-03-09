@@ -1065,7 +1065,7 @@ async function checkAccount(account: Account) {
       summary: result.valid ? t('accounts.messages.accountValid') : t('accounts.messages.accountInvalid'),
       detail: result.valid
         ? t('accounts.messages.accountWorking', { name: result.user_info?.username || account.telegram_id })
-        : result.error,
+        : getCheckErrorSummary(result.error_code, result.error),
       life: 3000
     })
   } catch (error: any) {
@@ -1338,6 +1338,37 @@ function getStatusSeverity(status: string): "success" | "info" | "warn" | "dange
     case 'checking': return 'info'
     default: return 'secondary'
   }
+}
+
+function getCheckErrorLabel(errorCode: string | null | undefined): string {
+  if (!errorCode) return ''
+  const key = `accounts.checkErrors.codes.${errorCode}`
+  const translated = t(key)
+  return translated === key ? errorCode : translated
+}
+
+function getCheckErrorTooltip(account: Account): string {
+  if (!account.last_check_error_code && !account.last_check_error) {
+    return ''
+  }
+
+  const details: string[] = []
+  if (account.last_check_error_code) {
+    details.push(`${t('accounts.checkErrors.code')}: ${getCheckErrorLabel(account.last_check_error_code)} (${account.last_check_error_code})`)
+  }
+  if (account.last_check_error) {
+    details.push(`${t('accounts.checkErrors.message')}: ${account.last_check_error}`)
+  }
+  return details.join('\n')
+}
+
+function getCheckErrorSummary(errorCode: string | null | undefined, errorMessage: string | null | undefined): string {
+  const normalizedMessage = errorMessage && errorCode && errorMessage === errorCode ? null : errorMessage
+  const codeLabel = getCheckErrorLabel(errorCode)
+  if (normalizedMessage && codeLabel) {
+    return `${codeLabel}: ${normalizedMessage}`
+  }
+  return normalizedMessage || codeLabel || t('accounts.messages.sessionNotValid')
 }
 
 function openTwoFADialog(account: Account) {
@@ -1652,7 +1683,14 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
               <div v-if="data.status === 'checking'" class="checking-status">
                 <i class="pi pi-spin pi-spinner"></i>
               </div>
-              <Tag v-else :value="t(`accounts.status.${data.status}`)" :severity="getStatusSeverity(data.status)" class="status-pill" />
+              <div v-else class="status-cell">
+                <Tag :value="t(`accounts.status.${data.status}`)" :severity="getStatusSeverity(data.status)" class="status-pill" />
+                <i
+                  v-if="data.last_check_error_code || data.last_check_error"
+                  class="pi pi-info-circle status-error-icon"
+                  v-tooltip.top="getCheckErrorTooltip(data)"
+                ></i>
+              </div>
             </template>
           </Column>
 
@@ -1670,6 +1708,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
                 <template #value="{ value }">
                   <div v-if="value && proxyStore.getById(value)" class="inline-proxy-value">
                     <i class="pi pi-circle-fill proxy-dot" :class="'proxy-dot--' + proxyStore.getById(value)!.status"></i>
+                    <span v-if="proxyStore.getById(value)!.geo" class="proxy-geo-flag">{{ countryFlag(proxyStore.getById(value)!.geo) }}</span>
                     <span class="proxy-addr">{{ proxyStore.getById(value)!.host }}:{{ proxyStore.getById(value)!.port }}</span>
                   </div>
                   <span v-else class="no-data">—</span>
@@ -1709,7 +1748,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
                     <span
                       v-if="value && groupStore.groups.find(g => g.id === value)"
                       class="group-dot"
-                      :style="{ background: groupStore.groups.find(g => g.id === value)?.color || '#6b7280' }"
+                      :style="{ background: groupStore.groups.find(g => g.id === value)?.color || '#8b8f9a' }"
                     ></span>
                     <span>{{ value ? (groupStore.groups.find(g => g.id === value)?.name || '—') : '—' }}</span>
                   </div>
@@ -1742,7 +1781,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
                       v-for="tagId in value.slice(0, 1)"
                       :key="tagId"
                       class="inline-tag-chip"
-                      :style="{ background: (tagStore.tags.find(t => t.id === tagId)?.color || '#6b7280') + '22', color: tagStore.tags.find(t => t.id === tagId)?.color || '#6b7280', borderColor: (tagStore.tags.find(t => t.id === tagId)?.color || '#6b7280') + '44' }"
+                      :style="{ background: (tagStore.tags.find(t => t.id === tagId)?.color || '#8b8f9a') + '22', color: tagStore.tags.find(t => t.id === tagId)?.color || '#8b8f9a', borderColor: (tagStore.tags.find(t => t.id === tagId)?.color || '#8b8f9a') + '44' }"
                     >{{ tagStore.tags.find(t => t.id === tagId)?.name }}</span>
                     <span v-if="value.length > 1" class="inline-tag-more">+{{ value.length - 1 }}</span>
                   </div>
@@ -2401,7 +2440,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 .stat-card {
   flex: 1;
   background: linear-gradient(145deg, #161616 0%, #111111 100%);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 10px;
   padding: 10px 14px;
   cursor: pointer;
@@ -2432,7 +2471,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
 .stat-label {
   font-size: 12px;
-  color: #6b7280;
+  color: #8b8f9a;
   margin-top: 4px;
 }
 
@@ -2455,7 +2494,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
   align-items: center;
   justify-content: center;
   background: linear-gradient(145deg, #161616 0%, #111111 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 10px;
   color: #9ca3af;
   cursor: pointer;
@@ -2481,7 +2520,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 }
 
 .toolbar-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.13);
   color: #e5e7eb;
   border-color: rgba(255, 255, 255, 0.15);
 }
@@ -2500,7 +2539,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
 .shown-count {
   font-size: 13px;
-  color: #6b7280;
+  color: #8b8f9a;
 }
 
 /* Filters Row */
@@ -2531,7 +2570,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
 :deep(.filter-chip .p-dropdown) {
   background: linear-gradient(145deg, #161616 0%, #111111 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 20px;
   min-height: 34px;
 }
@@ -2554,7 +2593,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 .table-card {
   flex: 1;
   background: linear-gradient(145deg, #161616 0%, #111111 100%);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 12px;
   padding: 0;
   overflow: hidden;
@@ -2585,7 +2624,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 }
 
 .empty-text {
-  color: #6b7280;
+  color: #8b8f9a;
   margin-bottom: 20px;
   font-size: 15px;
 }
@@ -2593,7 +2632,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 /* Row index */
 .row-index {
   font-size: 13px;
-  color: #6b7280;
+  color: #8b8f9a;
 }
 
 /* Avatar */
@@ -2629,7 +2668,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
 .account-name-sub {
   font-size: 10px;
-  color: #6b7280;
+  color: #8b8f9a;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2660,6 +2699,18 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
   white-space: nowrap;
 }
 
+.status-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-error-icon {
+  font-size: 11px;
+  color: #f59e0b;
+  cursor: help;
+}
+
 .checking-status {
   display: inline-flex;
   align-items: center;
@@ -2688,7 +2739,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 .proxy-dot--very_slow { color: #f59e0b; }
 .proxy-dot--not_working { color: #ef4444; }
 .proxy-dot--timeout { color: #ef4444; }
-.proxy-dot--unchecked { color: #6b7280; }
+.proxy-dot--unchecked { color: #8b8f9a; }
 
 .proxy-addr {
   font-size: 11px;
@@ -2698,6 +2749,12 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+}
+
+.proxy-geo-flag {
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 .inline-proxy-value {
@@ -2722,13 +2779,13 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
 .proxy-option-type {
   font-size: 10px;
-  color: #6b7280;
+  color: #8b8f9a;
   text-transform: uppercase;
 }
 
 .proxy-option-geo {
   font-size: 10px;
-  color: #6b7280;
+  color: #8b8f9a;
   margin-left: auto;
 }
 
@@ -2873,7 +2930,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
 .inline-tag-more {
   font-size: 11px;
-  color: #6b7280;
+  color: #8b8f9a;
   white-space: nowrap;
 }
 
@@ -2930,7 +2987,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
   background: transparent;
   border: none;
   border-radius: 6px;
-  color: #6b7280;
+  color: #8b8f9a;
   cursor: pointer;
   transition: all 0.15s;
   font-size: 12px;
@@ -2938,7 +2995,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 }
 
 .action-icon:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.13);
   color: #d1d5db;
 }
 
@@ -3017,9 +3074,9 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 }
 
 :deep(.custom-table .p-datatable-thead > tr > th) {
-  background: rgba(255, 255, 255, 0.02);
-  border-color: rgba(255, 255, 255, 0.06);
-  color: #6b7280;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.10);
+  color: #8b8f9a;
   font-weight: 600;
   font-size: 11px;
   letter-spacing: 0.3px;
@@ -3033,7 +3090,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 }
 
 :deep(.custom-table .p-datatable-tbody > tr:hover) {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 :deep(.custom-table .p-datatable-tbody > tr > td) {
@@ -3055,7 +3112,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 }
 
 :deep(.p-checkbox .p-checkbox-box) {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.13);
   border-color: rgba(255, 255, 255, 0.4);
 }
 
@@ -3071,7 +3128,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 /* Dialog styles */
 :deep(.custom-dialog .p-dialog-header) {
   background: #161616;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 :deep(.custom-dialog .p-dialog-content) {
@@ -3080,7 +3137,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
 :deep(.custom-dialog .p-dialog-footer) {
   background: #161616;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 /* Form fields */
@@ -3097,7 +3154,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 }
 
 .placeholder-text {
-  color: #6b7280;
+  color: #8b8f9a;
 }
 
 .description {
@@ -3171,13 +3228,13 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 /* TabView */
 :deep(.p-tabview .p-tabview-nav) {
   background: transparent;
-  border-color: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.10);
 }
 
 :deep(.p-tabview .p-tabview-nav li .p-tabview-nav-link) {
   background: transparent;
   border-color: transparent;
-  color: #6b7280;
+  color: #8b8f9a;
 }
 
 :deep(.p-tabview .p-tabview-nav li.p-highlight .p-tabview-nav-link) {
@@ -3232,7 +3289,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
   gap: 6px;
   font-size: 13px;
   color: #9ca3af;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.08);
   padding: 4px 10px;
   border-radius: 8px;
 }
@@ -3276,7 +3333,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 }
 
 .no-proxy-text {
-  color: #6b7280;
+  color: #8b8f9a;
 }
 
 .account-cell {
@@ -3296,7 +3353,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 }
 
 .format-cell i {
-  color: #6b7280;
+  color: #8b8f9a;
 }
 
 .empty-table-message {
@@ -3305,7 +3362,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
   align-items: center;
   gap: 8px;
   padding: 32px;
-  color: #6b7280;
+  color: #8b8f9a;
   font-size: 14px;
 }
 
@@ -3322,11 +3379,11 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
 :deep(.import-dialog-unified .p-dialog-content) {
   padding: 20px 24px !important;
-  background: var(--color-bg-elevated, #18181b) !important;
+  background: var(--color-bg-elevated, #1a1a1e) !important;
 }
 
 :deep(.import-dialog-unified .p-dialog-header) {
-  background: var(--color-bg-elevated, #18181b) !important;
+  background: var(--color-bg-elevated, #1a1a1e) !important;
 }
 
 /* Proxy option in dropdown */
@@ -3380,11 +3437,11 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 }
 
 .log-entry:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .log-time {
-  color: #6b7280;
+  color: #8b8f9a;
   flex-shrink: 0;
 }
 
@@ -3420,9 +3477,9 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
   align-items: center;
   gap: 12px;
   padding: 12px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.06);
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .result-ping {
@@ -3442,7 +3499,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
 .format-hint {
   font-size: 13px;
-  color: #6b7280;
+  color: #8b8f9a;
 }
 
 .dialog-actions {

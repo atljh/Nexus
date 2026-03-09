@@ -508,12 +508,19 @@ async def validate_session(
     except AuthKeyDuplicatedError:
         return False, None, "auth_key_duplicated"
     except (AuthKeyUnregisteredError, AuthKeyPermEmptyError):
-        return False, None, "session_expired"
+        return False, None, "auth_key_unregistered"
     except (SessionRevokedError, TelethonSessionExpired):
         return False, None, "session_revoked"
     except FloodWaitError as e:
         return False, None, f"flood_wait:{e.seconds}"
-    except (UnauthorizedError, SessionExpiredError):
+    except (UnauthorizedError, SessionExpiredError) as e:
+        error_str = str(e).lower()
+        if "not authorized" in error_str:
+            return False, None, "not_authorized"
+        if "revok" in error_str:
+            return False, None, "session_revoked"
+        if "authkeyunregistered" in error_str or ("auth" in error_str and "key" in error_str):
+            return False, None, "auth_key_unregistered"
         return False, None, "session_expired"
     except ConnectionError:
         return False, None, "connection_failed"
@@ -530,7 +537,7 @@ async def validate_session(
             if "duplicat" in error_str:
                 return False, None, "auth_key_duplicated"
             else:
-                return False, None, "session_expired"
+                return False, None, "auth_key_unregistered"
         elif "session" in error_str and ("revok" in error_str or "expir" in error_str):
             return False, None, "session_revoked"
         elif "flood" in error_str:

@@ -377,12 +377,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Account Picker — full width, collapsible -->
-      <AccountPicker
-        v-model="selectedAccountIds"
-        accent-color="#ec4899"
-      />
-
       <div class="page-grid">
         <!-- Create Task Card -->
         <div class="create-card">
@@ -399,6 +393,11 @@ onUnmounted(() => {
           <!-- Form Content -->
           <div class="tab-content">
             <div class="tab-panel">
+              <!-- Account Picker -->
+              <AccountPicker
+                v-model="selectedAccountIds"
+                accent-color="#ec4899"
+              />
               <div class="form-section">
                 <div class="form-section-header">
                   <i class="pi pi-hashtag"></i>
@@ -696,7 +695,7 @@ onUnmounted(() => {
   align-items: flex-start;
   margin-bottom: 20px;
   padding-bottom: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
   flex-shrink: 0;
 }
 
@@ -732,7 +731,7 @@ onUnmounted(() => {
 
 .header-subtitle {
   font-size: 14px;
-  color: #71717a;
+  color: #8b8b95;
   margin: 0;
 }
 
@@ -747,8 +746,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 14px;
   padding: 8px 12px 8px 16px;
 }
@@ -763,7 +762,7 @@ onUnmounted(() => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #52525b;
+  background: #6e6e78;
   flex-shrink: 0;
 }
 
@@ -781,7 +780,7 @@ onUnmounted(() => {
 .status-text {
   font-size: 12px;
   font-weight: 500;
-  color: #a1a1aa;
+  color: #ababb5;
   white-space: nowrap;
 }
 
@@ -833,8 +832,8 @@ onUnmounted(() => {
 }
 
 .stat-card {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 12px;
   padding: 12px 20px;
   text-align: center;
@@ -851,19 +850,13 @@ onUnmounted(() => {
 
 .stat-label {
   font-size: 12px;
-  color: #71717a;
-}
-
-/* Account Picker — between header and grid */
-.account-picker {
-  flex-shrink: 0;
-  margin-bottom: 16px;
+  color: #8b8b95;
 }
 
 /* Page Grid — fills remaining height */
 .page-grid {
   display: grid;
-  grid-template-columns: 480px 1fr;
+  grid-template-columns: 1fr 340px;
   gap: 24px;
   flex: 1;
   min-height: 0;
@@ -878,8 +871,8 @@ onUnmounted(() => {
 /* Cards Common Styles */
 .create-card,
 .tasks-card {
-  background: linear-gradient(180deg, #141417 0%, #0f0f12 100%);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, #161619 0%, #111114 100%);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 20px;
   overflow: hidden;
   display: flex;
@@ -892,7 +885,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 12px;
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
   flex-shrink: 0;
 }
 
@@ -932,7 +925,7 @@ onUnmounted(() => {
 
 .card-header-hint {
   font-size: 12px;
-  color: #71717a;
+  color: #8b8b95;
 }
 
 /* Form Content — scrollable */
@@ -952,7 +945,7 @@ onUnmounted(() => {
 }
 
 .tab-content::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.13);
   border-radius: 4px;
 }
 
@@ -980,7 +973,7 @@ onUnmounted(() => {
   gap: 8px;
   margin-bottom: 12px;
   padding-bottom: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .form-section-header i {
@@ -997,7 +990,7 @@ onUnmounted(() => {
 
 .emoji-mode-hint {
   font-size: 11px;
-  color: #71717a;
+  color: #8b8b95;
   margin-top: 4px;
 }
 
@@ -1027,12 +1020,12 @@ onUnmounted(() => {
   gap: 8px;
   font-size: 12px;
   font-weight: 500;
-  color: #a1a1aa;
+  color: #ababb5;
 }
 
 .form-label i {
   font-size: 12px;
-  color: #71717a;
+  color: #8b8b95;
 }
 
 .form-grid-2 {
@@ -1057,7 +1050,7 @@ onUnmounted(() => {
 }
 
 .delay-separator i {
-  color: #52525b;
+  color: #6e6e78;
   font-size: 14px;
 }
 
@@ -1071,7 +1064,7 @@ onUnmounted(() => {
   top: 50%;
   transform: translateY(-50%);
   font-size: 12px;
-  color: #71717a;
+  color: #8b8b95;
   pointer-events: none;
 }
 
@@ -1169,8 +1162,8 @@ onUnmounted(() => {
   border-radius: 8px;
   font-size: 10px;
   font-weight: 600;
-  color: #52525b;
-  background: rgba(255, 255, 255, 0.03);
+  color: #6e6e78;
+  background: rgba(255, 255, 255, 0.10);
   border: 1px solid rgba(255, 255, 255, 0.04);
   transition: all 0.2s;
 }
@@ -1201,20 +1194,20 @@ onUnmounted(() => {
 }
 
 .task-item {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 20px;
-  align-items: center;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 14px;
-  padding: 16px 20px;
+  padding: 14px 16px;
   transition: all 0.2s ease;
+  overflow: hidden;
 }
 
 .task-item:hover {
   border-color: rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.10);
 }
 
 .task-item.status-running {
@@ -1260,7 +1253,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #71717a;
+  color: #8b8b95;
 }
 
 .task-channel i {
@@ -1268,7 +1261,7 @@ onUnmounted(() => {
 }
 
 .channel-name {
-  color: #a1a1aa;
+  color: #ababb5;
 }
 
 .reaction-emoji {
@@ -1277,7 +1270,7 @@ onUnmounted(() => {
 
 /* Task Progress */
 .task-progress-section {
-  min-width: 160px;
+  width: 100%;
 }
 
 .progress-info {
@@ -1288,18 +1281,18 @@ onUnmounted(() => {
 
 .progress-label {
   font-size: 11px;
-  color: #52525b;
+  color: #6e6e78;
 }
 
 .progress-value {
   font-size: 11px;
   font-weight: 600;
-  color: #a1a1aa;
+  color: #ababb5;
 }
 
 .progress-bar-container {
   height: 6px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.13);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -1324,14 +1317,15 @@ onUnmounted(() => {
 .task-actions {
   display: flex;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .action-btn {
   width: 34px;
   height: 34px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.02);
-  color: #71717a;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.04);
+  color: #8b8b95;
   transition: all 0.15s ease;
 }
 
@@ -1435,21 +1429,21 @@ onUnmounted(() => {
 .empty-tasks h3 {
   font-size: 15px;
   font-weight: 600;
-  color: #71717a;
+  color: #8b8b95;
   margin: 0 0 6px 0;
 }
 
 .empty-tasks p {
   font-size: 12px;
-  color: #52525b;
+  color: #6e6e78;
   margin: 0;
 }
 
 /* Override PrimeVue styles */
 :deep(.p-inputnumber-buttons-horizontal .p-button) {
   background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.08);
-  color: #71717a;
+  border-color: rgba(255, 255, 255, 0.13);
+  color: #8b8b95;
 }
 
 :deep(.p-inputnumber-buttons-horizontal .p-button:hover) {

@@ -164,6 +164,26 @@ export default {
       connection_failed: 'connection failed'
     },
 
+    checkErrors: {
+      code: 'Reason',
+      message: 'Details',
+      codes: {
+        not_authorized: 'Session is not authorized',
+        auth_key_unregistered: 'Authorization key is no longer valid',
+        auth_key_duplicated: 'Authorization key duplicated',
+        session_revoked: 'Session was revoked',
+        session_expired: 'Session expired',
+        connection_failed: 'Connection failed',
+        timeout: 'Connection timeout',
+        no_proxy_assigned: 'Proxy is not assigned',
+        banned: 'Account is banned',
+        deactivated: 'Account is deactivated',
+        frozen: 'Account is frozen',
+        phone_number_invalid: 'Phone number is invalid',
+        unknown_error: 'Unknown error'
+      }
+    },
+
     messages: {
       loadError: 'Failed to load accounts',
       importSuccess: 'Account imported successfully',
@@ -702,12 +722,12 @@ export default {
   },
 
   accountPicker: {
-    title: 'Select Accounts',
+    title: 'Accounts',
     selected: '{count} selected',
     available: 'Available',
     selectedPanel: 'Selected',
     searchPlaceholder: 'ID, phone, username...',
-    allGroups: 'All groups',
+    allGroups: 'All',
     addAll: 'Add all',
     removeAll: 'Remove all',
     allAdded: 'All added',
@@ -777,7 +797,40 @@ export default {
       all: 'All',
       successful: 'Successful',
       failed: 'Errors',
-      search: 'Search...'
+      search: 'Search...',
+      translate: {
+        actionNotExecuted: 'Action was not executed',
+        staleAutoClosed: 'Task auto-closed as stale before this account was processed',
+        sessionNotAuthorized: 'Session is not authorized',
+        noSessionString: 'No session string',
+        accountSkippedByStatus: 'Account skipped by status: {status}',
+        reactionSent: 'Reaction {emoji} sent',
+        commentSentTo: 'Comment sent to {target}',
+        reactionAlreadySet: 'Reaction already set',
+        invalidReactionEmoji: 'Invalid reaction emoji',
+        accountCannotReactInChannel: 'Account cannot react in this channel',
+        channelPrivate: 'Channel is private',
+        invalidMessageId: 'Invalid message ID',
+        entityNotResolved: 'Entity not resolved',
+        clientNotConnected: 'Client not connected',
+        noPostsInChannel: 'No posts in channel',
+        cannotCommentInChannel: 'Cannot comment in this channel',
+        accountBannedInChannel: 'Account banned in channel',
+        messageIdInvalidPost: 'Message ID invalid — post may not support comments',
+        floodWait: 'FloodWait: {seconds}s',
+        slowMode: 'SlowMode: {seconds}s',
+        noAccountsAssigned: 'No accounts assigned to task',
+        noTargetChannelsSpecified: 'No target channels specified',
+        noCommentableChannelsFound: 'No commentable channels found (no discussion groups linked)',
+        allAccountsFailedToConnect: 'All accounts failed to connect',
+        allAccountsFailedDuringResolution: 'All accounts failed during channel resolution',
+        allAccountsFailedDuringSetup: 'All accounts failed during channel setup',
+        noValidAccountsForMonitoring: 'No valid accounts for monitoring',
+        reactionsDisabledInChannel: 'Reactions are disabled in this channel',
+        noMessagesFoundInChannel: 'No messages found in channel',
+        allEligibleAccountsExhausted: 'All eligible accounts exhausted before reaching total actions',
+        taskStoppedBeforeTotal: 'Task stopped before reaching total actions'
+      }
     },
     time: {
       justNow: 'just now',

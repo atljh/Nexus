@@ -425,7 +425,7 @@ function getAccountName(): string {
   align-items: center;
   gap: 16px;
   padding: 16px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.10);
   border-radius: 12px;
   margin-bottom: 16px;
 }
@@ -466,7 +466,7 @@ function getAccountName(): string {
 }
 
 .account-status.disabled {
-  color: #6b7280;
+  color: #8b8f9a;
 }
 
 .hint-box {
@@ -505,7 +505,7 @@ function getAccountName(): string {
 
 :deep(.twofa-dialog .p-dialog-header) {
   background: #161616;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 :deep(.twofa-dialog .p-dialog-content) {
@@ -515,13 +515,13 @@ function getAccountName(): string {
 
 :deep(.twofa-tabs .p-tabview-nav) {
   background: transparent;
-  border-color: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.10);
 }
 
 :deep(.twofa-tabs .p-tabview-nav li .p-tabview-nav-link) {
   background: transparent;
   border-color: transparent;
-  color: #6b7280;
+  color: #8b8f9a;
 }
 
 :deep(.twofa-tabs .p-tabview-nav li.p-highlight .p-tabview-nav-link) {
