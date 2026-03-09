@@ -15,7 +15,7 @@ from typing import Optional, Dict, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 
-from telethon import TelegramClient
+from .telegram_client import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import (
     SessionPasswordNeededError,

@@ -12,7 +12,7 @@ from hashlib import sha1
 from typing import Optional, Dict, Any
 
 from telethon.sessions import StringSession
-from telethon import TelegramClient
+from backend.telegram.telegram_client import TelegramClient
 
 logger = logging.getLogger(__name__)
 

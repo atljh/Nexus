@@ -12,6 +12,7 @@ from .exceptions import (
     TDataError,
 )
 from .session_manager import SessionManager
+from .telegram_client import TelegramClient, API_LANG_PACKS
 from .client import BaseClient, validate_session
 from .tdata_converter import TDataConverter, SimpleTDataConverter, convert_tdata_to_session, parse_tdata_to_session
 from .account_checker import AccountChecker, AccountStatus, AccountCheckResult, account_checker
@@ -39,6 +40,9 @@ __all__ = [
     "TDataError",
     # Session
     "SessionManager",
+    # Custom TelegramClient
+    "TelegramClient",
+    "API_LANG_PACKS",
     # Client
     "BaseClient",
     "validate_session",

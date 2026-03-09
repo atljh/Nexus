@@ -443,7 +443,6 @@ class TDataConverter:
                     "session_string": session_string,
                     "api_id": api_id,
                     "api_hash": api_hash,
-                    # Keep empty object for compatibility with account import flows.
                     "device_fingerprint": {},
                     "source": "tdata",
                     "converter_version": "tdesktop-decrypter",

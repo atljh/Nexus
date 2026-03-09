@@ -189,6 +189,17 @@ class CommentsWorker:
                     system_lang_code=device_fp.get("system_lang_code"),
                     unique_id=account.phone or str(account.telegram_id),
                 )
+                # Pre-task proxy validation — skip account fast if proxy is dead
+                if proxy:
+                    proxy_test = await client._test_proxy_connection()
+                    if not proxy_test.get("success"):
+                        error_msg = proxy_test.get("error", "Proxy test failed")
+                        logger.warning(f"Account {account.id}: proxy failed pre-check: {error_msg}")
+                        self._failed_accounts.add(account.id)
+                        self._record_connect_failure_log(db, account.id, "proxy_failed", error_msg)
+                        db.commit()
+                        continue
+
                 await client.connect()
                 await client.check_auth()
 

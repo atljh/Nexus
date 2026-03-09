@@ -12,7 +12,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-from telethon import TelegramClient
+from .telegram_client import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import (
     AuthKeyUnregisteredError,

@@ -8,7 +8,7 @@ from typing import Optional, Dict, Tuple, Any
 
 logger = logging.getLogger(__name__)
 
-from telethon import TelegramClient
+from .telegram_client import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import (
     AuthKeyUnregisteredError,
@@ -121,8 +121,6 @@ class BaseClient:
             self.system_lang_code = system_lang_code or fingerprint["system_lang_code"]
         else:
             # No device params provided — leave as None, Telethon will use its platform defaults
-            # This is critical for accounts imported from other clients (e.g. Desktop)
-            # to avoid fingerprint mismatch that triggers account freezing
             self.device_model = None
             self.system_version = None
             self.app_version = None
@@ -165,6 +163,10 @@ class BaseClient:
             timeout=self.timeout,
             lang_code=self.lang_code,
             system_lang_code=self.system_lang_code,
+            # Raise actual last error instead of generic "Request unsuccessful N times"
+            raise_last_call_error=True,
+            # Disable updates for worker clients (saves ~10-20MB RAM per client)
+            receive_updates=False,
         )
         if self.device_model:
             kwargs["device_model"] = self.device_model
@@ -348,15 +350,26 @@ class BaseClient:
             self._client = None
 
     async def connect(self):
-        """Connect to Telegram"""
+        """Connect to Telegram with timeout wrapper."""
         if not self._client:
             self._client = self._create_client()
-        await self._client.connect()
+        # Wrap connect in timeout — Telethon's timeout is for RPC, not TCP.
+        # Without this, connect() can hang forever if proxy accepts but DC doesn't respond.
+        connect_timeout = max(self.timeout * 2, 30)
+        try:
+            await asyncio.wait_for(self._client.connect(), timeout=connect_timeout)
+        except asyncio.TimeoutError:
+            raise ConnectionError(
+                f"Timeout connecting to Telegram after {connect_timeout}s"
+            )
 
     async def disconnect(self):
-        """Disconnect from Telegram"""
+        """Disconnect from Telegram with timeout to prevent hanging."""
         if self._client:
-            await self._client.disconnect()
+            try:
+                await asyncio.wait_for(self._client.disconnect(), timeout=5)
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Disconnect error (forcing cleanup): {e}")
             self._client = None
 
     async def check_auth(self) -> bool:
