@@ -179,7 +179,7 @@ class AccountChecker:
                 client_kwargs["system_version"] = normalized_fp.get("system_version")
                 client_kwargs["app_version"] = normalized_fp.get("app_version")
                 client_kwargs["lang_code"] = normalized_fp.get("lang_code", "en")
-                client_kwargs["system_lang_code"] = normalized_fp.get("system_lang_code", "en")
+                client_kwargs["system_lang_code"] = normalized_fp.get("system_lang_code", "en-US")
 
             client = TelegramClient(
                 session,

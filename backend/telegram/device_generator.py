@@ -111,19 +111,22 @@ IOS_DEVICES = [
 ]
 
 # Desktop варианты
+# app_version_suffix: "x64" appended for Windows only (tdesktop behavior)
 DESKTOP_DEVICES = [
-    {"device_model": "Desktop", "system_version": "Windows 10"},
-    {"device_model": "Desktop", "system_version": "Windows 11"},
-    {"device_model": "MacBook Pro", "system_version": "macOS 13.0"},
-    {"device_model": "MacBook Air", "system_version": "macOS 14.0"},
-    {"device_model": "iMac", "system_version": "macOS 13.5"},
+    {"device_model": "Desktop", "system_version": "Windows 10", "app_version_suffix": " x64"},
+    {"device_model": "Desktop", "system_version": "Windows 11", "app_version_suffix": " x64"},
+    {"device_model": "MacBook Pro", "system_version": "macOS 13.0", "app_version_suffix": ""},
+    {"device_model": "MacBook Air", "system_version": "macOS 14.0", "app_version_suffix": ""},
+    {"device_model": "iMac", "system_version": "macOS 13.5", "app_version_suffix": ""},
 ]
 
-# Актуальные версии приложений
+# Актуальные версии приложений (обновлять периодически)
+# Формат: Android "X.Y.Z (BUILD)", iOS "X.Y.Z", Desktop "X.Y.Z"
+# Desktop: "x64" suffix is appended only for Windows in DESKTOP_DEVICES
 APP_VERSIONS = {
-    "android": "10.14.5",
-    "ios": "10.3.1",
-    "desktop": "4.16.8",
+    "android": "12.5.1 (6530)",
+    "ios": "12.5",
+    "desktop": "6.6.2",
 }
 
 Platform = Literal["android", "ios", "desktop"]
@@ -133,7 +136,7 @@ def generate_device_fingerprint(
     unique_id: str,
     platform: Platform = "android",
     lang_code: str = "en",
-    system_lang_code: str = "en",
+    system_lang_code: str = "en-US",
 ) -> DeviceFingerprint:
     """
     Генерирует консистентный device fingerprint на основе unique_id.
@@ -165,12 +168,14 @@ def generate_device_fingerprint(
     device = devices[hash_int % len(devices)]
     api_config = OFFICIAL_APIS[platform]
 
+    app_version = APP_VERSIONS[platform] + device.get("app_version_suffix", "")
+
     return DeviceFingerprint(
         api_id=api_config["api_id"],
         api_hash=api_config["api_hash"],
         device_model=device["device_model"],
         system_version=device["system_version"],
-        app_version=APP_VERSIONS[platform],
+        app_version=app_version,
         lang_code=lang_code,
         system_lang_code=system_lang_code,
     )
@@ -210,7 +215,7 @@ def generate_fingerprint_for_api(
     unique_id: str,
     api_id: int,
     lang_code: str = "en",
-    system_lang_code: str = "en",
+    system_lang_code: str = "en-US",
 ) -> dict:
     """
     Генерирует device fingerprint, сохраняя указанный api_id.
@@ -241,10 +246,12 @@ def generate_fingerprint_for_api(
 
     device = devices[hash_int % len(devices)]
 
+    app_version = APP_VERSIONS[platform] + device.get("app_version_suffix", "")
+
     return {
         "device_model": device["device_model"],
         "system_version": device["system_version"],
-        "app_version": APP_VERSIONS[platform],
+        "app_version": app_version,
         "lang_code": lang_code,
         "system_lang_code": system_lang_code,
     }

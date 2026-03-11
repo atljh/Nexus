@@ -59,6 +59,7 @@ class BaseClient:
         lang_code: Optional[str] = None,
         system_lang_code: Optional[str] = None,
         unique_id: Optional[str] = None,  # For consistent fingerprint generation
+        receive_updates: bool = True,
     ):
         self.session_string = session_string
         self.api_id = api_id or self.DEFAULT_API_ID
@@ -68,6 +69,7 @@ class BaseClient:
         self.connection_retries = connection_retries
         self.request_retries = request_retries
         self.timeout = timeout
+        self.receive_updates = receive_updates
 
         # Generate device fingerprint if not provided
         self._setup_device_fingerprint(
@@ -102,7 +104,7 @@ class BaseClient:
             self.system_version = system_version
             self.app_version = app_version
             self.lang_code = lang_code or "en"
-            self.system_lang_code = system_lang_code or "en"
+            self.system_lang_code = system_lang_code or "en-US"
         elif any([device_model, system_version, app_version]):
             # Some params provided but not all — generate missing ones
             seed = unique_id or self.session_string[:32] if self.session_string else "default"
@@ -111,7 +113,7 @@ class BaseClient:
                 unique_id=seed,
                 api_id=self.api_id,
                 lang_code=lang_code or "en",
-                system_lang_code=system_lang_code or "en",
+                system_lang_code=system_lang_code or "en-US",
             )
 
             self.device_model = device_model or fingerprint["device_model"]
@@ -125,7 +127,7 @@ class BaseClient:
             self.system_version = None
             self.app_version = None
             self.lang_code = lang_code or "en"
-            self.system_lang_code = system_lang_code or "en"
+            self.system_lang_code = system_lang_code or "en-US"
 
     def _format_proxy(self, proxy: Dict) -> Tuple:
         """Format proxy dict to Telethon tuple format"""
@@ -165,8 +167,7 @@ class BaseClient:
             system_lang_code=self.system_lang_code,
             # Raise actual last error instead of generic "Request unsuccessful N times"
             raise_last_call_error=True,
-            # Disable updates for worker clients (saves ~10-20MB RAM per client)
-            receive_updates=False,
+            receive_updates=self.receive_updates,
         )
         if self.device_model:
             kwargs["device_model"] = self.device_model

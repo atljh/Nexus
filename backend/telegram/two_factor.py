@@ -118,7 +118,7 @@ class TwoFactorManager:
             client_kwargs["system_version"] = device_fingerprint.get("system_version")
             client_kwargs["app_version"] = device_fingerprint.get("app_version")
             client_kwargs["lang_code"] = device_fingerprint.get("lang_code", "en")
-            client_kwargs["system_lang_code"] = device_fingerprint.get("system_lang_code", "en")
+            client_kwargs["system_lang_code"] = device_fingerprint.get("system_lang_code", "en-US")
 
         return TelegramClient(
             session,
