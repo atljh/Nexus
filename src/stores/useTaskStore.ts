@@ -40,6 +40,7 @@ export const useTaskStore = defineStore('task', () => {
   const loading = ref(false)
   const error = ref<string | null>(null)
   const pollingInterval = ref<number | null>(null)
+  const currentTaskType = ref<string | null>(null)
 
   // Getters
   const activeTasks = computed(() =>
@@ -58,6 +59,7 @@ export const useTaskStore = defineStore('task', () => {
   async function fetchTasks(taskType?: string, status?: TaskStatus) {
     loading.value = true
     error.value = null
+    currentTaskType.value = taskType || null
     try {
       let endpoint = '/api/tasks'
       const params: string[] = []
@@ -78,7 +80,11 @@ export const useTaskStore = defineStore('task', () => {
   async function fetchActiveTasks() {
     try {
       const response = await window.api.get('/api/tasks/active') as TasksResponse
-      const active = Array.isArray(response) ? response : (response.data || [])
+      const allActive = Array.isArray(response) ? response : (response.data || [])
+      // Filter by current task type to avoid cross-type pollution
+      const active = currentTaskType.value
+        ? allActive.filter(t => t.task_type === currentTaskType.value)
+        : allActive
       const activeIds = new Set(active.map(t => t.id))
 
       // Update active tasks in the list
@@ -98,6 +104,9 @@ export const useTaskStore = defineStore('task', () => {
       )
       for (const task of vanished) {
         await fetchTask(task.id)
+        if (currentTask.value?.id === task.id) {
+          await fetchTaskLogs(task.id)
+        }
       }
     } catch (e) {
       console.error('Failed to fetch active tasks:', e)
@@ -120,14 +129,24 @@ export const useTaskStore = defineStore('task', () => {
     }
   }
 
-  async function fetchTaskLogs(taskId: number, successFilter?: boolean) {
+  const logsHasMore = ref(false)
+  const LOGS_PAGE_SIZE = 100
+
+  async function fetchTaskLogs(taskId: number, successFilter?: boolean, append = false) {
     try {
-      let endpoint = `/api/tasks/${taskId}/logs`
+      const offset = append ? taskLogs.value.length : 0
+      let endpoint = `/api/tasks/${taskId}/logs?limit=${LOGS_PAGE_SIZE}&offset=${offset}`
       if (successFilter !== undefined) {
-        endpoint += `?success=${successFilter}`
+        endpoint += `&success=${successFilter}`
       }
       const response = await window.api.get(endpoint) as TaskLogsResponse
-      taskLogs.value = Array.isArray(response) ? response : (response.data || [])
+      const logs = Array.isArray(response) ? response : (response.data || [])
+      if (append) {
+        taskLogs.value = [...taskLogs.value, ...logs]
+      } else {
+        taskLogs.value = logs
+      }
+      logsHasMore.value = logs.length >= LOGS_PAGE_SIZE
     } catch (e) {
       console.error('Failed to fetch task logs:', e)
     }
@@ -212,6 +231,40 @@ export const useTaskStore = defineStore('task', () => {
     }
   }
 
+  // Per-account stats
+  interface AccountStat {
+    account_id: number
+    phone: string | null
+    username: string | null
+    first_name: string | null
+    status: string | null
+    success: number
+    failed: number
+    total: number
+  }
+  const accountStats = ref<AccountStat[]>([])
+
+  async function fetchAccountStats(taskId: number) {
+    try {
+      const response = await window.api.get(`/api/tasks/${taskId}/account-stats`) as AccountStat[]
+      accountStats.value = Array.isArray(response) ? response : []
+    } catch (e) {
+      console.error('Failed to fetch account stats:', e)
+    }
+  }
+
+  // Duplicate task
+  async function duplicateTask(taskId: number): Promise<Task | null> {
+    try {
+      const response = await window.api.post(`/api/tasks/duplicate/${taskId}`, {}) as TaskResponse
+      tasks.value.unshift(response)
+      return response
+    } catch (e) {
+      console.error('Failed to duplicate task:', e)
+      return null
+    }
+  }
+
   // Target Channels
   const targetChannels = ref<TargetChannel[]>([])
 
@@ -225,6 +278,7 @@ export const useTaskStore = defineStore('task', () => {
   }
 
   async function startTask(taskId: number): Promise<boolean> {
+    error.value = null
     try {
       const response = await window.api.post(`/api/tasks/${taskId}/start`, {}) as TaskResponse
       const index = tasks.value.findIndex(t => t.id === taskId)
@@ -244,6 +298,7 @@ export const useTaskStore = defineStore('task', () => {
   }
 
   async function pauseTask(taskId: number): Promise<boolean> {
+    error.value = null
     try {
       const response = await window.api.post(`/api/tasks/${taskId}/pause`, {}) as TaskResponse
       const index = tasks.value.findIndex(t => t.id === taskId)
@@ -261,6 +316,7 @@ export const useTaskStore = defineStore('task', () => {
   }
 
   async function cancelTask(taskId: number): Promise<boolean> {
+    error.value = null
     try {
       const response = await window.api.post(`/api/tasks/${taskId}/cancel`, {}) as TaskResponse
       const index = tasks.value.findIndex(t => t.id === taskId)
@@ -278,6 +334,7 @@ export const useTaskStore = defineStore('task', () => {
   }
 
   async function deleteTask(taskId: number): Promise<boolean> {
+    error.value = null
     try {
       await window.api.delete(`/api/tasks/${taskId}`)
       tasks.value = tasks.value.filter(t => t.id !== taskId)
@@ -292,6 +349,7 @@ export const useTaskStore = defineStore('task', () => {
   }
 
   async function restartTask(taskId: number): Promise<Task | null> {
+    error.value = null
     try {
       const response = await window.api.post(`/api/tasks/${taskId}/restart`, {}) as TaskResponse
       const index = tasks.value.findIndex(t => t.id === taskId)
@@ -314,11 +372,18 @@ export const useTaskStore = defineStore('task', () => {
     pollingInterval.value = window.setInterval(async () => {
       if (hasRunningTasks.value) {
         await fetchActiveTasks()
-        if (currentTask.value && currentTask.value.status === 'running') {
-          await fetchTask(currentTask.value.id)
-          await fetchTaskLogs(currentTask.value.id)
+        if (currentTask.value) {
+          if (currentTask.value.status === 'running') {
+            await fetchTask(currentTask.value.id)
+            await fetchTaskLogs(currentTask.value.id)
+          } else if (['completed', 'failed', 'cancelled'].includes(currentTask.value.status)) {
+            await fetchTaskLogs(currentTask.value.id)
+          }
         }
       } else {
+        if (currentTask.value) {
+          await fetchTaskLogs(currentTask.value.id)
+        }
         stopPolling()
       }
     }, intervalMs)
@@ -333,6 +398,13 @@ export const useTaskStore = defineStore('task', () => {
 
   function $reset() {
     stopPolling()
+    error.value = null
+    loading.value = false
+    taskLogs.value = []
+    accountStats.value = []
+    targetChannels.value = []
+    currentTask.value = null
+    currentTaskType.value = null
   }
 
   function setCurrentTask(task: Task | null) {
@@ -341,6 +413,8 @@ export const useTaskStore = defineStore('task', () => {
       fetchTaskLogs(task.id)
     } else {
       taskLogs.value = []
+      accountStats.value = []
+      targetChannels.value = []
     }
   }
 
@@ -349,6 +423,8 @@ export const useTaskStore = defineStore('task', () => {
     tasks,
     currentTask,
     taskLogs,
+    logsHasMore,
+    accountStats,
     stats,
     loading,
     error,
@@ -381,6 +457,9 @@ export const useTaskStore = defineStore('task', () => {
     fetchTemplates,
     createTemplate,
     deleteTemplate,
+    // Account stats
+    fetchAccountStats,
+    duplicateTask,
     // Target Channels
     fetchTargetChannels
   }

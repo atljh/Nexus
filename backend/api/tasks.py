@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import func, case
 from sqlalchemy.orm import Session, subqueryload
 
 from database.database import get_db
@@ -68,6 +69,7 @@ class CreateCommentsTaskRequest(BaseModel):
     total_actions: int = Field(10, ge=1, le=10000, description="Number of comments to send")
     min_delay: float = Field(30.0, ge=1, le=3600, description="Min delay between actions")
     max_delay: float = Field(120.0, ge=1, le=3600, description="Max delay between actions")
+    max_concurrent: int = Field(1, ge=1, le=10, description="Max concurrent executions")
 
     @model_validator(mode='after')
     def validate_delays(self):
@@ -165,7 +167,7 @@ class AIPromptRequest(BaseModel):
 # ── Task list & creation ──
 
 @router.get("", response_model=List[TaskResponse])
-async def get_tasks(
+def get_tasks(
     task_type: Optional[str] = Query(None, description="Filter by task type"),
     status: Optional[str] = Query(None, description="Filter by status"),
     limit: int = Query(50, ge=1, le=200),
@@ -185,7 +187,7 @@ async def get_tasks(
 
 
 @router.get("/active", response_model=List[TaskResponse])
-async def get_active_tasks(db: Session = Depends(get_db)):
+def get_active_tasks(db: Session = Depends(get_db)):
     """Get all active (running or pending) tasks."""
     tasks = db.query(Task).options(subqueryload(Task.accounts)).filter(
         Task.status.in_(["pending", "running"])
@@ -196,34 +198,36 @@ async def get_active_tasks(db: Session = Depends(get_db)):
 # ── Statistics ──
 
 @router.get("/stats/summary")
-async def get_task_stats(db: Session = Depends(get_db)):
+def get_task_stats(db: Session = Depends(get_db)):
     """Get task statistics summary."""
-    total = db.query(Task).count()
-    running = db.query(Task).filter(Task.status == "running").count()
-    pending = db.query(Task).filter(Task.status == "pending").count()
-    completed = db.query(Task).filter(Task.status == "completed").count()
-    failed = db.query(Task).filter(Task.status == "failed").count()
+    row = db.query(
+        func.count().label("total"),
+        func.count(case((Task.status == "running", 1))).label("running"),
+        func.count(case((Task.status == "pending", 1))).label("pending"),
+        func.count(case((Task.status == "completed", 1))).label("completed"),
+        func.count(case((Task.status == "failed", 1))).label("failed"),
+    ).select_from(Task).one()
 
     return {
-        "total": total,
-        "running": running,
-        "pending": pending,
-        "completed": completed,
-        "failed": failed
+        "total": row.total,
+        "running": row.running,
+        "pending": row.pending,
+        "completed": row.completed,
+        "failed": row.failed,
     }
 
 
 # ── Comment Templates ──
 
 @router.get("/templates", response_model=List[CommentTemplateResponse])
-async def get_templates(db: Session = Depends(get_db)):
+def get_templates(db: Session = Depends(get_db)):
     """Get all comment templates."""
     templates = db.query(CommentTemplate).order_by(CommentTemplate.created_at.desc()).all()
     return [t.to_dict() for t in templates]
 
 
 @router.post("/templates", response_model=CommentTemplateResponse)
-async def create_template(request: CommentTemplateRequest, db: Session = Depends(get_db)):
+def create_template(request: CommentTemplateRequest, db: Session = Depends(get_db)):
     """Create a new comment template."""
     from workers.spintax import validate_spintax
 
@@ -246,7 +250,7 @@ async def create_template(request: CommentTemplateRequest, db: Session = Depends
 
 
 @router.put("/templates/{template_id}", response_model=CommentTemplateResponse)
-async def update_template(
+def update_template(
     template_id: int,
     request: CommentTemplateRequest,
     db: Session = Depends(get_db)
@@ -274,7 +278,7 @@ async def update_template(
 
 
 @router.delete("/templates/{template_id}")
-async def delete_template(template_id: int, db: Session = Depends(get_db)):
+def delete_template(template_id: int, db: Session = Depends(get_db)):
     """Delete a comment template."""
     template = db.query(CommentTemplate).filter(CommentTemplate.id == template_id).first()
     if not template:
@@ -286,17 +290,22 @@ async def delete_template(template_id: int, db: Session = Depends(get_db)):
     return {"message": "Template deleted"}
 
 
+class PreviewTemplateRequest(BaseModel):
+    content: str
+    count: int = 5
+
+
 @router.post("/templates/preview")
-async def preview_template(content: str, count: int = 5, db: Session = Depends(get_db)):
+def preview_template(request: PreviewTemplateRequest):
     """Preview spintax template with sample outputs."""
     from workers.spintax import validate_spintax, generate_samples, count_variants
 
-    is_valid, error = validate_spintax(content)
+    is_valid, error = validate_spintax(request.content)
     if not is_valid:
         raise HTTPException(status_code=400, detail=f"Invalid spintax: {error}")
 
-    samples = generate_samples(content, count)
-    total_variants = count_variants(content)
+    samples = generate_samples(request.content, request.count)
+    total_variants = count_variants(request.content)
 
     return {
         "samples": samples,
@@ -307,14 +316,14 @@ async def preview_template(content: str, count: int = 5, db: Session = Depends(g
 # ── AI Prompt Templates ──
 
 @router.get("/ai-prompts", response_model=list)
-async def get_ai_prompts(db: Session = Depends(get_db)):
+def get_ai_prompts(db: Session = Depends(get_db)):
     """Get all AI prompt templates."""
     prompts = db.query(AIPromptTemplate).order_by(AIPromptTemplate.created_at.desc()).all()
     return [p.to_dict() for p in prompts]
 
 
 @router.post("/ai-prompts")
-async def create_ai_prompt(request: AIPromptRequest, db: Session = Depends(get_db)):
+def create_ai_prompt(request: AIPromptRequest, db: Session = Depends(get_db)):
     """Create a new AI prompt template."""
     # Validate template has required placeholders
     if "{post_text}" not in request.prompt_template:
@@ -339,7 +348,7 @@ async def create_ai_prompt(request: AIPromptRequest, db: Session = Depends(get_d
 
 
 @router.put("/ai-prompts/{prompt_id}")
-async def update_ai_prompt(
+def update_ai_prompt(
     prompt_id: int,
     request: AIPromptRequest,
     db: Session = Depends(get_db)
@@ -369,7 +378,7 @@ async def update_ai_prompt(
 
 
 @router.delete("/ai-prompts/{prompt_id}")
-async def delete_ai_prompt(prompt_id: int, db: Session = Depends(get_db)):
+def delete_ai_prompt(prompt_id: int, db: Session = Depends(get_db)):
     """Delete an AI prompt template."""
     prompt = db.query(AIPromptTemplate).filter(AIPromptTemplate.id == prompt_id).first()
     if not prompt:
@@ -383,7 +392,7 @@ async def delete_ai_prompt(prompt_id: int, db: Session = Depends(get_db)):
 # ── Comment History (static prefix) ──
 
 @router.get("/comment-history/by-account/{account_id}")
-async def get_account_comment_history(
+def get_account_comment_history(
     account_id: int,
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
@@ -399,7 +408,7 @@ async def get_account_comment_history(
 # ── Blacklist (static prefix) ──
 
 @router.get("/blacklist/{account_id}")
-async def get_account_blacklist(
+def get_account_blacklist(
     account_id: int,
     db: Session = Depends(get_db)
 ):
@@ -411,7 +420,7 @@ async def get_account_blacklist(
 
 
 @router.delete("/blacklist/{blacklist_id}")
-async def delete_blacklist_entry(
+def delete_blacklist_entry(
     blacklist_id: int,
     db: Session = Depends(get_db)
 ):
@@ -428,7 +437,7 @@ async def delete_blacklist_entry(
 # ── Task creation (static prefix) ──
 
 @router.post("/likes", response_model=TaskResponse)
-async def create_likes_task(request: CreateLikesTaskRequest, db: Session = Depends(get_db)):
+def create_likes_task(request: CreateLikesTaskRequest, db: Session = Depends(get_db)):
     """Create a new likes (reactions) task."""
     # Validate accounts exist and are valid
     accounts = db.query(Account).filter(
@@ -439,10 +448,7 @@ async def create_likes_task(request: CreateLikesTaskRequest, db: Session = Depen
     if not accounts:
         raise HTTPException(status_code=400, detail="No valid accounts found")
 
-    if len(accounts) < len(request.account_ids):
-        invalid_count = len(request.account_ids) - len(accounts)
-        # Continue with valid accounts, just warn
-        pass
+    skipped_count = len(request.account_ids) - len(accounts)
 
     # Normalize channel
     channel = request.config.channel.strip()
@@ -478,11 +484,14 @@ async def create_likes_task(request: CreateLikesTaskRequest, db: Session = Depen
     db.commit()
     db.refresh(task)
 
-    return task.to_dict()
+    result = task.to_dict()
+    if skipped_count > 0:
+        result["skipped_accounts"] = skipped_count
+    return result
 
 
 @router.post("/comments", response_model=TaskResponse)
-async def create_comments_task(request: CreateCommentsTaskRequest, db: Session = Depends(get_db)):
+def create_comments_task(request: CreateCommentsTaskRequest, db: Session = Depends(get_db)):
     """Create a new comments task."""
     # Validate accounts
     accounts = db.query(Account).filter(
@@ -492,6 +501,8 @@ async def create_comments_task(request: CreateCommentsTaskRequest, db: Session =
 
     if not accounts:
         raise HTTPException(status_code=400, detail="No valid accounts found")
+
+    skipped_count = len(request.account_ids) - len(accounts)
 
     # Normalize channels
     channels = []
@@ -531,7 +542,7 @@ async def create_comments_task(request: CreateCommentsTaskRequest, db: Session =
         total_actions=request.total_actions,
         min_delay=request.min_delay,
         max_delay=request.max_delay,
-        max_concurrent=1
+        max_concurrent=request.max_concurrent
     )
     task.accounts = accounts
 
@@ -539,14 +550,63 @@ async def create_comments_task(request: CreateCommentsTaskRequest, db: Session =
     db.commit()
     db.refresh(task)
 
-    return task.to_dict()
+    result = task.to_dict()
+    if skipped_count > 0:
+        result["skipped_accounts"] = skipped_count
+    return result
+
+
+# ── Duplicate Task (static prefix) ──
+
+@router.post("/duplicate/{task_id}", response_model=TaskResponse)
+def duplicate_task(task_id: int, db: Session = Depends(get_db)):
+    """Duplicate a task with the same config and accounts."""
+    original = db.query(Task).options(subqueryload(Task.accounts)).filter(Task.id == task_id).first()
+    if not original:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    accounts = list(original.accounts)
+
+    # For likes tasks, recalculate total_actions based on current valid accounts
+    total = original.total_actions
+    if original.task_type == "likes":
+        valid = [a for a in accounts if a.status == "valid"]
+        total = len(valid) if valid else len(accounts)
+
+    new_task = Task(
+        task_type=original.task_type,
+        status="pending",
+        config=dict(original.config) if original.config else {},
+        total_actions=total,
+        min_delay=original.min_delay,
+        max_delay=original.max_delay,
+        max_concurrent=original.max_concurrent,
+    )
+    new_task.accounts = accounts
+
+    db.add(new_task)
+    db.commit()
+    db.refresh(new_task)
+
+    # Clone target channels for comments tasks
+    if original.task_type == "comments":
+        channels = db.query(TargetChannel).filter(TargetChannel.task_id == task_id).all()
+        for ch in channels:
+            new_ch = TargetChannel(
+                task_id=new_task.id,
+                channel_username=ch.channel_username,
+            )
+            db.add(new_ch)
+        db.commit()
+
+    return new_task.to_dict()
 
 
 # ============ Dynamic /{task_id} routes ============
 # These MUST come after all static prefix routes above.
 
 @router.get("/{task_id}", response_model=TaskResponse)
-async def get_task(task_id: int, db: Session = Depends(get_db)):
+def get_task(task_id: int, db: Session = Depends(get_db)):
     """Get a specific task by ID."""
     task = db.query(Task).options(subqueryload(Task.accounts)).filter(Task.id == task_id).first()
     if not task:
@@ -555,7 +615,7 @@ async def get_task(task_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{task_id}", response_model=TaskResponse)
-async def update_task(task_id: int, request: UpdateTaskRequest, db: Session = Depends(get_db)):
+def update_task(task_id: int, request: UpdateTaskRequest, db: Session = Depends(get_db)):
     """Update a task."""
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
@@ -676,7 +736,7 @@ async def pause_task(task_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{task_id}/restart", response_model=TaskResponse)
-async def restart_task(task_id: int, db: Session = Depends(get_db)):
+def restart_task(task_id: int, db: Session = Depends(get_db)):
     """Restart a completed/failed/cancelled task — reset counters and set to pending."""
     task = db.query(Task).options(subqueryload(Task.accounts)).filter(Task.id == task_id).first()
     if not task:
@@ -688,7 +748,6 @@ async def restart_task(task_id: int, db: Session = Depends(get_db)):
     # Reset counters
     task.completed_actions = 0
     task.failed_actions = 0
-    task.progress = 0
     task.last_error = None
     task.started_at = None
     task.completed_at = None
@@ -739,7 +798,7 @@ async def cancel_task(task_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/{task_id}")
-async def delete_task(task_id: int, db: Session = Depends(get_db)):
+def delete_task(task_id: int, db: Session = Depends(get_db)):
     """Delete a task and its logs."""
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
@@ -756,7 +815,7 @@ async def delete_task(task_id: int, db: Session = Depends(get_db)):
 # ── Task Logs ──
 
 @router.get("/{task_id}/logs", response_model=List[TaskLogResponse])
-async def get_task_logs(
+def get_task_logs(
     task_id: int,
     success: Optional[bool] = Query(None, description="Filter by success"),
     limit: int = Query(100, ge=1, le=1000),
@@ -777,16 +836,20 @@ async def get_task_logs(
     return [log.to_dict() for log in logs]
 
 
+class AddTaskLogRequest(BaseModel):
+    action_type: str
+    success: bool
+    account_id: Optional[int] = None
+    target: Optional[str] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
+    extra_data: Optional[dict] = None
+
+
 @router.post("/{task_id}/logs")
-async def add_task_log(
+def add_task_log(
     task_id: int,
-    action_type: str,
-    success: bool,
-    account_id: Optional[int] = None,
-    target: Optional[str] = None,
-    message: Optional[str] = None,
-    error: Optional[str] = None,
-    extra_data: Optional[dict] = None,
+    request: AddTaskLogRequest,
     db: Session = Depends(get_db)
 ):
     """Add a log entry for a task (used by worker)."""
@@ -796,22 +859,22 @@ async def add_task_log(
 
     log = TaskLog(
         task_id=task_id,
-        account_id=account_id,
-        action_type=action_type,
-        target=target,
-        success=success,
-        message=message,
-        error=error,
-        extra_data=extra_data
+        account_id=request.account_id,
+        action_type=request.action_type,
+        target=request.target,
+        success=request.success,
+        message=request.message,
+        error=request.error,
+        extra_data=request.extra_data
     )
 
     # Update task counters
-    if success:
+    if request.success:
         task.completed_actions += 1
     else:
         task.failed_actions += 1
-        if error:
-            task.last_error = error
+        if request.error:
+            task.last_error = request.error
 
     # Check if task is complete
     if task.completed_actions + task.failed_actions >= task.total_actions:
@@ -825,10 +888,64 @@ async def add_task_log(
     return log.to_dict()
 
 
+# ── Per-account stats ──
+
+@router.get("/{task_id}/account-stats")
+def get_task_account_stats(task_id: int, db: Session = Depends(get_db)):
+    """Get per-account statistics for a task (success/fail counts)."""
+    task = db.query(Task).options(subqueryload(Task.accounts)).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Count per-account success/fail using SQL aggregation
+    log_stats = db.query(
+        TaskLog.account_id,
+        func.count(case((TaskLog.success == True, 1))).label("success"),
+        func.count(case((TaskLog.success == False, 1))).label("failed"),
+    ).filter(
+        TaskLog.task_id == task_id,
+        TaskLog.account_id.isnot(None),
+    ).group_by(TaskLog.account_id).all()
+
+    # Build per-account stats
+    account_map: dict = {}
+    for row in log_stats:
+        account_map[row.account_id] = {"success": row.success, "failed": row.failed}
+
+    # Also include task accounts that haven't been logged yet
+    account_ids = list(account_map.keys())
+    for acc in task.accounts:
+        if acc.id not in account_map:
+            account_map[acc.id] = {"success": 0, "failed": 0}
+            account_ids.append(acc.id)
+
+    accounts = db.query(Account).filter(Account.id.in_(account_ids)).all() if account_ids else []
+    account_info = {a.id: a for a in accounts}
+
+    results = []
+    for acc_id, counts in account_map.items():
+        acc = account_info.get(acc_id)
+        results.append({
+            "account_id": acc_id,
+            "phone": acc.phone if acc else None,
+            "username": acc.username if acc else None,
+            "first_name": acc.first_name if acc else None,
+            "status": acc.status if acc else None,
+            "success": counts["success"],
+            "failed": counts["failed"],
+            "total": counts["success"] + counts["failed"],
+        })
+
+    # Sort: most actions first
+    results.sort(key=lambda x: x["total"], reverse=True)
+
+    return results
+
+
 # ── Target Channels ──
 
 @router.get("/{task_id}/channels", response_model=List[TargetChannelResponse])
-async def get_task_channels(task_id: int, db: Session = Depends(get_db)):
+def get_task_channels(task_id: int, db: Session = Depends(get_db)):
     """Get target channels for a comments task."""
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
@@ -841,7 +958,7 @@ async def get_task_channels(task_id: int, db: Session = Depends(get_db)):
 # ── Comment History (per task) ──
 
 @router.get("/{task_id}/comment-history")
-async def get_task_comment_history(
+def get_task_comment_history(
     task_id: int,
     success: Optional[bool] = Query(None),
     ai_only: bool = Query(False),

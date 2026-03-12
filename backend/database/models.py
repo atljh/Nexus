@@ -162,6 +162,7 @@ class Account(Base):
     # Extended metadata from JSON import
     extra_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     spamblock: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    is_premium: Mapped[bool] = mapped_column(Boolean, default=False)
     register_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     geo: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)  # Country code: RU, US, UA
 
@@ -215,6 +216,7 @@ class Account(Base):
             "last_name": self.last_name,
             "status": self.status,
             "spamblock": self.spamblock,
+            "is_premium": self.is_premium,
             "geo": self.geo,
             "register_time": _utc_iso(self.register_time),
             "api_id": self.api_id,
@@ -332,7 +334,7 @@ class TaskLog(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
-    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
     task: Mapped["Task"] = relationship(back_populates="logs")
 
     account_id: Mapped[Optional[int]] = mapped_column(ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True)
@@ -391,7 +393,7 @@ class TargetChannel(Base):
     __tablename__ = "target_channels"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
 
     channel_username: Mapped[str] = mapped_column(String(100))
     channel_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

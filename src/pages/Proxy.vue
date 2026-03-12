@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
+import { countryFlag } from '@/utils/formatters'
 import Button from 'primevue/button'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -15,7 +16,7 @@ import Checkbox from 'primevue/checkbox'
 import { useToast } from 'primevue/usetoast'
 import Toast from 'primevue/toast'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 interface Proxy {
   id: number
@@ -183,10 +184,6 @@ function getStatusSeverity(status: string): "success" | "danger" | "warn" | "sec
   }
 }
 
-function countryFlag(code: string | null): string {
-  if (!code) return ''
-  return code.toUpperCase().replace(/./g, c => String.fromCodePoint(c.charCodeAt(0) + 0x1F1A5))
-}
 
 function formatLastChecked(dateStr: string | null): string {
   if (!dateStr) return '—'
@@ -197,11 +194,11 @@ function formatLastChecked(dateStr: string | null): string {
   const diffHours = Math.floor(diffMs / 3600000)
   const diffDays = Math.floor(diffMs / 86400000)
 
-  if (diffMin < 1) return 'Только что'
-  if (diffMin < 60) return `${diffMin} мин назад`
-  if (diffHours < 24) return `${diffHours} ч назад`
-  if (diffDays < 7) return `${diffDays} дн назад`
-  return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })
+  if (diffMin < 1) return t('common.time.justNow')
+  if (diffMin < 60) return t('common.time.minutesShort', { count: diffMin })
+  if (diffHours < 24) return t('common.time.hoursShort', { count: diffHours })
+  if (diffDays < 7) return t('common.time.daysShort', { count: diffDays })
+  return date.toLocaleDateString(locale.value === 'uk' ? 'uk-UA' : 'en-US', { day: '2-digit', month: '2-digit', year: '2-digit' })
 }
 
 function setStatusFilter(val: string | null) {
@@ -261,9 +258,10 @@ async function checkProxy(proxy: Proxy) {
   try {
     const response = await window.api.post(`/api/proxy/${proxy.id}/check`, {}) as CheckResult
 
+    const isWorking = ['working', 'slow', 'very_slow'].includes(response.status)
     toast.add({
-      severity: response.status === 'valid' ? 'success' : 'error',
-      summary: response.status === 'valid' ? t('proxy.messages.proxyValid') : t('proxy.messages.proxyInvalid'),
+      severity: isWorking ? 'success' : 'error',
+      summary: isWorking ? t('proxy.messages.proxyValid') : t('proxy.messages.proxyInvalid'),
       detail: `${proxy.host}:${proxy.port}`,
       life: 3000
     })
@@ -668,7 +666,7 @@ async function deleteProxy(proxy: Proxy) {
 
 async function deleteSelectedProxies() {
   if (selectedProxies.value.length === 0) return
-  if (!confirm(`Удалить ${selectedProxies.value.length} прокси?`)) return
+  if (!confirm(t('proxy.bulkDeleteConfirm', { count: selectedProxies.value.length }))) return
 
   try {
     for (const proxy of selectedProxies.value) {
@@ -678,7 +676,7 @@ async function deleteSelectedProxies() {
     toast.add({
       severity: 'success',
       summary: t('common.success'),
-      detail: `Удалено ${selectedProxies.value.length} прокси`,
+      detail: t('proxy.messages.bulkDeleted', { count: selectedProxies.value.length }),
       life: 3000
     })
 
@@ -734,23 +732,23 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
       <div class="stats-row">
         <div class="stat-card" :class="{ active: !statusFilter }" @click="setStatusFilter(null)">
           <div class="stat-value accent">{{ totalProxies }}</div>
-          <div class="stat-label">Все прокси</div>
+          <div class="stat-label">{{ t('proxy.allProxies') }}</div>
         </div>
         <div class="stat-card" :class="{ active: statusFilter === 'working' }" @click="setStatusFilter('working')">
           <div class="stat-value">{{ workingProxies }}</div>
-          <div class="stat-label">Рабочие</div>
+          <div class="stat-label">{{ t('proxy.working') }}</div>
         </div>
         <div class="stat-card" :class="{ active: statusFilter === 'slow' }" @click="setStatusFilter('slow')">
           <div class="stat-value">{{ slowProxies }}</div>
-          <div class="stat-label">Медленные</div>
+          <div class="stat-label">{{ t('proxy.slow') }}</div>
         </div>
         <div class="stat-card" :class="{ active: statusFilter === 'not_working' }" @click="setStatusFilter('not_working')">
           <div class="stat-value">{{ notWorkingProxies }}</div>
-          <div class="stat-label">Нерабочие</div>
+          <div class="stat-label">{{ t('proxy.notWorking') }}</div>
         </div>
         <div class="stat-card" :class="{ active: statusFilter === 'unchecked' }" @click="setStatusFilter('unchecked')">
           <div class="stat-value">{{ uncheckedProxies }}</div>
-          <div class="stat-label">Не проверены</div>
+          <div class="stat-label">{{ t('proxy.uncheckedLabel') }}</div>
         </div>
       </div>
 
@@ -763,12 +761,12 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
           <button class="toolbar-btn" :disabled="proxies.length === 0" @click="checkAllProxies" v-tooltip.top="t('proxy.checkAll')">
             <i class="pi pi-refresh"></i>
           </button>
-          <button class="toolbar-btn" :disabled="!hasSelection" @click="deleteSelectedProxies" v-tooltip.top="'Удалить выбранные'">
+          <button class="toolbar-btn" :disabled="!hasSelection" @click="deleteSelectedProxies" v-tooltip.top="t('proxy.deleteSelected')">
             <i class="pi pi-trash"></i>
           </button>
         </div>
         <span class="shown-count">
-          Показано: {{ filteredProxies.length }} / {{ proxies.length }}
+          {{ t('proxy.shown', { filtered: filteredProxies.length, total: proxies.length }) }}
         </span>
       </div>
 
@@ -792,7 +790,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
             :options="typeFilterOptions"
             optionLabel="label"
             optionValue="value"
-            placeholder="Тип"
+            :placeholder="t('common.type')"
             @update:model-value="(val: string | null) => typeFilter = val"
             class="filter-chip"
             showClear
@@ -803,7 +801,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
             <i class="pi pi-search search-icon"></i>
             <InputText
               v-model="searchQuery"
-              placeholder="Поиск по IP, хосту, гео..."
+              :placeholder="t('proxy.searchPlaceholder')"
               class="search-input"
             />
           </div>
@@ -845,7 +843,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
             </template>
           </Column>
 
-          <Column header="Прокси" sortable field="host" style="min-width: 200px">
+          <Column :header="t('proxy.proxyColumn')" sortable field="host" style="min-width: 200px">
             <template #body="{ data }">
               <div class="proxy-cell">
                 <span class="proxy-address">{{ data.host }}:{{ data.port }}</span>
@@ -854,7 +852,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
             </template>
           </Column>
 
-          <Column header="Гео" style="width: 90px" sortable field="geo">
+          <Column :header="t('proxy.geoColumn')" style="width: 90px" sortable field="geo">
             <template #body="{ data }">
               <div v-if="data.geo" class="geo-cell">
                 <span class="geo-flag">{{ countryFlag(data.geo) }}</span>
@@ -868,7 +866,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
             <template #body="{ data }">
               <div v-if="data.status === 'checking'" class="checking-status">
                 <i class="pi pi-spin pi-spinner"></i>
-                <span>Проверка...</span>
+                <span>{{ t('proxy.checking') }}</span>
               </div>
               <Tag v-else :value="t(`proxy.status.${data.status}`)" :severity="getStatusSeverity(data.status)" class="status-pill" />
             </template>
@@ -881,26 +879,26 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
             </template>
           </Column>
 
-          <Column header="Акк." style="width: 70px" sortable field="accounts_count">
+          <Column :header="t('proxy.accountsShort')" style="width: 70px" sortable field="accounts_count">
             <template #body="{ data }">
               <span class="accounts-count">{{ data.accounts_count }}</span>
             </template>
           </Column>
 
-          <Column header="Внешний IP" style="min-width: 130px">
+          <Column :header="t('proxy.externalIp')" style="min-width: 130px">
             <template #body="{ data }">
               <span v-if="data.external_ip" class="ip-text">{{ data.external_ip }}</span>
               <span v-else class="no-data">—</span>
             </template>
           </Column>
 
-          <Column header="Проверка" style="min-width: 120px" sortable field="last_checked_at">
+          <Column :header="t('proxy.lastCheckColumn')" style="min-width: 120px" sortable field="last_checked_at">
             <template #body="{ data }">
               <span class="last-check-text">{{ formatLastChecked(data.last_checked_at) }}</span>
             </template>
           </Column>
 
-          <Column header="Действия" style="width: 120px">
+          <Column :header="t('proxy.actionsColumn')" style="width: 120px">
             <template #body="{ data }">
               <div class="actions-cell">
                 <button class="action-icon" @click="checkProxy(data)" v-tooltip.top="t('common.check')">

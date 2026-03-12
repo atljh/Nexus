@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import zipfile
 import shutil
@@ -29,6 +30,7 @@ from telegram import (
     auth_service,
     OFFICIAL_APIS,
 )
+from telegram.device_generator import generate_device_fingerprint
 from telegram.account_metadata import (
     extract_api_credentials as extract_api_credentials_from_metadata,
     extract_device_fingerprint as extract_device_fingerprint_from_metadata,
@@ -55,6 +57,8 @@ class AccountUpdate(BaseModel):
 class SessionImport(BaseModel):
     session_string: str
     proxy_id: Optional[int] = None
+    api_id: Optional[int] = None
+    api_hash: Optional[str] = None
 
 
 class CheckBatchRequest(BaseModel):
@@ -108,16 +112,13 @@ class SaveAccountsRequest(BaseModel):
     accounts: List[dict]  # Full account data with proxy_id and verification results
 
 
-def extract_api_credentials(json_data: dict) -> dict:
+def extract_api_credentials(json_data: dict) -> tuple:
     """
     Extract API credentials from JSON data.
     Supports both naming conventions: api_id/app_id, api_hash/app_hash.
+    Returns (api_id, api_hash) tuple.
     """
-    api_id, api_hash = extract_api_credentials_from_metadata(json_data)
-    return {
-        "api_id": api_id,
-        "api_hash": api_hash,
-    }
+    return extract_api_credentials_from_metadata(json_data)
 
 
 def extract_device_fingerprint(json_data: dict) -> dict:
@@ -312,26 +313,34 @@ async def delete_account(
     return {"success": True}
 
 
+class BulkActionRequest(BaseModel):
+    action: str
+    account_ids: List[int]
+    value: Optional[int] = None
+
+
 @router.post("/bulk-action")
 async def bulk_action(
-    action: str,
-    account_ids: List[int],
-    value: Optional[int] = None,
+    data: BulkActionRequest,
     session: AsyncSession = Depends(get_session)
 ):
-    query = select(Account).where(Account.id.in_(account_ids))
+    valid_actions = ("delete", "set_proxy", "set_group")
+    if data.action not in valid_actions:
+        raise HTTPException(status_code=400, detail=f"Invalid action. Must be one of: {', '.join(valid_actions)}")
+
+    query = select(Account).where(Account.id.in_(data.account_ids))
     result = await session.execute(query)
     accounts = result.scalars().all()
 
-    if action == "delete":
+    if data.action == "delete":
         for acc in accounts:
             await session.delete(acc)
-    elif action == "set_proxy":
+    elif data.action == "set_proxy":
         for acc in accounts:
-            acc.proxy_id = value
-    elif action == "set_group":
+            acc.proxy_id = data.value
+    elif data.action == "set_group":
         for acc in accounts:
-            acc.group_id = value
+            acc.group_id = data.value
 
     await session.commit()
 
@@ -382,6 +391,7 @@ async def check_account(
         system_version=device_fp.get("system_version"),
         app_version=device_fp.get("app_version"),
         lang_code=device_fp.get("lang_code"),
+        check_frozen=True,
     )
 
     if is_valid and user_info:
@@ -608,7 +618,7 @@ async def import_json_session(
 
     for i, item in enumerate(data):
         session_string = item.get("session_string") or item.get("session")
-        api_creds = extract_api_credentials(item)
+        item_api_id, item_api_hash = extract_api_credentials(item)
         device_fp = extract_device_fingerprint(item)
 
         if not session_string:
@@ -626,13 +636,14 @@ async def import_json_session(
         is_valid, user_info, error = await validate_session(
             session_string,
             proxy=proxy_config,
-            api_id=api_creds.get("api_id"),
-            api_hash=api_creds.get("api_hash"),
+            api_id=item_api_id,
+            api_hash=item_api_hash,
             unique_id=unique_id,
             device_model=device_fp.get("device_model"),
             system_version=device_fp.get("system_version"),
             app_version=device_fp.get("app_version"),
             lang_code=device_fp.get("lang_code"),
+            check_frozen=False,  # Don't do extra API calls during import
         )
 
         if not is_valid:
@@ -662,8 +673,8 @@ async def import_json_session(
             session_string=session_string,
             proxy_id=proxy_id,
             status="valid",
-            api_id=api_creds.get("api_id"),
-            api_hash=api_creds.get("api_hash"),
+            api_id=item_api_id,
+            api_hash=item_api_hash,
             device_fingerprint=device_fp,
             extra_data=item,
         )
@@ -719,7 +730,10 @@ async def import_session_string(
     is_valid, user_info, error = await validate_session(
         data.session_string,
         proxy=proxy_config,
+        api_id=data.api_id,
+        api_hash=data.api_hash,
         unique_id=data.session_string[:32],
+        check_frozen=False,  # Don't do extra API calls during import
     )
 
     if not is_valid:
@@ -746,7 +760,9 @@ async def import_session_string(
         phone=user_info.get("phone"),
         session_string=data.session_string,
         proxy_id=data.proxy_id,
-        status="valid"
+        status="valid",
+        api_id=data.api_id,
+        api_hash=data.api_hash,
     )
 
     session.add(account)
@@ -871,6 +887,11 @@ async def check_batch_accounts(
                     acc.last_name = check_result.last_name
                 if check_result.phone:
                     acc.phone = check_result.phone
+                # Persist premium status
+                acc.is_premium = check_result.is_premium
+                # Detect geo from phone if not already set
+                if not acc.geo and (check_result.phone or acc.phone):
+                    acc.geo = detect_geo_from_phone(check_result.phone or acc.phone)
 
             # Update spamblock if checked
             if check_result.spamblock is not None:
@@ -881,7 +902,9 @@ async def check_batch_accounts(
                 "status": acc.status,
                 "telegram_id": acc.telegram_id,
                 "username": acc.username,
+                "is_premium": acc.is_premium,
                 "spamblock": acc.spamblock,
+                "geo": acc.geo,
                 "error_code": check_result.error_code,
                 "error": check_result.error
             })
@@ -896,7 +919,9 @@ async def check_batch_accounts(
             "status": "invalid",
             "telegram_id": acc.telegram_id,
             "username": acc.username,
+            "is_premium": acc.is_premium,
             "spamblock": None,
+            "geo": acc.geo,
             "error_code": "no_proxy_assigned",
             "error": "No proxy assigned. Assign a proxy before checking."
         })
@@ -1071,7 +1096,7 @@ async def import_session_json_pairs(
             first_name = json_data.get("first_name")
             last_name = json_data.get("last_name")
             geo = json_data.get("geo")
-            api_creds = extract_api_credentials(json_data)
+            file_api_id, file_api_hash = extract_api_credentials(json_data)
             device_fp = extract_device_fingerprint(json_data)
 
             # Parse spamblock - can be bool, string ("free", "banned"), or None
@@ -1124,8 +1149,8 @@ async def import_session_json_pairs(
                 spamblock=spamblock,
                 register_time=register_time,
                 geo=geo,
-                api_id=api_creds.get("api_id"),
-                api_hash=api_creds.get("api_hash"),
+                api_id=file_api_id,
+                api_hash=file_api_hash,
                 device_fingerprint=device_fp,
             )
 
@@ -1703,9 +1728,9 @@ async def parse_import_files(
 
                 # Find tdata folder
                 tdata_path = None
-                for root, dirs, files in extract_path.walk():
+                for root, dirs, files in os.walk(extract_path):
                     if "tdata" in dirs:
-                        tdata_path = root / "tdata"
+                        tdata_path = Path(root) / "tdata"
                         break
 
                 if not tdata_path:
@@ -1716,6 +1741,12 @@ async def parse_import_files(
 
                 # Convert tdata to session (without validation - proxy not assigned yet)
                 session_string = await parse_tdata_to_session(tdata_path)
+
+                # Generate desktop fingerprint for tdata sessions
+                tdata_fp = generate_device_fingerprint(
+                    unique_id=session_string[:32],
+                    platform="desktop",
+                )
 
                 parsed_accounts.append({
                     "temp_id": str(uuid.uuid4()),
@@ -1731,7 +1762,13 @@ async def parse_import_files(
                     "geo": None,
                     "api_id": OFFICIAL_APIS["desktop"]["api_id"],
                     "api_hash": OFFICIAL_APIS["desktop"]["api_hash"],
-                    "device_fingerprint": {},
+                    "device_fingerprint": {
+                        "device_model": tdata_fp["device_model"],
+                        "system_version": tdata_fp["system_version"],
+                        "app_version": tdata_fp["app_version"],
+                        "lang_code": tdata_fp["lang_code"],
+                        "system_lang_code": tdata_fp["system_lang_code"],
+                    },
                 })
 
         except Exception as e:
@@ -1805,8 +1842,8 @@ async def parse_import_files(
                 last_name = json_data.get("last_name")
                 geo = json_data.get("geo")
 
-                # Extract API credentials from JSON
-                api_creds = extract_api_credentials(json_data)
+                # Extract API credentials from JSON (returns tuple)
+                api_id_parsed, api_hash_parsed = extract_api_credentials(json_data)
 
                 # Extract device fingerprint from JSON
                 device_fp = extract_device_fingerprint(json_data)
@@ -1838,8 +1875,8 @@ async def parse_import_files(
                     "register_time": register_time_str,
                     "geo": geo,
                     # API credentials from JSON
-                    "api_id": api_creds.get("api_id"),
-                    "api_hash": api_creds.get("api_hash"),
+                    "api_id": api_id_parsed,
+                    "api_hash": api_hash_parsed,
                     # Device fingerprint from JSON
                     "device_fingerprint": device_fp,
                 })
@@ -1977,6 +2014,12 @@ async def parse_tdata_folder(
                         source_name = tdata_root.rsplit('/', 1)[0] if '/' in tdata_root else tdata_root
                         source_name = source_name.rsplit('/', 1)[-1] if '/' in source_name else source_name
 
+                        # Generate desktop fingerprint for tdata sessions
+                        tdata_fp = generate_device_fingerprint(
+                            unique_id=session_string[:32],
+                            platform="desktop",
+                        )
+
                         parsed_accounts.append({
                             "temp_id": str(uuid.uuid4()),
                             "session_string": session_string,
@@ -1991,7 +2034,13 @@ async def parse_tdata_folder(
                             "geo": None,
                             "api_id": OFFICIAL_APIS["desktop"]["api_id"],
                             "api_hash": OFFICIAL_APIS["desktop"]["api_hash"],
-                            "device_fingerprint": {},
+                            "device_fingerprint": {
+                                "device_model": tdata_fp["device_model"],
+                                "system_version": tdata_fp["system_version"],
+                                "app_version": tdata_fp["app_version"],
+                                "lang_code": tdata_fp["lang_code"],
+                                "system_lang_code": tdata_fp["system_lang_code"],
+                            },
                         })
                     except Exception as e:
                         errors.append({
@@ -2130,6 +2179,7 @@ async def verify_parsed_accounts(
                 system_version=device_fp.get("system_version"),
                 app_version=device_fp.get("app_version"),
                 lang_code=device_fp.get("lang_code"),
+                check_frozen=False,  # Don't do extra API calls during import
             )
 
             if is_valid and user_info:

@@ -8,6 +8,7 @@ export interface Account {
   last_name: string | null
   status: AccountStatus
   spamblock: boolean | null
+  is_premium: boolean
   geo: string | null
   register_time: string | null
   has_2fa: boolean
@@ -155,7 +156,9 @@ export interface CheckBatchResult {
     status: AccountStatus
     telegram_id: number | null
     username: string | null
+    is_premium: boolean
     spamblock: boolean | null
+    geo: string | null
     error_code: string | null
     error: string | null
   }[]
@@ -320,6 +323,7 @@ export interface CreateCommentsTaskParams {
   total_actions: number
   min_delay: number
   max_delay: number
+  max_concurrent?: number
 }
 
 export interface TargetChannel {

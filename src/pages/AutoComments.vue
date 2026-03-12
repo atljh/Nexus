@@ -88,6 +88,17 @@ function getStatusSeverity(status: string): 'success' | 'info' | 'warn' | 'dange
   }
 }
 
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return t('common.time.justNow')
+  if (mins < 60) return t('common.time.minutesShort', { count: mins })
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return t('common.time.hoursShort', { count: hours })
+  const days = Math.floor(hours / 24)
+  return t('common.time.daysShort', { count: days })
+}
+
 // Create task and auto-start
 async function createTask() {
   if (channels.value.length === 0) {
@@ -95,6 +106,21 @@ async function createTask() {
       severity: 'error',
       summary: t('common.error'),
       detail: t('autoComments.errors.channelsRequired'),
+      life: 3000
+    })
+    return
+  }
+
+  // Validate all channel formats
+  const invalidChannel = channels.value.find(ch => {
+    const clean = ch.startsWith('@') ? ch.slice(1) : ch
+    return !/^[a-zA-Z0-9_]{5,32}$/.test(clean)
+  })
+  if (invalidChannel) {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: t('autoComments.errors.invalidChannel', { channel: invalidChannel }),
       life: 3000
     })
     return
@@ -137,6 +163,15 @@ async function createTask() {
     })
 
     if (task) {
+      // Warn if some accounts were skipped
+      if ((task as any).skipped_accounts) {
+        toast.add({
+          severity: 'warn',
+          summary: t('common.warning'),
+          detail: t('autoComments.messages.accountsSkipped', { count: (task as any).skipped_accounts }),
+          life: 5000
+        })
+      }
       // Auto-start the created task
       const started = await taskStore.startTask(task.id)
       if (started) {
@@ -405,7 +440,9 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  taskStore.stopPolling()
+  if (!taskStore.hasRunningTasks) {
+    taskStore.stopPolling()
+  }
 })
 </script>
 
@@ -780,6 +817,13 @@ onUnmounted(() => {
                     +{{ (task.config?.channels || []).length - 2 }}
                   </span>
                 </div>
+              </div>
+
+              <div class="task-meta">
+                <span class="task-accounts-count">
+                  <i class="pi pi-users"></i> {{ task.accounts_count }}
+                </span>
+                <span class="task-time">{{ timeAgo(task.created_at) }}</span>
               </div>
 
               <div class="task-progress-section">
@@ -1683,6 +1727,24 @@ onUnmounted(() => {
 
 .task-channels .more {
   color: #6e6e78;
+}
+
+.task-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: #6e6e78;
+}
+
+.task-accounts-count {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.task-time {
+  color: #5a5a64;
 }
 
 /* Task Progress */

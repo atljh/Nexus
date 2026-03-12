@@ -142,6 +142,8 @@ export const useAccountStore = defineStore('accounts', () => {
     try {
       const response = await window.api.get('/api/accounts') as AccountsResponse
       accounts.value = response.data || []
+    } catch (e) {
+      console.error('Failed to fetch accounts:', e)
     } finally {
       loading.value = false
     }
@@ -307,6 +309,8 @@ export const useAccountStore = defineStore('accounts', () => {
         if (r.telegram_id) account.telegram_id = r.telegram_id
         if (r.username) account.username = r.username
         if (r.spamblock !== null) account.spamblock = r.spamblock
+        if (r.is_premium !== undefined) account.is_premium = r.is_premium
+        if (r.geo) account.geo = r.geo
         account.last_check_error_code = r.error_code || null
         account.last_check_error = r.error || null
       }

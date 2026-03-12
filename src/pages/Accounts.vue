@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import { useAccountStore, useProxyStore, useGroupStore, useTagStore } from '@/stores'
 import { useDebouncedRef } from '@/composables'
+import { countryFlag } from '@/utils/formatters'
 import type { Account, AccountStatus, BulkAction } from '@/types'
 
 // Dialog components
@@ -30,7 +31,7 @@ import Toast from 'primevue/toast'
 import ConfirmDialog from 'primevue/confirmdialog'
 import { useConfirm } from 'primevue/useconfirm'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const toast = useToast()
 const confirm = useConfirm()
 
@@ -53,6 +54,10 @@ interface ParsedAccount {
   register_time?: string
   geo?: string
   source_file?: string
+  // From JSON metadata
+  api_id?: number
+  api_hash?: string
+  device_fingerprint?: Record<string, any>
   // Added by frontend
   proxy_id?: number
   status?: 'pending' | 'verifying' | 'valid' | 'invalid'
@@ -112,6 +117,16 @@ const showQuickProxyDialog = ref(false)
 const quickProxyString = ref('')
 const quickProxyChecking = ref(false)
 const quickProxyResult = ref<{ status: string; ping_ms?: number; geo?: string; error?: string } | null>(null)
+
+// Proxy pool
+const showProxyPool = ref(false)
+const proxyPoolText = ref('')
+const distributingPool = ref(false)
+
+const proxyPoolCount = computed(() => {
+  if (!proxyPoolText.value.trim()) return 0
+  return proxyPoolText.value.trim().split('\n').filter(line => line.trim()).length
+})
 
 function addImportLog(type: 'info' | 'success' | 'error' | 'warn', message: string) {
   const time = new Date().toLocaleTimeString()
@@ -213,7 +228,9 @@ const statusOptions = computed(() => [
   { label: t('accounts.status.session_expired'), value: 'session_expired' },
   { label: t('accounts.status.deactivated'), value: 'deactivated' },
   { label: t('accounts.status.needs_reauth'), value: 'needs_reauth' },
-  { label: t('accounts.status.unchecked'), value: 'unchecked' }
+  { label: t('accounts.status.unchecked'), value: 'unchecked' },
+  { label: t('accounts.status.checking'), value: 'checking' },
+  { label: t('accounts.status.connection_failed'), value: 'connection_failed' }
 ])
 
 const bulkMenuItems = computed(() => [
@@ -623,6 +640,85 @@ function assignBulkProxy() {
   })
 }
 
+async function distributeFromPool() {
+  const lines = proxyPoolText.value.trim().split('\n').filter(line => line.trim())
+  if (lines.length === 0) {
+    toast.add({ severity: 'warn', summary: t('common.warning'), detail: t('accounts.importFlow.proxyPoolEmpty'), life: 3000 })
+    return
+  }
+  if (parsedAccounts.value.length === 0) {
+    toast.add({ severity: 'warn', summary: t('common.warning'), detail: t('accounts.importFlow.noAccountsToDistribute'), life: 3000 })
+    return
+  }
+
+  distributingPool.value = true
+  addImportLog('info', `Розподіл проксі з пулу: ${lines.length} проксі на ${parsedAccounts.value.length} акаунтів...`)
+
+  const createdProxyIds: number[] = []
+  const failedLines: string[] = []
+
+  for (const line of lines) {
+    const parsed = parseProxyString(line)
+    if (!parsed) {
+      failedLines.push(line)
+      addImportLog('warn', `Не вдалося розпарсити: ${line}`)
+      continue
+    }
+
+    try {
+      // Check if proxy already exists
+      const existing = proxyStore.proxies.find(
+        p => p.host === parsed.host && p.port === parsed.port
+      )
+      if (existing) {
+        createdProxyIds.push(existing.id)
+        addImportLog('info', `Проксі вже існує: ${parsed.host}:${parsed.port}`)
+        continue
+      }
+
+      const proxyData: any = {
+        ...parsed,
+        username: parsed.username || null,
+        password: parsed.password || null
+      }
+      const newProxy = await window.api.post('/api/proxy', proxyData) as { id: number }
+      createdProxyIds.push(newProxy.id)
+      addImportLog('success', `Проксі додано: ${parsed.host}:${parsed.port}`)
+    } catch (error: any) {
+      failedLines.push(line)
+      addImportLog('error', `Помилка додавання ${parsed.host}:${parsed.port}: ${error.message}`)
+    }
+  }
+
+  if (createdProxyIds.length > 0) {
+    await proxyStore.fetchProxies()
+
+    // Round-robin distribution
+    parsedAccounts.value.forEach((account, index) => {
+      account.proxy_id = createdProxyIds[index % createdProxyIds.length]
+    })
+
+    addImportLog('success', `Розподілено ${createdProxyIds.length} проксі на ${parsedAccounts.value.length} акаунтів`)
+    toast.add({
+      severity: 'success',
+      summary: t('common.success'),
+      detail: `Розподілено ${createdProxyIds.length} проксі`,
+      life: 3000
+    })
+  }
+
+  if (failedLines.length > 0) {
+    toast.add({
+      severity: 'warn',
+      summary: t('common.warning'),
+      detail: `Не вдалося обробити ${failedLines.length} рядків`,
+      life: 5000
+    })
+  }
+
+  distributingPool.value = false
+}
+
 async function checkParsedProxies() {
   addImportLog('info', 'Запуск проверки прокси...')
 
@@ -747,7 +843,11 @@ async function verifyParsedAccounts() {
       .map(a => JSON.parse(JSON.stringify({
         temp_id: a.temp_id,
         session_string: a.session_string,
-        proxy_id: a.proxy_id
+        proxy_id: a.proxy_id,
+        api_id: a.api_id,
+        api_hash: a.api_hash,
+        device_fingerprint: a.device_fingerprint,
+        phone: a.phone,
       })))
 
     addImportLog('info', `Отправляем ${accountsToVerify.length} аккаунтов на верификацию...`)
@@ -875,6 +975,8 @@ function resetImportDialog() {
   bulkProxyId.value = null
   importLogs.value = []
   showLogs.value = false
+  showProxyPool.value = false
+  proxyPoolText.value = ''
 }
 
 function backToUpload() {
@@ -1394,10 +1496,6 @@ function handleAccountAdded() {
 // Row select/unselect handled by v-model:selection bridge (selectedRows)
 
 // Helper: country code to flag emoji
-function countryFlag(code: string | null): string {
-  if (!code) return ''
-  return code.toUpperCase().replace(/./g, c => String.fromCodePoint(c.charCodeAt(0) + 0x1F1A5))
-}
 
 // Helper: format aging time since registration
 function formatAging(registerTime: string | null): string {
@@ -1407,19 +1505,19 @@ function formatAging(registerTime: string | null): string {
   const diffMs = now.getTime() - reg.getTime()
   const days = Math.floor(diffMs / (1000 * 60 * 60 * 24))
 
-  if (days < 1) return 'Сегодня'
-  if (days < 30) return `${days} дн`
+  if (days < 1) return t('accounts.time.today')
+  if (days < 30) return t('accounts.time.days', { count: days })
 
   const months = Math.floor(days / 30)
   const remainDays = days % 30
 
   if (months < 12) {
-    return remainDays > 0 ? `${months} мес ${remainDays} дн` : `${months} мес`
+    return remainDays > 0 ? t('accounts.time.daysMonths', { months, days: remainDays }) : t('accounts.time.months', { count: months })
   }
 
   const years = Math.floor(months / 12)
   const remainMonths = months % 12
-  return remainMonths > 0 ? `${years} г ${remainMonths} мес` : `${years} г`
+  return remainMonths > 0 ? t('accounts.time.yearsMonths', { years, months: remainMonths }) : t('accounts.time.years', { count: years })
 }
 
 // Helper: format last used time
@@ -1431,12 +1529,13 @@ function formatLastUsed(lastUsedAt: string | null): string {
   const yesterday = new Date(today.getTime() - 86400000)
   const dateDay = new Date(date.getFullYear(), date.getMonth(), date.getDate())
 
-  const time = date.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
+  const loc = locale.value === 'uk' ? 'uk-UA' : 'en-US'
+  const time = date.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' })
 
-  if (dateDay.getTime() === today.getTime()) return `Сегодня, ${time}`
-  if (dateDay.getTime() === yesterday.getTime()) return `Вчера, ${time}`
+  if (dateDay.getTime() === today.getTime()) return `${t('accounts.time.today')}, ${time}`
+  if (dateDay.getTime() === yesterday.getTime()) return `${t('accounts.time.yesterday')}, ${time}`
 
-  return date.toLocaleDateString('ru', { day: '2-digit', month: '2-digit', year: '2-digit' })
+  return date.toLocaleDateString(loc, { day: '2-digit', month: '2-digit', year: '2-digit' })
 }
 
 // Helper: full name
@@ -1501,6 +1600,7 @@ const tagOptions = computed(() =>
 const totalAccounts = computed(() => accountStore.accounts.length)
 const validAccounts = computed(() => accountStore.accounts.filter(a => a.status === 'valid').length)
 const bannedAccounts = computed(() => accountStore.accounts.filter(a => ['banned', 'deactivated'].includes(a.status)).length)
+const premiumAccounts = computed(() => accountStore.accounts.filter(a => a.is_premium).length)
 const noRestrictionsAccounts = computed(() => accountStore.accounts.filter(a => a.status === 'valid' && !a.spamblock).length)
 const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.spamblock === true).length)
 
@@ -1516,23 +1616,27 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
       <div class="stats-row">
         <div class="stat-card" :class="{ active: !accountStore.filters.status }" @click="setStatusFilter(null)">
           <div class="stat-value accent">{{ totalAccounts }}</div>
-          <div class="stat-label">Все аккаунты</div>
+          <div class="stat-label">{{ t('accounts.allAccounts') }}</div>
         </div>
         <div class="stat-card" @click="setStatusFilter('valid')">
           <div class="stat-value">{{ validAccounts }}</div>
-          <div class="stat-label">Валидные</div>
+          <div class="stat-label">{{ t('accounts.validAccounts') }}</div>
         </div>
         <div class="stat-card" @click="setStatusFilter('banned')">
           <div class="stat-value">{{ bannedAccounts }}</div>
-          <div class="stat-label">Забанены</div>
+          <div class="stat-label">{{ t('accounts.bannedAccounts') }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{{ premiumAccounts }}</div>
+          <div class="stat-label">⭐ Premium</div>
         </div>
         <div class="stat-card">
           <div class="stat-value">{{ noRestrictionsAccounts }}</div>
-          <div class="stat-label">Без ограничений</div>
+          <div class="stat-label">{{ t('accounts.noRestrictions') }}</div>
         </div>
         <div class="stat-card">
           <div class="stat-value">{{ restrictedAccounts }}</div>
-          <div class="stat-label">С ограничениями</div>
+          <div class="stat-label">{{ t('accounts.withRestrictions') }}</div>
         </div>
       </div>
 
@@ -1545,22 +1649,22 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
           <button class="toolbar-btn" :disabled="accountStore.accounts.length === 0" @click="checkAllAccounts" v-tooltip.top="t('accounts.checkAll')">
             <i class="pi pi-refresh"></i>
           </button>
-          <button class="toolbar-btn" :disabled="!hasSelection" @click="showBatchCheckDialog = true" v-tooltip.top="'Проверить выбранные'">
+          <button class="toolbar-btn" :disabled="!hasSelection" @click="showBatchCheckDialog = true" v-tooltip.top="t('accounts.checkSelected')">
             <i class="pi pi-check"></i>
           </button>
-          <button class="toolbar-btn" :disabled="!hasSelection" @click="checkBulkProxies" v-tooltip.top="'Проверить прокси'">
+          <button class="toolbar-btn" :disabled="!hasSelection" @click="checkBulkProxies" v-tooltip.top="t('accounts.checkProxiesBtn')">
             <i class="pi pi-check-circle"></i>
           </button>
           <div class="toolbar-divider"></div>
-          <button class="toolbar-btn" @click="showGroupDialog = true" v-tooltip.top="'Создать группу'">
+          <button class="toolbar-btn" @click="showGroupDialog = true" v-tooltip.top="t('accounts.createGroup')">
             <i class="pi pi-folder"></i>
           </button>
-          <button class="toolbar-btn" @click="showTagDialog = true" v-tooltip.top="'Создать тег'">
+          <button class="toolbar-btn" @click="showTagDialog = true" v-tooltip.top="t('accounts.createTag')">
             <i class="pi pi-tag"></i>
           </button>
         </div>
         <span class="shown-count">
-          Показано аккаунтов: {{ accountStore.filteredAccounts.length }} / {{ accountStore.accounts.length }}
+          {{ t('accounts.shownAccounts', { filtered: accountStore.filteredAccounts.length, total: accountStore.accounts.length }) }}
         </span>
       </div>
 
@@ -1569,10 +1673,10 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
         <div class="filter-chips">
           <Select
             :model-value="accountStore.filters.group_id"
-            :options="[{ label: 'Все', value: null }, ...groupStore.groups.map(g => ({ label: g.name, value: g.id }))]"
+            :options="[{ label: t('accounts.all'), value: null }, ...groupStore.groups.map(g => ({ label: g.name, value: g.id }))]"
             optionLabel="label"
             optionValue="value"
-            placeholder="Роль"
+            :placeholder="t('accounts.groupPlaceholder')"
             @update:model-value="(val: number | null) => accountStore.setFilter('group_id', val || undefined)"
             class="filter-chip"
             showClear
@@ -1603,7 +1707,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             :options="[...tagStore.tags.map(tg => ({ label: tg.name, value: tg.id }))]"
             optionLabel="label"
             optionValue="value"
-            placeholder="Тег"
+            :placeholder="t('accounts.tagPlaceholder')"
             @update:model-value="(val: number | null) => accountStore.setFilter('tag_id', val || undefined)"
             class="filter-chip"
             showClear
@@ -1661,17 +1765,20 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             </template>
           </Column>
 
-          <Column header="Аккаунт" sortable field="phone" style="min-width: 140px">
+          <Column :header="t('accounts.accountColumn')" sortable field="phone" style="min-width: 140px">
             <template #body="{ data }">
               <div class="account-info-cell">
-                <span class="phone-text">{{ data.phone || data.telegram_id || '—' }}</span>
+                <div class="phone-row">
+                  <span class="phone-text">{{ data.phone || data.telegram_id || '—' }}</span>
+                  <span v-if="data.is_premium" class="premium-badge" v-tooltip.top="'Telegram Premium'">⭐</span>
+                </div>
                 <span v-if="data.username" class="account-username-sub">@{{ data.username }}</span>
                 <span v-else class="account-name-sub" :title="getFullName(data)">{{ getFullName(data) }}</span>
               </div>
             </template>
           </Column>
 
-          <Column header="Гео" style="width: 42px" sortable field="geo">
+          <Column :header="t('accounts.geoColumn')" style="width: 42px" sortable field="geo">
             <template #body="{ data }">
               <span v-if="data.geo" class="geo-flag" v-tooltip.top="data.geo?.toUpperCase()">{{ countryFlag(data.geo) }}</span>
               <span v-else class="no-data">—</span>
@@ -1694,7 +1801,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             </template>
           </Column>
 
-          <Column header="Прокси" style="min-width: 160px">
+          <Column :header="t('accounts.proxyColumn')" style="min-width: 160px">
             <template #body="{ data }">
               <Select
                 :model-value="data.proxy_id"
@@ -1726,13 +1833,13 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             </template>
           </Column>
 
-          <Column header="Отлежка" style="min-width: 70px" sortable field="register_time">
+          <Column :header="t('accounts.agingColumn')" style="min-width: 70px" sortable field="register_time">
             <template #body="{ data }">
               <span class="aging-text">{{ formatAging(data.register_time) }}</span>
             </template>
           </Column>
 
-          <Column header="Группа" style="min-width: 110px">
+          <Column :header="t('accounts.groupColumn')" style="min-width: 110px">
             <template #body="{ data }">
               <Select
                 :model-value="data.group_id"
@@ -1763,7 +1870,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             </template>
           </Column>
 
-          <Column header="Теги" style="min-width: 120px">
+          <Column :header="t('accounts.tagsColumn')" style="min-width: 120px">
             <template #body="{ data }">
               <MultiSelect
                 :model-value="data.tags?.map((tg: any) => tg.id) || []"
@@ -1797,7 +1904,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             </template>
           </Column>
 
-          <Column header="Послед." style="min-width: 80px" sortable field="last_used_at">
+          <Column :header="t('accounts.lastUsedColumn')" style="min-width: 80px" sortable field="last_used_at">
             <template #body="{ data }">
               <span class="last-used-text">{{ formatLastUsed(data.last_used_at) }}</span>
             </template>
@@ -1915,10 +2022,11 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             </template>
           </Select>
           <Button
-            icon="pi pi-plus"
-            severity="secondary"
-            v-tooltip.top="t('accounts.importFlow.addProxy')"
-            @click="showQuickProxyDialog = true"
+            :label="t('accounts.importFlow.proxyPool') + (proxyPoolCount > 0 ? ` (${proxyPoolCount})` : ` (${t('common.optional')})`)"
+            :icon="showProxyPool ? 'pi pi-chevron-up' : 'pi pi-list'"
+            :severity="showProxyPool ? 'info' : 'secondary'"
+            :outlined="!showProxyPool"
+            @click="showProxyPool = !showProxyPool"
           />
           <Button
             icon="pi pi-trash"
@@ -1928,6 +2036,40 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             @click="clearAllParsedAccounts"
             v-tooltip.top="t('accounts.importFlow.clearAll')"
           />
+        </div>
+
+        <!-- Proxy Pool Section -->
+        <div v-if="showProxyPool" class="proxy-pool-section">
+          <textarea
+            v-model="proxyPoolText"
+            class="proxy-pool-textarea"
+            rows="6"
+            placeholder="1.2.3.4:8000:user:pass
+5.6.7.8:1080:user:pass
+socks5://user:pass@proxy.example.com:10000
+http://9.9.9.9:8080
+login:pass:1.2.3.4:8080"
+          ></textarea>
+          <div class="proxy-pool-actions">
+            <Button
+              :label="t('accounts.importFlow.distributeFromPool')"
+              icon="pi pi-arrow-down"
+              severity="info"
+              size="small"
+              :disabled="proxyPoolCount === 0 || parsedAccounts.length === 0"
+              :loading="distributingPool"
+              @click="distributeFromPool"
+            />
+            <Button
+              icon="pi pi-times"
+              severity="secondary"
+              text
+              size="small"
+              :disabled="!proxyPoolText.trim()"
+              @click="proxyPoolText = ''; showProxyPool = false"
+              v-tooltip.top="t('accounts.importFlow.clearPool')"
+            />
+          </div>
         </div>
 
         <!-- Stats Bar -->
@@ -2062,7 +2204,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
         <!-- Logs Toggle Button -->
         <div class="logs-toggle-row">
           <Button
-            :label="showLogs ? 'Скрыть логи' : `Показать логи (${importLogs.length})`"
+            :label="showLogs ? t('accounts.importFlow.hideLogs') : t('accounts.importFlow.showLogs', { count: importLogs.length })"
             :icon="showLogs ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
             severity="secondary"
             text
@@ -2077,7 +2219,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             text
             size="small"
             @click="importLogs = []; showLogs = false"
-            v-tooltip.top="'Очистить логи'"
+            v-tooltip.top="t('accounts.importFlow.clearLogs')"
           />
         </div>
 
@@ -2684,6 +2826,19 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
   max-width: 120px;
 }
 
+/* Premium badge */
+.phone-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.premium-badge {
+  font-size: 12px;
+  line-height: 1;
+  cursor: default;
+}
+
 /* Geo */
 .geo-flag {
   font-size: 14px;
@@ -3275,6 +3430,47 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
 
 .proxy-dropdown-value i {
   color: #a855f7;
+}
+
+/* Proxy Pool */
+.proxy-pool-section {
+  margin-bottom: 16px;
+  border: 1px dashed rgba(96, 165, 250, 0.3);
+  border-radius: 10px;
+  padding: 12px;
+  background: rgba(96, 165, 250, 0.04);
+}
+
+.proxy-pool-textarea {
+  width: 100%;
+  min-height: 120px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: #e5e7eb;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.proxy-pool-textarea:focus {
+  border-color: rgba(96, 165, 250, 0.5);
+}
+
+.proxy-pool-textarea::placeholder {
+  color: #6b7280;
+  font-style: italic;
+}
+
+.proxy-pool-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .import-stats-bar {

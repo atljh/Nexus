@@ -90,13 +90,37 @@ function getStatusSeverity(status: string): 'success' | 'info' | 'warn' | 'dange
   }
 }
 
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return t('common.time.justNow')
+  if (mins < 60) return t('common.time.minutesShort', { count: mins })
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return t('common.time.hoursShort', { count: hours })
+  const days = Math.floor(hours / 24)
+  return t('common.time.daysShort', { count: days })
+}
+
 // Create task and auto-start
 async function createTask() {
-  if (!channel.value.trim()) {
+  const ch = channel.value.trim()
+  if (!ch) {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
       detail: t('autoLikes.errors.channelRequired'),
+      life: 3000
+    })
+    return
+  }
+
+  // Validate channel format: @username or username (alphanumeric + underscore, 5-32 chars)
+  const cleanChannel = ch.startsWith('@') ? ch.slice(1) : ch
+  if (!/^[a-zA-Z0-9_]{5,32}$/.test(cleanChannel)) {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: t('autoLikes.errors.invalidChannel'),
       life: 3000
     })
     return
@@ -138,6 +162,15 @@ async function createTask() {
     })
 
     if (task) {
+      // Warn if some accounts were skipped
+      if ((task as any).skipped_accounts) {
+        toast.add({
+          severity: 'warn',
+          summary: t('common.warning'),
+          detail: t('autoLikes.messages.accountsSkipped', { count: (task as any).skipped_accounts }),
+          life: 5000
+        })
+      }
       // Auto-start the created task
       const started = await taskStore.startTask(task.id)
       if (started) {
@@ -316,7 +349,9 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  taskStore.stopPolling()
+  if (!taskStore.hasRunningTasks) {
+    taskStore.stopPolling()
+  }
 })
 </script>
 
@@ -592,6 +627,13 @@ onUnmounted(() => {
                   <span class="channel-name">{{ task.config?.channel }}</span>
                   <span class="reaction-emoji">{{ (task.config?.reactions || []).join('') }}</span>
                 </div>
+              </div>
+
+              <div class="task-meta">
+                <span class="task-accounts-count">
+                  <i class="pi pi-users"></i> {{ task.accounts_count }}
+                </span>
+                <span class="task-time">{{ timeAgo(task.created_at) }}</span>
               </div>
 
               <div class="task-progress-section">
@@ -1266,6 +1308,24 @@ onUnmounted(() => {
 
 .reaction-emoji {
   font-size: 16px;
+}
+
+.task-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: #6e6e78;
+}
+
+.task-accounts-count {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.task-time {
+  color: #5a5a64;
 }
 
 /* Task Progress */

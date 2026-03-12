@@ -61,8 +61,7 @@ async def update_group(
         raise HTTPException(status_code=404, detail="Group not found")
 
     group.name = data.name
-    if data.color:
-        group.color = data.color
+    group.color = data.color
 
     await session.commit()
     await session.refresh(group)
