@@ -1,45 +1,41 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
+import { useAccountStore } from '@/stores/useAccountStore'
+import { useProxyStore } from '@/stores/useProxyStore'
+import { useTaskStore } from '@/stores/useTaskStore'
 
 const { t } = useI18n()
 
-const stats = ref({
-  accounts: { total: 0, active: 0 },
-  proxies: { total: 0, working: 0 },
-  tasks: { running: 0, completed: 0 },
-})
+const accountStore = useAccountStore()
+const proxyStore = useProxyStore()
+const taskStore = useTaskStore()
 
-interface Account { id: number; status: string }
-interface ProxyItem { id: number; status: string }
-interface TaskStats { total: number; running: number; pending: number; completed: number; failed: number }
-interface AccountsResponse { data: Account[] }
-interface ProxiesResponse { data: ProxyItem[] }
+const stats = computed(() => ({
+  accounts: {
+    total: accountStore.accounts.length,
+    active: accountStore.accounts.filter(a => a.status === 'valid').length,
+  },
+  proxies: {
+    total: proxyStore.proxies.length,
+    working: proxyStore.statusCounts.working,
+  },
+  tasks: {
+    running: taskStore.stats.running || 0,
+    completed: taskStore.stats.completed || 0,
+  },
+}))
 
 const loaded = ref(false)
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 
 async function loadStats() {
-  try {
-    const [accountsRes, proxiesRes, taskStatsRes] = await Promise.all([
-      window.api.get('/api/accounts') as Promise<AccountsResponse>,
-      window.api.get('/api/proxy') as Promise<ProxiesResponse>,
-      window.api.get('/api/tasks/stats/summary') as Promise<TaskStats>,
-    ])
-
-    const accounts = accountsRes.data || []
-    const proxies = proxiesRes.data || []
-
-    stats.value.accounts.total = accounts.length
-    stats.value.accounts.active = accounts.filter((a: Account) => a.status === 'valid').length
-    stats.value.proxies.total = proxies.length
-    stats.value.proxies.working = proxies.filter((p: ProxyItem) => p.status === 'working').length
-    stats.value.tasks.running = taskStatsRes.running || 0
-    stats.value.tasks.completed = taskStatsRes.completed || 0
-  } catch (error) {
-    console.error('Failed to load stats:', error)
-  }
+  await Promise.all([
+    accountStore.fetchAccounts(),
+    proxyStore.fetchProxies(),
+    taskStore.fetchStats(),
+  ])
 }
 
 onMounted(async () => {

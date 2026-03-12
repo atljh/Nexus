@@ -406,7 +406,7 @@ onUnmounted(() => {
 })
 
 // Watch for status changes + completion notifications
-watch(() => task.value?.status, (newStatus, oldStatus) => {
+watch(() => task.value?.status, async (newStatus, oldStatus) => {
   if (newStatus === 'running') {
     startPolling()
   } else {
@@ -422,8 +422,12 @@ watch(() => task.value?.status, (newStatus, oldStatus) => {
     } else if (newStatus === 'cancelled') {
       toast.add({ severity: 'warn', summary: t('taskResults.messages.cancelled'), life: 3000 })
     }
-    // Final fetch to get complete stats
-    taskStore.fetchAccountStats(taskId.value)
+    // Final fetch to get complete stats and logs
+    await Promise.all([
+      taskStore.fetchTaskLogs(taskId.value),
+      taskStore.fetchAccountStats(taskId.value)
+    ])
+    nextTick(() => scrollLogsToBottom())
   }
 })
 </script>

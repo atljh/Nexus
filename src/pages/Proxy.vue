@@ -14,24 +14,13 @@ import Tag from 'primevue/tag'
 import ProgressBar from 'primevue/progressbar'
 import Checkbox from 'primevue/checkbox'
 import { useToast } from 'primevue/usetoast'
+import { useConfirm } from 'primevue/useconfirm'
 import Toast from 'primevue/toast'
+import ConfirmDialog from 'primevue/confirmdialog'
+import { useProxyStore } from '@/stores/useProxyStore'
+import type { Proxy } from '@/types'
 
 const { t, locale } = useI18n()
-
-interface Proxy {
-  id: number
-  host: string
-  port: number
-  type: string
-  username: string | null
-  password?: string | null
-  status: 'unchecked' | 'working' | 'slow' | 'very_slow' | 'not_working' | 'timeout'
-  ping_ms?: number | null
-  geo?: string | null
-  external_ip?: string | null
-  accounts_count: number
-  last_checked_at: string | null
-}
 
 interface ProxyPreview {
   type: string
@@ -47,10 +36,12 @@ interface ProxyPreview {
 }
 
 const toast = useToast()
-const proxies = ref<Proxy[]>([])
+const confirm = useConfirm()
+const proxyStore = useProxyStore()
+const proxies = computed(() => proxyStore.proxies)
+const loading = computed(() => proxyStore.loading)
 const showAddDialog = ref(false)
 const showEditDialog = ref(false)
-const loading = ref(false)
 const checking = ref(false)
 const selectedProxies = ref<Proxy[]>([])
 
@@ -72,14 +63,14 @@ const proxyTypes = [
   { label: 'HTTPS', value: 'https' }
 ]
 
-const statusOptions = [
-  { label: 'Working', value: 'working' },
-  { label: 'Slow', value: 'slow' },
-  { label: 'Very Slow', value: 'very_slow' },
-  { label: 'Not Working', value: 'not_working' },
-  { label: 'Timeout', value: 'timeout' },
-  { label: 'Unchecked', value: 'unchecked' }
-]
+const statusOptions = computed(() => [
+  { label: t('proxy.status.working'), value: 'working' },
+  { label: t('proxy.status.slow'), value: 'slow' },
+  { label: t('proxy.status.very_slow'), value: 'very_slow' },
+  { label: t('proxy.status.not_working'), value: 'not_working' },
+  { label: t('proxy.status.timeout'), value: 'timeout' },
+  { label: t('proxy.status.unchecked'), value: 'unchecked' }
+])
 
 const typeFilterOptions = [
   { label: 'SOCKS5', value: 'socks5' },
@@ -109,10 +100,10 @@ const editCheckResult = ref<{ status: string; ping_ms?: number; geo?: string } |
 
 // Stats
 const totalProxies = computed(() => proxies.value.length)
-const workingProxies = computed(() => proxies.value.filter(p => p.status === 'working').length)
-const slowProxies = computed(() => proxies.value.filter(p => ['slow', 'very_slow'].includes(p.status)).length)
-const notWorkingProxies = computed(() => proxies.value.filter(p => ['not_working', 'timeout'].includes(p.status)).length)
-const uncheckedProxies = computed(() => proxies.value.filter(p => p.status === 'unchecked').length)
+const workingProxies = computed(() => proxyStore.statusCounts.working)
+const slowProxies = computed(() => proxyStore.statusCounts.slow + proxyStore.statusCounts.very_slow)
+const notWorkingProxies = computed(() => proxyStore.statusCounts.not_working + proxyStore.statusCounts.timeout)
+const uncheckedProxies = computed(() => proxyStore.statusCounts.unchecked)
 
 // Filtered proxies
 const filteredProxies = computed(() => {
@@ -150,28 +141,8 @@ const selectedPreviews = computed(() =>
 )
 
 onMounted(() => {
-  loadProxies()
+  proxyStore.fetchProxies()
 })
-
-interface ProxiesResponse { data: Proxy[] }
-
-async function loadProxies() {
-  loading.value = true
-  try {
-    const response = await window.api.get('/api/proxy') as ProxiesResponse
-    proxies.value = response.data || []
-  } catch (error) {
-    console.error('Failed to load proxies:', error)
-    toast.add({
-      severity: 'error',
-      summary: t('common.error'),
-      detail: t('proxy.messages.loadError'),
-      life: 3000
-    })
-  } finally {
-    loading.value = false
-  }
-}
 
 function getStatusSeverity(status: string): "success" | "danger" | "warn" | "secondary" {
   switch (status) {
@@ -251,22 +222,17 @@ function parseProxyString(str: string): { type: 'socks5' | 'socks4' | 'http' | '
   return { type, host, port, username, password }
 }
 
-interface CheckResult { status: string; valid?: boolean }
-interface CheckAllResult { checked: number }
-
 async function checkProxy(proxy: Proxy) {
   try {
-    const response = await window.api.post(`/api/proxy/${proxy.id}/check`, {}) as CheckResult
+    const result = await proxyStore.checkProxy(proxy.id)
 
-    const isWorking = ['working', 'slow', 'very_slow'].includes(response.status)
+    const isWorking = ['working', 'slow', 'very_slow'].includes(result.status)
     toast.add({
       severity: isWorking ? 'success' : 'error',
       summary: isWorking ? t('proxy.messages.proxyValid') : t('proxy.messages.proxyInvalid'),
       detail: `${proxy.host}:${proxy.port}`,
       life: 3000
     })
-
-    loadProxies()
   } catch (error: any) {
     toast.add({
       severity: 'error',
@@ -287,16 +253,14 @@ async function checkAllProxies() {
   })
 
   try {
-    const response = await window.api.post('/api/proxy/check-all', {}) as CheckAllResult
+    const result = await proxyStore.checkAllProxies()
 
     toast.add({
       severity: 'success',
       summary: t('common.success'),
-      detail: t('proxy.messages.checkComplete', { count: response.checked }),
+      detail: t('proxy.messages.checkComplete', { count: result.results.length }),
       life: 3000
     })
-
-    loadProxies()
   } catch (error: any) {
     toast.add({
       severity: 'error',
@@ -471,17 +435,12 @@ async function addSelectedProxies() {
     let addedCount = 0
 
     for (const proxy of selected) {
-      await window.api.post('/api/proxy', {
-        type: proxy.type,
+      await proxyStore.createProxy({
+        type: proxy.type as Proxy['type'],
         host: proxy.host,
         port: proxy.port,
-        username: proxy.username || null,
-        password: proxy.password || null,
-        // Pass check results so proxy is added with correct status
-        status: proxy.status,
-        ping_ms: proxy.ping_ms || null,
-        external_ip: proxy.external_ip || null,
-        geo: proxy.geo || null
+        username: proxy.username || undefined,
+        password: proxy.password || undefined,
       })
       addedCount++
     }
@@ -495,7 +454,6 @@ async function addSelectedProxies() {
 
     resetForm()
     showAddDialog.value = false
-    loadProxies()
   } catch (error: any) {
     toast.add({
       severity: 'error',
@@ -610,12 +568,12 @@ async function saveEditProxy() {
   if (!editProxy.value) return
 
   try {
-    await window.api.put(`/api/proxy/${editProxy.value.id}`, {
-      type: editProxy.value.type,
+    await proxyStore.updateProxy(editProxy.value.id, {
+      type: editProxy.value.type as Proxy['type'],
       host: editProxy.value.host,
       port: editProxy.value.port,
-      username: editProxy.value.username || null,
-      password: editProxy.value.password || null
+      username: editProxy.value.username || undefined,
+      password: editProxy.value.password || undefined
     })
 
     toast.add({
@@ -627,7 +585,6 @@ async function saveEditProxy() {
 
     showEditDialog.value = false
     resetEditDialog()
-    loadProxies()
   } catch (error: any) {
     toast.add({
       severity: 'error',
@@ -638,58 +595,65 @@ async function saveEditProxy() {
   }
 }
 
-async function deleteProxy(proxy: Proxy) {
-  if (!confirm(t('proxy.deleteConfirm', { host: proxy.host, port: proxy.port }))) {
-    return
-  }
-
-  try {
-    await window.api.delete(`/api/proxy/${proxy.id}`)
-
-    toast.add({
-      severity: 'success',
-      summary: t('common.success'),
-      detail: t('proxy.messages.deleted'),
-      life: 3000
-    })
-
-    loadProxies()
-  } catch (error: any) {
-    toast.add({
-      severity: 'error',
-      summary: t('common.error'),
-      detail: error.message || t('proxy.messages.deleteFailed'),
-      life: 3000
-    })
-  }
+function deleteProxy(proxy: Proxy) {
+  confirm.require({
+    message: t('proxy.deleteConfirm', { host: proxy.host, port: proxy.port }),
+    header: t('common.confirm'),
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: t('common.delete'),
+    rejectLabel: t('common.cancel'),
+    accept: async () => {
+      try {
+        await proxyStore.deleteProxy(proxy.id)
+        toast.add({
+          severity: 'success',
+          summary: t('common.success'),
+          detail: t('proxy.messages.deleted'),
+          life: 3000
+        })
+      } catch (error: any) {
+        toast.add({
+          severity: 'error',
+          summary: t('common.error'),
+          detail: error.message || t('proxy.messages.deleteFailed'),
+          life: 3000
+        })
+      }
+    }
+  })
 }
 
-async function deleteSelectedProxies() {
+function deleteSelectedProxies() {
   if (selectedProxies.value.length === 0) return
-  if (!confirm(t('proxy.bulkDeleteConfirm', { count: selectedProxies.value.length }))) return
 
-  try {
-    for (const proxy of selectedProxies.value) {
-      await window.api.delete(`/api/proxy/${proxy.id}`)
+  confirm.require({
+    message: t('proxy.bulkDeleteConfirm', { count: selectedProxies.value.length }),
+    header: t('common.confirm'),
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: t('common.delete'),
+    rejectLabel: t('common.cancel'),
+    accept: async () => {
+      try {
+        for (const proxy of selectedProxies.value) {
+          await proxyStore.deleteProxy(proxy.id)
+        }
+        toast.add({
+          severity: 'success',
+          summary: t('common.success'),
+          detail: t('proxy.messages.bulkDeleted', { count: selectedProxies.value.length }),
+          life: 3000
+        })
+        selectedProxies.value = []
+      } catch (error: any) {
+        toast.add({
+          severity: 'error',
+          summary: t('common.error'),
+          detail: error.message || t('proxy.messages.deleteFailed'),
+          life: 3000
+        })
+      }
     }
-
-    toast.add({
-      severity: 'success',
-      summary: t('common.success'),
-      detail: t('proxy.messages.bulkDeleted', { count: selectedProxies.value.length }),
-      life: 3000
-    })
-
-    selectedProxies.value = []
-    loadProxies()
-  } catch (error: any) {
-    toast.add({
-      severity: 'error',
-      summary: t('common.error'),
-      detail: error.message || t('proxy.messages.deleteFailed'),
-      life: 3000
-    })
-  }
+  })
 }
 
 function resetForm() {
@@ -727,6 +691,7 @@ function getPreviewStatusSeverity(status: string): "success" | "danger" | "warn"
 <template>
   <MainLayout>
     <Toast />
+    <ConfirmDialog />
     <div class="proxy-page">
       <!-- Stats Cards -->
       <div class="stats-row">
