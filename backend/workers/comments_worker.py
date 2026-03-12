@@ -20,6 +20,11 @@ from telethon.tl.functions.channels import (
     GetFullChannelRequest,
     GetParticipantRequest,
 )
+from telethon.tl.functions.messages import (
+    CheckChatInviteRequest,
+    ImportChatInviteRequest,
+)
+from telethon.tl.types import ChatInviteAlready
 from telethon.errors import (
     FloodWaitError,
     ChannelPrivateError,
@@ -29,7 +34,20 @@ from telethon.errors import (
     ChannelsTooMuchError,
     SlowModeWaitError,
     MsgIdInvalidError,
+    InviteHashExpiredError,
+    InviteHashInvalidError,
+    UserAlreadyParticipantError,
 )
+
+try:
+    from telethon.errors import ChatGuestSendForbiddenError
+except ImportError:
+    ChatGuestSendForbiddenError = None
+
+try:
+    from telethon.errors import InviteRequestSentError
+except ImportError:
+    InviteRequestSentError = None
 
 from database.database import SessionLocal
 from database.models import (
@@ -77,12 +95,14 @@ class CommentsWorker:
         self._clients: Dict[int, BaseClient] = {}
         self._entities: Dict[Tuple[int, str], Any] = {}  # (account_id, channel) -> entity
         self._failed_accounts: set = set()
+        self._flood_wait_until: Dict[int, float] = {}  # account_id -> monotonic timestamp when cooldown expires
         self._linked_chat_cache: Dict[int, Optional[int]] = {}  # channel_entity_id -> linked_chat_id
         self._account_comment_count: Dict[int, int] = {}
         self._account_action_times: Dict[int, list] = {}  # account_id -> list of timestamps
         self._blacklist_cache: Set[Tuple[int, str]] = set()
         self._ai_service: Optional[AIService] = None
         self._accounts_map: Dict[int, Any] = {}  # account_id -> Account (for warming multiplier)
+        self._invite_hashes: List[str] = []  # invite hashes from config invite_links
 
     @staticmethod
     def _normalize_device_fingerprint(value: Optional[Any]) -> Dict[str, Any]:
@@ -134,116 +154,129 @@ class CommentsWorker:
 
     # ── Client pool management ──
 
-    async def _connect_accounts(self, accounts: List[Account], db: Session) -> int:
-        """Pre-connect all accounts. Returns count of successfully connected."""
+    async def _connect_accounts(
+        self, accounts: List[Account], db: Session, max_concurrent: int = 1
+    ) -> int:
+        """Pre-connect accounts in parallel. Returns count of successfully connected."""
+        semaphore = asyncio.Semaphore(max_concurrent)
         connected = 0
-        for i, account in enumerate(accounts):
-            # Delay between connections to avoid suspicion
-            if i > 0:
-                await asyncio.sleep(random.uniform(0.5, 1.5))
+        lock = asyncio.Lock()
+
+        async def connect_one(account: Account):
+            nonlocal connected
 
             if not account.session_string:
                 logger.warning(f"Account {account.id}: no session string, skipping")
                 self._failed_accounts.add(account.id)
-                account.status = "invalid"
-                account.last_check_error_code = "missing_session"
-                account.last_check_error = "No session string"
-                account.last_checked_at = datetime.now(timezone.utc)
-                self._record_connect_failure_log(
-                    db,
-                    account.id,
-                    "missing_session",
-                    "No session string",
-                )
-                db.commit()
-                continue
+                async with lock:
+                    account.status = "invalid"
+                    account.last_check_error_code = "missing_session"
+                    account.last_check_error = "No session string"
+                    account.last_checked_at = datetime.now(timezone.utc)
+                    self._record_connect_failure_log(db, account.id, "missing_session", "No session string")
+                    db.commit()
+                return
 
             if account.status in SKIP_ACCOUNT_STATUSES:
                 logger.warning(f"Account {account.id}: status {account.status}, skipping")
                 self._failed_accounts.add(account.id)
-                self._record_connect_failure_log(
-                    db,
-                    account.id,
-                    f"status_{account.status}",
-                    f"Account skipped by status: {account.status}",
-                )
-                db.commit()
-                continue
+                async with lock:
+                    self._record_connect_failure_log(
+                        db, account.id,
+                        f"status_{account.status}",
+                        f"Account skipped by status: {account.status}",
+                    )
+                    db.commit()
+                return
 
             proxy = self._get_proxy_dict(account)
             resolved_api_id, resolved_api_hash, device_fp = resolve_account_connection_params(account)
 
             client = None
-            try:
-                client = BaseClient(
-                    session_string=account.session_string,
-                    api_id=resolved_api_id,
-                    api_hash=resolved_api_hash,
-                    proxy=proxy,
-                    connection_retries=3,
-                    timeout=15,
-                    device_model=device_fp.get("device_model"),
-                    system_version=device_fp.get("system_version"),
-                    app_version=device_fp.get("app_version"),
-                    lang_code=device_fp.get("lang_code"),
-                    system_lang_code=device_fp.get("system_lang_code"),
-                    unique_id=account.phone or str(account.telegram_id),
-                )
-                # Pre-task proxy validation — skip account fast if proxy is dead
-                if proxy:
-                    proxy_test = await client._test_proxy_connection()
-                    if not proxy_test.get("success"):
-                        error_msg = proxy_test.get("error", "Proxy test failed")
-                        logger.warning(f"Account {account.id}: proxy failed pre-check: {error_msg}")
+            async with semaphore:
+                await asyncio.sleep(random.uniform(0.2, 0.8))
+                try:
+                    client = BaseClient(
+                        session_string=account.session_string,
+                        api_id=resolved_api_id,
+                        api_hash=resolved_api_hash,
+                        proxy=proxy,
+                        connection_retries=3,
+                        timeout=15,
+                        device_model=device_fp.get("device_model"),
+                        system_version=device_fp.get("system_version"),
+                        app_version=device_fp.get("app_version"),
+                        lang_code=device_fp.get("lang_code"),
+                        system_lang_code=device_fp.get("system_lang_code"),
+                        unique_id=account.phone or str(account.telegram_id),
+                    )
+                    if proxy:
+                        proxy_test = await client._test_proxy_connection()
+                        if not proxy_test.get("success"):
+                            error_msg = proxy_test.get("error", "Proxy test failed")
+                            logger.warning(f"Account {account.id}: proxy failed pre-check: {error_msg}")
+                            self._failed_accounts.add(account.id)
+                            async with lock:
+                                self._record_connect_failure_log(db, account.id, "proxy_failed", error_msg)
+                                db.commit()
+                            return
+
+                    await client.connect()
+                    await client.check_auth()
+
+                    proxy_geo = account.proxy.geo if account.proxy else None
+                    geo_warnings = AccountSafetyValidator.validate_geo_match(account.geo, proxy_geo)
+                    for w in geo_warnings:
+                        logger.warning(f"Account {account.id}: {w}")
+
+                    locked_fingerprint = self._normalize_device_fingerprint(account.device_fingerprint)
+                    fp_valid, fp_errors = AccountSafetyValidator.validate_fingerprint(
+                        device_fp, locked_fingerprint
+                    )
+                    if not fp_valid:
+                        for e in fp_errors:
+                            logger.error(f"Account {account.id}: {e}")
                         self._failed_accounts.add(account.id)
-                        self._record_connect_failure_log(db, account.id, "proxy_failed", error_msg)
-                        db.commit()
-                        continue
-
-                await client.connect()
-                await client.check_auth()
-
-                # Geo validation (warning only, does not block)
-                proxy_geo = account.proxy.geo if account.proxy else None
-                geo_warnings = AccountSafetyValidator.validate_geo_match(account.geo, proxy_geo)
-                for w in geo_warnings:
-                    logger.warning(f"Account {account.id}: {w}")
-
-                # Fingerprint validation (blocks on mismatch)
-                locked_fingerprint = self._normalize_device_fingerprint(account.device_fingerprint)
-                fp_valid, fp_errors = AccountSafetyValidator.validate_fingerprint(
-                    device_fp, locked_fingerprint
-                )
-                if not fp_valid:
-                    for e in fp_errors:
-                        logger.error(f"Account {account.id}: {e}")
-                    self._failed_accounts.add(account.id)
-                    await client.disconnect()
-                    continue
-
-                # Lock fingerprint on first connect
-                AccountSafetyValidator.lock_fingerprint(account, device_fp, db)
-
-                self._clients[account.id] = client
-                connected += 1
-                logger.debug(f"Account {account.id}: connected")
-            except Exception as e:
-                logger.warning(f"Account {account.id}: connect failed — {e}")
-                self._failed_accounts.add(account.id)
-                new_status, error_code, error_message = self._classify_connect_failure(e)
-                if new_status:
-                    account.status = new_status
-                account.last_check_error_code = error_code
-                account.last_check_error = error_message
-                account.last_checked_at = datetime.now(timezone.utc)
-                self._record_connect_failure_log(db, account.id, error_code, error_message)
-                db.commit()
-                if client:
-                    try:
                         await client.disconnect()
-                    except Exception:
-                        pass
+                        return
 
+                    async with lock:
+                        AccountSafetyValidator.lock_fingerprint(account, device_fp, db)
+
+                    self._clients[account.id] = client
+                    async with lock:
+                        connected += 1
+                        db.add(TaskLog(
+                            task_id=self.task_id,
+                            account_id=account.id,
+                            action_type="connect",
+                            target=None,
+                            success=True,
+                            message="Connected",
+                            error=None,
+                        ))
+                        db.commit()
+                    logger.info(f"Account {account.id}: connected successfully")
+
+                except Exception as e:
+                    logger.warning(f"Account {account.id}: connect failed — {e}")
+                    self._failed_accounts.add(account.id)
+                    new_status, error_code, error_message = self._classify_connect_failure(e)
+                    async with lock:
+                        if new_status:
+                            account.status = new_status
+                        account.last_check_error_code = error_code
+                        account.last_check_error = error_message
+                        account.last_checked_at = datetime.now(timezone.utc)
+                        self._record_connect_failure_log(db, account.id, error_code, error_message)
+                        db.commit()
+                    if client:
+                        try:
+                            await client.disconnect()
+                        except Exception:
+                            pass
+
+        await asyncio.gather(*[connect_one(a) for a in accounts])
         return connected
 
     async def _disconnect_all(self):
@@ -259,13 +292,22 @@ class CommentsWorker:
     # ── Channel resolution & subscription ──
 
     async def _resolve_entity(self, account_id: int, channel: str) -> Any:
-        """Resolve and cache entity per (account_id, channel)."""
+        """Resolve and cache entity per (account_id, channel). Supports @username and numeric IDs."""
         key = (account_id, channel)
         if key in self._entities:
             return self._entities[key]
 
         client = self._clients[account_id]
-        entity = await client.client.get_entity(channel)
+        # Strip @ from numeric IDs (e.g. @-1003548071275 → -1003548071275)
+        clean = channel
+        if clean.startswith("@") and clean[1:].lstrip("-").isdigit():
+            clean = clean[1:]
+        # Support numeric channel IDs (e.g. -1003548071275 from t.me/c/ links)
+        try:
+            channel_id = int(clean)
+            entity = await client.client.get_entity(channel_id)
+        except (ValueError, TypeError):
+            entity = await client.client.get_entity(channel)
         self._entities[key] = entity
         return entity
 
@@ -299,39 +341,107 @@ class CommentsWorker:
         except Exception as e:
             return False, f"Join failed: {str(e)[:50]}"
 
+    @staticmethod
+    def _extract_invite_hash(channel: str) -> Optional[str]:
+        """Extract invite hash from t.me/+HASH or t.me/joinchat/HASH links."""
+        import re
+        m = re.match(r'(?:https?://)?t\.me/(?:\+|joinchat/)([a-zA-Z0-9_-]+)', channel)
+        return m.group(1) if m else None
+
+    async def _join_via_invite(self, account_id: int, invite_hash: str) -> Tuple[bool, Optional[str], Any]:
+        """Join channel via invite hash. Returns (success, error, entity)."""
+        client = self._clients[account_id]
+        try:
+            invite_info = await client.client(CheckChatInviteRequest(hash=invite_hash))
+            if isinstance(invite_info, ChatInviteAlready):
+                return True, None, invite_info.chat
+        except Exception:
+            pass
+
+        try:
+            updates = await client.client(ImportChatInviteRequest(hash=invite_hash))
+            entity = updates.chats[0] if updates.chats else None
+            return True, None, entity
+        except UserAlreadyParticipantError:
+            try:
+                invite_info = await client.client(CheckChatInviteRequest(hash=invite_hash))
+                if isinstance(invite_info, ChatInviteAlready):
+                    return True, None, invite_info.chat
+            except Exception:
+                pass
+            return True, None, None
+        except InviteHashExpiredError:
+            return False, "Invite link expired", None
+        except InviteHashInvalidError:
+            return False, "Invite link invalid", None
+        except ChannelPrivateError:
+            return False, "Channel is private, cannot join", None
+        except UserBannedInChannelError:
+            return False, "Account banned in channel", None
+        except ChannelsTooMuchError:
+            return False, "Account joined too many channels", None
+        except FloodWaitError:
+            raise
+        except Exception as e:
+            err_str = str(e).lower()
+            if "inviterequestsent" in err_str or ("request" in err_str and "sent" in err_str):
+                return False, "Join request sent, awaiting admin approval", None
+            return False, f"Join via invite failed: {str(e)[:50]}", None
+
     async def _get_linked_chat(self, account_id: int, entity: Any) -> Optional[int]:
-        """Get linked discussion group for a channel. Uses cache."""
+        """Get linked discussion group ID for a channel.
+        Each account calls GetFullChannelRequest so Telethon caches the entity
+        (with access_hash) for that specific client."""
         entity_id = entity.id
-        if entity_id in self._linked_chat_cache:
-            return self._linked_chat_cache[entity_id]
+        cache_key = (account_id, entity_id)
+
+        # Only cache the numeric ID; each account needs its own GetFullChannelRequest
+        # call to populate Telethon's internal entity cache for get_input_entity()
+        if cache_key in self._linked_chat_cache:
+            return self._linked_chat_cache[cache_key]
 
         client = self._clients[account_id]
         try:
             full = await client.client(GetFullChannelRequest(entity))
             linked_chat_id = full.full_chat.linked_chat_id
-            self._linked_chat_cache[entity_id] = linked_chat_id
+            self._linked_chat_cache[cache_key] = linked_chat_id
             return linked_chat_id
         except Exception as e:
             logger.debug(f"Cannot get linked chat: {e}")
-            self._linked_chat_cache[entity_id] = None
+            self._linked_chat_cache[cache_key] = None
             return None
 
     async def _join_discussion_group(self, account_id: int, linked_chat_id: int) -> Tuple[bool, Optional[str]]:
-        """Join the linked discussion group."""
+        """Join the linked discussion group by ID.
+        Relies on Telethon's internal entity cache (populated by prior GetFullChannelRequest)."""
         client = self._clients[account_id]
         try:
+            # Resolve via Telethon's cache (populated by GetFullChannelRequest in _get_linked_chat)
             try:
-                await client.client(GetParticipantRequest(linked_chat_id, "me"))
+                input_entity = await client.client.get_input_entity(linked_chat_id)
+            except (ValueError, TypeError):
+                # Fallback: try get_entity
+                try:
+                    input_entity = await client.client.get_entity(linked_chat_id)
+                except Exception:
+                    logger.warning(f"Account {account_id}: cannot resolve discussion group {linked_chat_id}")
+                    return False, f"Cannot resolve group {linked_chat_id}"
+
+            try:
+                await client.client(GetParticipantRequest(input_entity, "me"))
                 return True, None  # Already joined
             except UserNotParticipantError:
                 pass  # Need to join
+            except Exception:
+                pass  # Can't check — try joining anyway
 
-            await client.client(JoinChannelRequest(linked_chat_id))
+            await client.client(JoinChannelRequest(input_entity))
+            logger.info(f"Account {account_id}: joined discussion group {linked_chat_id}")
             return True, None
         except FloodWaitError:
             raise
         except Exception as e:
-            logger.debug(f"Discussion group join error: {e}")
+            logger.warning(f"Account {account_id}: discussion group {linked_chat_id} join error: {e}")
             return False, str(e)[:50]
 
     # ── AI Service ──
@@ -358,11 +468,22 @@ class CommentsWorker:
         self, db: Session, task: Task, channels: List[str]
     ) -> List[TargetChannel]:
         """Initialize target channels in database."""
+        import re
         targets = []
         for channel in channels:
-            if channel.startswith("https://t.me/") or channel.startswith("http://t.me/"):
+            # Strip @ from numeric channel IDs (e.g. @-1003548071275 → -1003548071275)
+            if channel.startswith("@") and channel[1:].lstrip("-").isdigit():
+                channel = channel[1:]
+            # Private channel link: t.me/c/CHANNEL_ID/POST_ID
+            m = re.match(r'(?:https?://)?t\.me/c/(\d+)(?:/\d+)?', channel)
+            if m:
+                channel = "-100" + m.group(1)
+            # Invite link: t.me/+HASH or t.me/joinchat/HASH — keep as-is for invite flow
+            elif re.match(r'(?:https?://)?t\.me/(?:\+|joinchat/)', channel):
+                pass  # keep original link
+            elif channel.startswith("https://t.me/") or channel.startswith("http://t.me/"):
                 channel = "@" + channel.split("t.me/")[1].split("/")[0]
-            elif not channel.startswith("@"):
+            elif not channel.startswith("@") and not channel.lstrip("-").isdigit():
                 channel = "@" + channel
 
             existing = db.query(TargetChannel).filter(
@@ -394,45 +515,88 @@ class CommentsWorker:
                 continue
 
             try:
-                # Resolve entity
-                entity = await self._resolve_entity(account_id, target.channel_username)
-                target.channel_id = entity.id
-                target.channel_title = getattr(entity, 'title', None)
+                invite_hash = self._extract_invite_hash(target.channel_username)
 
-                # Check subscription
-                is_subscribed, sub_error = await self._check_subscription(account_id, entity)
+                # Determine the best join strategy
+                use_invite_hash = invite_hash  # from channel_username itself (t.me/+HASH)
+                if not use_invite_hash and self._invite_hashes:
+                    # Numeric -100 channel IDs need invite hash to join
+                    clean_ch = target.channel_username
+                    if clean_ch.startswith("@"):
+                        clean_ch = clean_ch[1:]
+                    if clean_ch.lstrip("-").isdigit():
+                        use_invite_hash = self._invite_hashes[0]
 
-                if sub_error == "CHANNEL_PRIVATE":
-                    is_subscribed = False
-
-                if not is_subscribed:
-                    joined, join_error = await self._join_channel(account_id, entity, target.channel_username)
-                    if not joined:
+                if use_invite_hash:
+                    # Invite link flow: join via hash, then use entity from result
+                    joined, join_error, entity = await self._join_via_invite(
+                        account_id, use_invite_hash
+                    )
+                    if not joined or not entity:
                         logger.warning(
-                            f"Account {account_id}: cannot join {target.channel_username} — {join_error}"
+                            f"Account {account_id}: cannot join {target.channel_username} via invite — {join_error}"
                         )
                         continue
-
-                    # Re-resolve after join
-                    self._entities.pop((account_id, target.channel_username), None)
+                    self._entities[(account_id, target.channel_username)] = entity
+                    target.channel_id = entity.id
+                    target.channel_title = getattr(entity, 'title', None)
+                    await asyncio.sleep(random.uniform(1, 3))
+                else:
+                    # Public channel flow: resolve → check subscription → join
                     entity = await self._resolve_entity(account_id, target.channel_username)
                     target.channel_id = entity.id
-                    await asyncio.sleep(random.uniform(1, 3))
+                    target.channel_title = getattr(entity, 'title', None)
+
+                    # Check subscription
+                    if (account_id, target.channel_username) not in self._entities:
+                        is_subscribed, sub_error = await self._check_subscription(account_id, entity)
+
+                        if sub_error == "CHANNEL_PRIVATE":
+                            is_subscribed = False
+
+                        if not is_subscribed:
+                            joined, join_error = await self._join_channel(account_id, entity, target.channel_username)
+                            if not joined and self._invite_hashes:
+                                # Fallback: try invite links
+                                for ih in self._invite_hashes:
+                                    joined, join_error, inv_entity = await self._join_via_invite(account_id, ih)
+                                    if joined:
+                                        if inv_entity:
+                                            entity = inv_entity
+                                            self._entities[(account_id, target.channel_username)] = entity
+                                            target.channel_id = entity.id
+                                            target.channel_title = getattr(entity, 'title', None)
+                                        break
+                            if not joined:
+                                logger.warning(
+                                    f"Account {account_id}: cannot join {target.channel_username} — {join_error}"
+                                )
+                                continue
+
+                            # Re-resolve after join
+                            if (account_id, target.channel_username) not in self._entities:
+                                self._entities.pop((account_id, target.channel_username), None)
+                                entity = await self._resolve_entity(account_id, target.channel_username)
+                                target.channel_id = entity.id
+                            await asyncio.sleep(random.uniform(1, 3))
 
                 # Get linked discussion group
                 linked_chat_id = await self._get_linked_chat(account_id, entity)
 
                 if linked_chat_id:
-                    target.can_comment = True
-                    target.status = "joined"
-
-                    # Join discussion group
+                    # Join discussion group (required for commenting)
                     dg_joined, dg_error = await self._join_discussion_group(account_id, linked_chat_id)
-                    if not dg_joined:
-                        logger.debug(
-                            f"Account {account_id}: discussion group join skip — {dg_error}"
+                    if dg_joined:
+                        target.can_comment = True
+                        target.status = "joined"
+                        ready += 1
+                    else:
+                        logger.warning(
+                            f"Account {account_id}: cannot join discussion group — {dg_error}"
                         )
-                    ready += 1
+                        target.can_comment = False
+                        target.status = "error"
+                        target.error_message = f"Discussion group join failed: {dg_error}"
                 else:
                     target.can_comment = False
                     target.status = "cannot_comment"
@@ -441,8 +605,8 @@ class CommentsWorker:
             except ChannelPrivateError:
                 logger.warning(f"Account {account_id}: {target.channel_username} — channel private")
             except FloodWaitError as e:
-                logger.warning(f"Account {account_id}: FloodWait {e.seconds}s during setup")
-                self._failed_accounts.add(account_id)
+                logger.warning(f"Account {account_id}: FloodWait {e.seconds}s during setup — cooldown")
+                self._flood_wait_until[account_id] = time.monotonic() + e.seconds
                 return ready
             except Exception as e:
                 logger.warning(
@@ -528,6 +692,8 @@ class CommentsWorker:
             if a.id in self._failed_accounts:
                 continue
             if a.id not in self._clients:
+                continue
+            if a.id in self._flood_wait_until:
                 continue
             if self._account_comment_count.get(a.id, 0) >= limit:
                 continue
@@ -679,6 +845,10 @@ class CommentsWorker:
             )
 
         except FloodWaitError as e:
+            # Temporary cooldown — account will be retried after wait expires
+            wait = e.seconds
+            self._flood_wait_until[account_id] = time.monotonic() + wait
+            logger.warning(f"FloodWait {wait}s on account {account_id} — cooldown until +{wait}s")
             return SendResult(
                 status=SendStatus.FLOOD_WAIT,
                 message=f"FloodWait: {e.seconds}s",
@@ -687,6 +857,45 @@ class CommentsWorker:
                 entity_id=target.channel_id,
                 entity_title=target.channel_title,
             )
+
+        except Exception as guest_err:
+            if ChatGuestSendForbiddenError and isinstance(guest_err, ChatGuestSendForbiddenError):
+                # Need to join discussion group first, then retry
+                logger.info(f"Account {account_id}: ChatGuestSendForbidden — joining discussion group and retrying")
+                linked_chat_id = await self._get_linked_chat(account_id, entity)
+                if linked_chat_id:
+                    dg_joined, _ = await self._join_discussion_group(account_id, linked_chat_id)
+                    if dg_joined:
+                        await asyncio.sleep(random.uniform(1, 2))
+                        try:
+                            sent = await client.client.send_message(
+                                entity=entity,
+                                message=comment,
+                                comment_to=post_id,
+                            )
+                            return SendResult(
+                                status=SendStatus.OK,
+                                message=f"Comment sent to {target.channel_username}/{post_id}",
+                                entity_id=target.channel_id,
+                                entity_title=target.channel_title,
+                                sent_message=sent,
+                            )
+                        except Exception as retry_err:
+                            return SendResult(
+                                status=SendStatus.ERROR,
+                                message="Cannot comment after joining discussion group",
+                                error=str(retry_err)[:100],
+                                entity_id=target.channel_id,
+                                entity_title=target.channel_title,
+                            )
+                return SendResult(
+                    status=SendStatus.WRITE_FORBIDDEN,
+                    message="Must join discussion group before commenting",
+                    error="ChatGuestSendForbiddenError",
+                    entity_id=target.channel_id,
+                    entity_title=target.channel_title,
+                )
+            raise  # Re-raise for other exceptions to be caught below
 
         except ChatWriteForbiddenError:
             return SendResult(
@@ -858,9 +1067,20 @@ class CommentsWorker:
 
             config = task.config
             channels = config.get("channels", [])
+
+            # Extract invite hashes from invite_links config
+            raw_invite_links = config.get("invite_links", [])
+            logger.info(f"Task {self.task_id}: invite_links from config = {raw_invite_links}")
+            for link in raw_invite_links:
+                h = self._extract_invite_hash(link)
+                if h:
+                    self._invite_hashes.append(h)
+            logger.info(f"Task {self.task_id}: extracted invite_hashes = {self._invite_hashes}")
+
             comment_templates = config.get("templates", [])
             rotation_mode = config.get("rotation_mode", "random")
             comments_per_account = config.get("comments_per_account", 10)
+            target_post_id = config.get("post_id")  # specific post to comment on
             mode = config.get("mode", "single")
 
             if not channels:
@@ -875,15 +1095,18 @@ class CommentsWorker:
             self._init_ai_service(config)
             self._load_blacklist_cache(db, [a.id for a in accounts])
 
+            max_concurrent = task.max_concurrent or 1
+
             logger.info(
                 f"Starting comments task {self.task_id}: "
                 f"channels={len(channels)}, accounts={len(accounts)}, "
                 f"mode={mode}, rotation={rotation_mode}, "
+                f"max_concurrent={max_concurrent}, "
                 f"ai={'on' if self._ai_service else 'off'}"
             )
 
-            # Phase 1: Pre-connect all accounts
-            connected = await self._connect_accounts(accounts, db)
+            # Phase 1: Pre-connect all accounts (parallel)
+            connected = await self._connect_accounts(accounts, db, max_concurrent)
             if connected == 0:
                 task.status = "failed"
                 task.last_error = "All accounts failed to connect"
@@ -954,6 +1177,12 @@ class CommentsWorker:
 
                     await pause_event.wait()
 
+                    # Clear expired flood-wait cooldowns
+                    now = time.monotonic()
+                    expired_cooldowns = [aid for aid, until in self._flood_wait_until.items() if now >= until]
+                    for aid in expired_cooldowns:
+                        del self._flood_wait_until[aid]
+
                     # Select target channel
                     target = self._select_target_channel(valid_targets)
                     if not target:
@@ -969,9 +1198,27 @@ class CommentsWorker:
                     account_index += 1
 
                     if not account:
-                        logger.warning("All accounts exhausted or blacklisted")
-                        termination_reason = "All accounts exhausted or blacklisted"
-                        break
+                        # Check if all accounts are permanently exhausted or just in flood-wait
+                        all_exhausted = all(
+                            a.id in self._failed_accounts
+                            or self._account_comment_count.get(a.id, 0) >= comments_per_account
+                            or a.status in SKIP_ACCOUNT_STATUSES
+                            for a in accounts if a.id in self._clients
+                        )
+                        if all_exhausted:
+                            logger.warning("All accounts exhausted or blacklisted")
+                            termination_reason = "All accounts exhausted or blacklisted"
+                            break
+                        # Some accounts in flood-wait or rate-limited — wait and retry
+                        if self._flood_wait_until:
+                            earliest = min(self._flood_wait_until.values())
+                            wait = max(1, earliest - time.monotonic())
+                            logger.info(f"Accounts in flood-wait cooldown, waiting {wait:.0f}s")
+                            await asyncio.sleep(min(wait, 60))
+                        else:
+                            logger.info("All accounts rate-limited, cooling down 60s")
+                            await asyncio.sleep(60)
+                        continue
 
                     # Generate comment
                     comment_text, is_ai = await self._generate_comment(
@@ -984,6 +1231,7 @@ class CommentsWorker:
                         account_id=account.id,
                         target=target,
                         comment=comment_text,
+                        post_id=target_post_id,
                     )
 
                     # Handle result (blacklist, account status, pool exclusion)
@@ -1028,10 +1276,10 @@ class CommentsWorker:
                         if result.error:
                             task.last_error = result.error
 
-                        # FLOOD_WAIT / SLOW_MODE — sleep
-                        if result.wait_seconds:
+                        # SLOW_MODE — sleep (FloodWait handled via _flood_wait_until cooldown)
+                        if result.wait_seconds and result.status == SendStatus.SLOW_MODE:
                             wait = min(result.wait_seconds, 300)
-                            logger.info(f"Rate limit: sleeping {wait}s")
+                            logger.info(f"SlowMode: sleeping {wait}s")
                             await asyncio.sleep(wait)
 
                     db.commit()
@@ -1161,6 +1409,12 @@ class CommentsWorker:
                 if task.total_actions > 0 and completed >= task.total_actions:
                     return
 
+                # Clear expired flood-wait cooldowns
+                now = time.monotonic()
+                expired_cooldowns = [aid for aid, until in self._flood_wait_until.items() if now >= until]
+                for aid in expired_cooldowns:
+                    del self._flood_wait_until[aid]
+
                 chat = await event.get_chat()
                 channel_title = getattr(chat, 'title', '')
                 channel_username = getattr(chat, 'username', '')
@@ -1229,10 +1483,10 @@ class CommentsWorker:
                     task.failed_actions += 1
                     if result.error:
                         task.last_error = result.error
-                    # FLOOD_WAIT / SLOW_MODE — sleep before next action
-                    if result.wait_seconds:
+                    # SLOW_MODE — sleep (FloodWait handled via _flood_wait_until cooldown)
+                    if result.wait_seconds and result.status == SendStatus.SLOW_MODE:
                         wait = min(result.wait_seconds, 300)
-                        logger.info(f"Monitoring rate limit: sleeping {wait}s")
+                        logger.info(f"Monitoring SlowMode: sleeping {wait}s")
                         await asyncio.sleep(wait)
 
                 # Log

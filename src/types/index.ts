@@ -236,8 +236,10 @@ export interface TaskConfig {
   post_id?: number | null
   reactions?: string[]
   emoji_mode?: 'single' | 'random' | 'all'
+  invite_link?: string
   // For comments tasks
   channels?: string[]
+  invite_links?: string[]
   templates?: string[]
   rotation_mode?: 'random' | 'round_robin'
   comments_per_account?: number
@@ -261,6 +263,7 @@ export interface CreateLikesTaskParams {
   config: {
     channel: string
     post_id?: number | null
+    invite_link?: string
     reactions: string[]
     emoji_mode: 'single' | 'random' | 'all'
   }
@@ -311,6 +314,8 @@ export interface CreateCommentTemplateParams {
 // Comments Task Types
 export interface CommentsTaskConfig {
   channels: string[]
+  invite_links?: string[]
+  post_id?: number
   templates: string[]
   rotation_mode: 'random' | 'round_robin'
   comments_per_account: number

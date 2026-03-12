@@ -6,7 +6,6 @@ Based on tg_reacter logic: resolve → check subscription → auto-join → reac
 """
 
 import asyncio
-import itertools
 import random
 import logging
 import re
@@ -21,11 +20,16 @@ from telethon.tl.functions.channels import (
     GetParticipantRequest,
     JoinChannelRequest,
 )
+from telethon.tl.functions.messages import (
+    CheckChatInviteRequest,
+    ImportChatInviteRequest,
+)
 from telethon.tl.types import (
     ReactionEmoji,
     ChatReactionsAll,
     ChatReactionsSome,
     ChatReactionsNone,
+    ChatInviteAlready,
 )
 from telethon.errors import (
     FloodWaitError,
@@ -37,7 +41,15 @@ from telethon.errors import (
     MsgIdInvalidError,
     MessageNotModifiedError,
     ChannelsTooMuchError,
+    InviteHashExpiredError,
+    InviteHashInvalidError,
+    UserAlreadyParticipantError,
 )
+
+try:
+    from telethon.errors import InviteRequestSentError
+except ImportError:
+    InviteRequestSentError = None
 
 from database.database import SessionLocal
 from database.models import Task, TaskLog, Account
@@ -106,6 +118,7 @@ class LikesWorker:
         self._clients: Dict[int, BaseClient] = {}
         self._entities: Dict[int, Any] = {}
         self._failed_accounts: set = set()
+        self._flood_wait_until: Dict[int, float] = {}  # account_id -> monotonic timestamp when cooldown expires
         self._account_action_times: Dict[int, List[float]] = {}  # account_id -> list of timestamps
         self._accounts_map: Dict[int, Any] = {}  # account_id -> Account (for warming multiplier)
 
@@ -159,41 +172,40 @@ class LikesWorker:
 
     # ── Client pool management ──
 
-    async def _connect_accounts(self, accounts: List[Account], db: Session) -> int:
-        """Pre-connect all accounts. Returns count of successfully connected."""
+    async def _connect_accounts(
+        self, accounts: List[Account], db: Session, max_concurrent: int = 1
+    ) -> int:
+        """Pre-connect accounts in parallel. Returns count of successfully connected."""
+        semaphore = asyncio.Semaphore(max_concurrent)
         connected = 0
-        for i, account in enumerate(accounts):
-            # Delay between connections to avoid suspicion
-            if i > 0:
-                await asyncio.sleep(random.uniform(0.5, 1.5))
+        lock = asyncio.Lock()
+
+        async def connect_one(account: Account):
+            nonlocal connected
 
             if account.status in SKIP_ACCOUNT_STATUSES:
                 logger.warning(f"Account {account.id}: status {account.status}, skipping")
                 self._failed_accounts.add(account.id)
-                self._record_connect_failure_log(
-                    db,
-                    account.id,
-                    f"status_{account.status}",
-                    f"Account skipped by status: {account.status}",
-                )
-                db.commit()
-                continue
+                async with lock:
+                    self._record_connect_failure_log(
+                        db, account.id,
+                        f"status_{account.status}",
+                        f"Account skipped by status: {account.status}",
+                    )
+                    db.commit()
+                return
 
             if not account.session_string:
                 logger.warning(f"Account {account.id}: no session string, skipping")
                 self._failed_accounts.add(account.id)
-                account.status = "invalid"
-                account.last_check_error_code = "missing_session"
-                account.last_check_error = "No session string"
-                account.last_checked_at = datetime.now(timezone.utc)
-                self._record_connect_failure_log(
-                    db,
-                    account.id,
-                    "missing_session",
-                    "No session string",
-                )
-                db.commit()
-                continue
+                async with lock:
+                    account.status = "invalid"
+                    account.last_check_error_code = "missing_session"
+                    account.last_check_error = "No session string"
+                    account.last_checked_at = datetime.now(timezone.utc)
+                    self._record_connect_failure_log(db, account.id, "missing_session", "No session string")
+                    db.commit()
+                return
 
             proxy = None
             if account.proxy:
@@ -208,77 +220,96 @@ class LikesWorker:
             resolved_api_id, resolved_api_hash, device_fp = resolve_account_connection_params(account)
 
             client = None
-            try:
-                client = BaseClient(
-                    session_string=account.session_string,
-                    api_id=resolved_api_id,
-                    api_hash=resolved_api_hash,
-                    proxy=proxy,
-                    connection_retries=3,
-                    timeout=15,
-                    device_model=device_fp.get("device_model"),
-                    system_version=device_fp.get("system_version"),
-                    app_version=device_fp.get("app_version"),
-                    lang_code=device_fp.get("lang_code"),
-                    system_lang_code=device_fp.get("system_lang_code"),
-                    unique_id=account.phone or str(account.telegram_id),
-                )
-                # Pre-task proxy validation — skip account fast if proxy is dead
-                if proxy:
-                    proxy_test = await client._test_proxy_connection()
-                    if not proxy_test.get("success"):
-                        error_msg = proxy_test.get("error", "Proxy test failed")
-                        logger.warning(f"Account {account.id}: proxy failed pre-check: {error_msg}")
+            async with semaphore:
+                # Small stagger to avoid burst connections
+                await asyncio.sleep(random.uniform(0.2, 0.8))
+                try:
+                    client = BaseClient(
+                        session_string=account.session_string,
+                        api_id=resolved_api_id,
+                        api_hash=resolved_api_hash,
+                        proxy=proxy,
+                        connection_retries=3,
+                        timeout=15,
+                        device_model=device_fp.get("device_model"),
+                        system_version=device_fp.get("system_version"),
+                        app_version=device_fp.get("app_version"),
+                        lang_code=device_fp.get("lang_code"),
+                        system_lang_code=device_fp.get("system_lang_code"),
+                        unique_id=account.phone or str(account.telegram_id),
+                    )
+                    # Pre-task proxy validation
+                    if proxy:
+                        proxy_test = await client._test_proxy_connection()
+                        if not proxy_test.get("success"):
+                            error_msg = proxy_test.get("error", "Proxy test failed")
+                            logger.warning(f"Account {account.id}: proxy failed pre-check: {error_msg}")
+                            self._failed_accounts.add(account.id)
+                            async with lock:
+                                self._record_connect_failure_log(db, account.id, "proxy_failed", error_msg)
+                                db.commit()
+                            return
+
+                    await client.connect()
+                    await client.check_auth()
+
+                    # Geo validation (warning only)
+                    proxy_geo = account.proxy.geo if account.proxy else None
+                    geo_warnings = AccountSafetyValidator.validate_geo_match(account.geo, proxy_geo)
+                    for w in geo_warnings:
+                        logger.warning(f"Account {account.id}: {w}")
+
+                    # Fingerprint validation
+                    locked_fingerprint = self._normalize_device_fingerprint(account.device_fingerprint)
+                    fp_valid, fp_errors = AccountSafetyValidator.validate_fingerprint(
+                        device_fp, locked_fingerprint
+                    )
+                    if not fp_valid:
+                        for e in fp_errors:
+                            logger.error(f"Account {account.id}: {e}")
                         self._failed_accounts.add(account.id)
-                        self._record_connect_failure_log(db, account.id, "proxy_failed", error_msg)
-                        db.commit()
-                        continue
-
-                await client.connect()
-                await client.check_auth()
-
-                # Geo validation (warning only, does not block)
-                proxy_geo = account.proxy.geo if account.proxy else None
-                geo_warnings = AccountSafetyValidator.validate_geo_match(account.geo, proxy_geo)
-                for w in geo_warnings:
-                    logger.warning(f"Account {account.id}: {w}")
-
-                # Fingerprint validation (blocks on mismatch)
-                locked_fingerprint = self._normalize_device_fingerprint(account.device_fingerprint)
-                fp_valid, fp_errors = AccountSafetyValidator.validate_fingerprint(
-                    device_fp, locked_fingerprint
-                )
-                if not fp_valid:
-                    for e in fp_errors:
-                        logger.error(f"Account {account.id}: {e}")
-                    self._failed_accounts.add(account.id)
-                    await client.disconnect()
-                    continue
-
-                # Lock fingerprint on first connect
-                AccountSafetyValidator.lock_fingerprint(account, device_fp, db)
-
-                self._clients[account.id] = client
-                connected += 1
-                logger.debug(f"Account {account.id}: connected")
-            except Exception as e:
-                logger.warning(f"Account {account.id}: connect failed — {e}")
-                self._failed_accounts.add(account.id)
-                new_status, error_code, error_message = self._classify_connect_failure(e)
-                if new_status:
-                    account.status = new_status
-                account.last_check_error_code = error_code
-                account.last_check_error = error_message
-                account.last_checked_at = datetime.now(timezone.utc)
-                self._record_connect_failure_log(db, account.id, error_code, error_message)
-                db.commit()
-                # Disconnect if client was partially connected
-                if client:
-                    try:
                         await client.disconnect()
-                    except Exception:
-                        pass
+                        return
 
+                    # Lock fingerprint on first connect
+                    async with lock:
+                        AccountSafetyValidator.lock_fingerprint(account, device_fp, db)
+
+                    self._clients[account.id] = client
+                    async with lock:
+                        connected += 1
+                        # Log successful connection
+                        db.add(TaskLog(
+                            task_id=self.task_id,
+                            account_id=account.id,
+                            action_type="connect",
+                            target=None,
+                            success=True,
+                            message="Connected",
+                            error=None,
+                        ))
+                        db.commit()
+                    logger.info(f"Account {account.id}: connected successfully")
+
+                except Exception as e:
+                    logger.warning(f"Account {account.id}: connect failed — {e}")
+                    self._failed_accounts.add(account.id)
+                    new_status, error_code, error_message = self._classify_connect_failure(e)
+                    async with lock:
+                        if new_status:
+                            account.status = new_status
+                        account.last_check_error_code = error_code
+                        account.last_check_error = error_message
+                        account.last_checked_at = datetime.now(timezone.utc)
+                        self._record_connect_failure_log(db, account.id, error_code, error_message)
+                        db.commit()
+                    if client:
+                        try:
+                            await client.disconnect()
+                        except Exception:
+                            pass
+
+        await asyncio.gather(*[connect_one(a) for a in accounts])
         return connected
 
     async def _disconnect_all(self):
@@ -294,12 +325,21 @@ class LikesWorker:
     # ── Channel resolution & subscription ──
 
     async def _resolve_entity(self, account_id: int, channel: str) -> Any:
-        """Resolve and cache entity per client."""
+        """Resolve and cache entity per client. Supports @username, username, and numeric IDs."""
         if account_id in self._entities:
             return self._entities[account_id]
 
         client = self._clients[account_id]
-        entity = await client.client.get_entity(channel)
+        # Strip @ from numeric IDs (e.g. @-1003548071275 → -1003548071275)
+        clean = channel
+        if clean.startswith("@") and clean[1:].lstrip("-").isdigit():
+            clean = clean[1:]
+        # Support numeric channel IDs (e.g. -1003548071275 from t.me/c/ links)
+        try:
+            channel_id = int(clean)
+            entity = await client.client.get_entity(channel_id)
+        except (ValueError, TypeError):
+            entity = await client.client.get_entity(channel)
         self._entities[account_id] = entity
         return entity
 
@@ -332,6 +372,49 @@ class LikesWorker:
             raise e
         except Exception as e:
             return False, f"Join failed: {str(e)[:50]}"
+
+    async def _join_via_invite(self, account_id: int, invite_hash: str) -> Tuple[bool, Optional[str], Any]:
+        """Join channel via invite hash. Returns (success, error, entity)."""
+        client = self._clients[account_id]
+        try:
+            # Check if already a member
+            invite_info = await client.client(CheckChatInviteRequest(hash=invite_hash))
+            if isinstance(invite_info, ChatInviteAlready):
+                return True, None, invite_info.chat
+        except Exception:
+            pass
+
+        try:
+            updates = await client.client(ImportChatInviteRequest(hash=invite_hash))
+            entity = updates.chats[0] if updates.chats else None
+            return True, None, entity
+        except UserAlreadyParticipantError:
+            # Already in, re-check to get entity
+            try:
+                invite_info = await client.client(CheckChatInviteRequest(hash=invite_hash))
+                if isinstance(invite_info, ChatInviteAlready):
+                    return True, None, invite_info.chat
+            except Exception:
+                pass
+            return True, None, None
+        except InviteHashExpiredError:
+            return False, "Invite link expired", None
+        except InviteHashInvalidError:
+            return False, "Invite link invalid", None
+        except ChannelPrivateError:
+            return False, "Channel is private, cannot join", None
+        except UserBannedInChannelError:
+            return False, "Account banned in channel", None
+        except ChannelsTooMuchError:
+            return False, "Account joined too many channels", None
+        except FloodWaitError:
+            raise
+        except Exception as e:
+            err_str = str(e).lower()
+            # InviteRequestSentError — channel requires admin approval
+            if "inviterequestsent" in err_str or "request" in err_str and "sent" in err_str:
+                return False, "Join request sent, awaiting admin approval", None
+            return False, f"Join via invite failed: {str(e)[:50]}", None
 
     # ── Available reactions check ──
 
@@ -395,14 +478,20 @@ class LikesWorker:
             return True, "Reaction already set", None
 
         except FloodWaitError as e:
-            logger.warning(f"FloodWait {e.seconds}s on account {account_id} — quarantining")
-            self._failed_accounts.add(account_id)
-            return False, None, f"FloodWait: {e.seconds}s (account quarantined)"
+            # Temporary cooldown — account will be retried after wait expires
+            wait = e.seconds
+            self._flood_wait_until[account_id] = time.monotonic() + wait
+            logger.warning(f"FloodWait {wait}s on account {account_id} — cooldown until +{wait}s")
+            return False, None, f"FloodWait: {wait}s"
 
         except ReactionInvalidError:
             return False, None, "Invalid reaction emoji"
 
-        except (ChatWriteForbiddenError, UserBannedInChannelError):
+        except UserBannedInChannelError:
+            self._failed_accounts.add(account_id)
+            return False, None, "Account banned in channel"
+
+        except ChatWriteForbiddenError:
             self._failed_accounts.add(account_id)
             return False, None, "Account cannot react in this channel"
 
@@ -414,6 +503,11 @@ class LikesWorker:
             return False, None, "Invalid message ID"
 
         except Exception as e:
+            error_str = str(e)[:200].lower()
+            # Detect spamblock patterns
+            if any(p in error_str for p in ("peer_flood", "a wait of", "spam")):
+                self._failed_accounts.add(account_id)
+                return False, None, f"Spamblock: {str(e)[:100]}"
             logger.warning(f"Reaction error on account {account_id}: {e}")
             return False, None, str(e)[:100]
 
@@ -460,17 +554,32 @@ class LikesWorker:
     # ── Link parsing ──
 
     @staticmethod
-    def _parse_channel(channel: str, post_id: Optional[int] = None) -> tuple[str, Optional[int]]:
+    def _parse_channel(channel: str, post_id: Optional[int] = None) -> tuple[str, Optional[int], Optional[str]]:
         """
-        Parse channel input — supports @channel, username, and t.me links.
-        Returns (channel, post_id).
+        Parse channel input — supports @channel, username, t.me links,
+        private channel links (t.me/c/ID/post), and invite links (t.me/+HASH).
+        Returns (channel, post_id, invite_hash).
         """
+        # Private channel format: t.me/c/CHANNEL_ID/POST_ID
+        m = re.match(r'(?:https?://)?t\.me/c/(\d+)(?:/(\d+))?', channel)
+        if m:
+            channel_id = int(m.group(1))
+            if m.group(2) and not post_id:
+                post_id = int(m.group(2))
+            return "-100" + str(channel_id), post_id, None
+
+        # Invite link format: t.me/+HASH or t.me/joinchat/HASH
+        m = re.match(r'(?:https?://)?t\.me/(?:\+|joinchat/)([a-zA-Z0-9_-]+)', channel)
+        if m:
+            return channel, post_id, m.group(1)
+
+        # Public channel: t.me/username/POST_ID
         m = re.match(r'(?:https?://)?t\.me/([a-zA-Z0-9_]+)(?:/(\d+))?', channel)
         if m:
             channel = m.group(1)
             if m.group(2) and not post_id:
                 post_id = int(m.group(2))
-        return channel, post_id
+        return channel, post_id, None
 
     # ── Main execution ──
 
@@ -506,8 +615,18 @@ class LikesWorker:
             config = task.config
             channel = config.get("channel", "")
             post_id = config.get("post_id")
-            # Parse t.me links (e.g. https://t.me/channel/12345)
-            channel, post_id = self._parse_channel(channel, post_id)
+            # Parse t.me links (e.g. https://t.me/channel/12345, t.me/c/ID/post, t.me/+HASH)
+            channel, post_id, invite_hash = self._parse_channel(channel, post_id)
+
+            # Separate invite link for private channels (t.me/c/ format)
+            invite_link = config.get("invite_link", "")
+            if invite_link and not invite_hash:
+                _, _, invite_hash = self._parse_channel(invite_link)
+                if not invite_hash:
+                    # Try extracting hash directly
+                    m = re.match(r'(?:https?://)?t\.me/(?:\+|joinchat/)([a-zA-Z0-9_-]+)', invite_link)
+                    if m:
+                        invite_hash = m.group(1)
 
             # Backward compat: old "reaction" (str) → new "reactions" (list)
             reactions = config.get("reactions")
@@ -518,15 +637,17 @@ class LikesWorker:
                 reactions = [REACTIONS_MAP.get(r, r) for r in reactions]
 
             emoji_mode = config.get("emoji_mode", "single")
+            max_concurrent = task.max_concurrent or 1
 
             logger.info(
                 f"Starting likes task {self.task_id}: "
                 f"channel={channel}, post_id={post_id}, reactions={reactions}, "
-                f"emoji_mode={emoji_mode}, accounts={len(accounts)}, total={task.total_actions}"
+                f"emoji_mode={emoji_mode}, accounts={len(accounts)}, "
+                f"total={task.total_actions}, max_concurrent={max_concurrent}"
             )
 
-            # Phase 1: Pre-connect all accounts
-            connected = await self._connect_accounts(accounts, db)
+            # Phase 1: Pre-connect all accounts (parallel)
+            connected = await self._connect_accounts(accounts, db, max_concurrent)
             if connected == 0:
                 task.status = "failed"
                 task.last_error = "All accounts failed to connect"
@@ -550,47 +671,71 @@ class LikesWorker:
                     setup_index += 1
 
                     try:
-                        # Resolve entity
-                        entity = await self._resolve_entity(account.id, channel)
-
-                        # Check subscription
-                        is_subscribed, sub_error = await self._check_subscription(account.id, entity)
-
-                        if sub_error == "CHANNEL_PRIVATE":
-                            # Try joining anyway
-                            is_subscribed = False
-
-                        if not is_subscribed:
-                            joined, join_error = await self._join_channel(account.id, entity, channel)
-                            if not joined:
+                        if invite_hash:
+                            # Invite link flow: join via hash, then resolve entity
+                            joined, join_error, entity = await self._join_via_invite(
+                                account.id, invite_hash
+                            )
+                            if not joined or not entity:
                                 logger.warning(
-                                    f"Account {account.id}: cannot join channel — {join_error}"
+                                    f"Account {account.id}: cannot join via invite — {join_error}"
+                                )
+                                self._failed_accounts.add(account.id)
+                                continue
+                            self._entities[account.id] = entity
+                            await asyncio.sleep(random.uniform(2, 5))
+                        else:
+                            # Public / numeric ID channel flow
+                            entity = None
+                            try:
+                                entity = await self._resolve_entity(account.id, channel)
+                            except ChannelPrivateError:
+                                # Channel is private — no invite hash available
+                                logger.warning(
+                                    f"Account {account.id}: channel private, no invite link"
                                 )
                                 self._failed_accounts.add(account.id)
                                 continue
 
-                            # Re-resolve entity after join
-                            self._entities.pop(account.id, None)
-                            entity = await self._resolve_entity(account.id, channel)
+                            is_subscribed, sub_error = await self._check_subscription(account.id, entity)
 
-                            # Delay after join
-                            await asyncio.sleep(random.uniform(2, 5))
+                            if sub_error == "CHANNEL_PRIVATE":
+                                is_subscribed = False
+
+                            if not is_subscribed:
+                                joined, join_error = await self._join_channel(account.id, entity, channel)
+                                if not joined:
+                                    logger.warning(
+                                        f"Account {account.id}: cannot join channel — {join_error}"
+                                    )
+                                    self._failed_accounts.add(account.id)
+                                    continue
+
+                                # Re-resolve entity after join
+                                self._entities.pop(account.id, None)
+                                entity = await self._resolve_entity(account.id, channel)
+
+                                await asyncio.sleep(random.uniform(2, 5))
 
                     except ChannelPrivateError:
                         logger.warning(f"Account {account.id}: channel private")
                         self._failed_accounts.add(account.id)
                     except FloodWaitError as e:
                         logger.warning(f"Account {account.id}: FloodWait {e.seconds}s during resolve")
-                        self._failed_accounts.add(account.id)
+                        self._flood_wait_until[account.id] = time.monotonic() + e.seconds
                     except Exception as e:
                         logger.warning(f"Account {account.id}: resolve/join failed — {e}")
                         self._failed_accounts.add(account.id)
 
-                # Check we still have active accounts
+                # Check we still have active accounts (include flood-wait — they'll recover)
                 active_ids = [
                     a.id for a in accounts
                     if a.id in self._clients and a.id not in self._failed_accounts
                 ]
+                # Also include flood-wait accounts (they are temporarily paused, not failed)
+                for a in accounts:
+                    if a.id in self._flood_wait_until and a.id in self._clients and a.id not in active_ids:
+                        active_ids.append(a.id)
                 if not active_ids:
                     task.status = "failed"
                     task.last_error = "All accounts failed during channel resolution"
@@ -627,12 +772,68 @@ class LikesWorker:
                         db.commit()
                         return
 
-                # Phase 5: Send reactions with round-robin
+                # Phase 5: Send reactions in parallel batches
                 completed = task.completed_actions
                 failed = task.failed_actions
                 done_accounts: set = set()  # accounts that already reacted
-                account_cycle = itertools.cycle(active_ids)
                 termination_reason: Optional[str] = None
+                db_lock = asyncio.Lock()
+
+                async def _process_account_reaction(account_id: int, emoji: str):
+                    """Send reaction for a single account. Returns (account_id, success)."""
+                    nonlocal completed, failed
+
+                    success, message, error = await self._send_reaction(
+                        account_id, post_id, emoji
+                    )
+
+                    account = self._accounts_map.get(account_id)
+
+                    log = TaskLog(
+                        task_id=self.task_id,
+                        account_id=account_id,
+                        action_type="reaction",
+                        target=f"{channel}/{post_id}",
+                        success=success,
+                        message=message,
+                        error=error,
+                        extra_data={"reaction": emoji}
+                    )
+
+                    async with db_lock:
+                        db.add(log)
+                        if success:
+                            completed += 1
+                            task.completed_actions = completed
+                            self._record_account_action(account_id)
+                            if account:
+                                account.last_used_at = datetime.now(timezone.utc)
+                        else:
+                            failed += 1
+                            task.failed_actions = failed
+                            if error:
+                                task.last_error = error
+                            # Update account status in DB for persistent errors
+                            if account and error:
+                                err_lower = error.lower()
+                                if "banned" in err_lower:
+                                    account.status = "banned"
+                                elif "spamblock" in err_lower or "peer_flood" in err_lower:
+                                    account.status = "spamblock"
+                        db.commit()
+
+                    if self.on_progress:
+                        try:
+                            await self.on_progress(
+                                self.task_id,
+                                completed,
+                                task.total_actions,
+                                message or error or ""
+                            )
+                        except Exception as e:
+                            logger.warning(f"Progress callback error: {e}")
+
+                    return account_id, success
 
                 while completed + failed < task.total_actions:
                     if cancel_event.is_set():
@@ -644,20 +845,26 @@ class LikesWorker:
 
                     await pause_event.wait()
 
-                    # Find next available account (skip failed, done, rate-limited)
-                    account_id = None
-                    for _ in range(len(active_ids)):
-                        candidate = next(account_cycle)
-                        if (
-                            candidate not in self._failed_accounts
-                            and candidate not in done_accounts
-                            and not self._is_account_rate_limited(candidate)
-                        ):
-                            account_id = candidate
-                            break
+                    # Clear expired flood-wait cooldowns
+                    now = time.monotonic()
+                    expired = [aid for aid, until in self._flood_wait_until.items() if now >= until]
+                    for aid in expired:
+                        del self._flood_wait_until[aid]
 
-                    if account_id is None:
-                        # No available account right now
+                    # Collect a batch of available accounts (up to max_concurrent)
+                    batch: List[int] = []
+                    for aid in active_ids:
+                        if len(batch) >= max_concurrent:
+                            break
+                        if (
+                            aid not in self._failed_accounts
+                            and aid not in done_accounts
+                            and aid not in self._flood_wait_until
+                            and not self._is_account_rate_limited(aid)
+                        ):
+                            batch.append(aid)
+
+                    if not batch:
                         all_exhausted = all(
                             aid in self._failed_accounts or aid in done_accounts
                             for aid in active_ids
@@ -666,74 +873,44 @@ class LikesWorker:
                             logger.info(f"Task {self.task_id}: all accounts exhausted")
                             termination_reason = "All eligible accounts exhausted before reaching total actions"
                             break
-                        # Some accounts are just rate-limited — wait and retry
-                        logger.info("All accounts rate-limited, cooling down 60s")
-                        await asyncio.sleep(60)
+                        # Some accounts may be in flood-wait cooldown or rate-limited — wait and retry
+                        if self._flood_wait_until:
+                            # Wait until earliest cooldown expires
+                            earliest = min(self._flood_wait_until.values())
+                            wait = max(1, earliest - time.monotonic())
+                            logger.info(f"Accounts in flood-wait cooldown, waiting {wait:.0f}s")
+                            await asyncio.sleep(min(wait, 60))
+                        else:
+                            logger.info("All accounts rate-limited, cooling down 60s")
+                            await asyncio.sleep(60)
                         continue
 
-                    # Pick reaction(s) for this action
-                    emojis = self._pick_reaction(filtered_reactions, emoji_mode, completed)
-                    account_had_success = False
-
-                    for emoji in emojis:
+                    # Send reactions for the whole batch in parallel
+                    tasks_list = []
+                    for account_id in batch:
                         if completed + failed >= task.total_actions:
                             break
-                        if account_id in self._failed_accounts:
-                            break
+                        emojis = self._pick_reaction(filtered_reactions, emoji_mode, completed)
+                        for emoji in emojis:
+                            tasks_list.append((account_id, emoji))
 
-                        success, message, error = await self._send_reaction(
-                            account_id, post_id, emoji
+                    if tasks_list:
+                        results = await asyncio.gather(
+                            *[_process_account_reaction(aid, em) for aid, em in tasks_list],
+                            return_exceptions=True,
                         )
+                        for r in results:
+                            if isinstance(r, Exception):
+                                logger.warning(f"Batch reaction error: {r}")
+                            elif isinstance(r, tuple):
+                                aid, success = r
+                                if success:
+                                    done_accounts.add(aid)
 
-                        # Find account for log
-                        account = next((a for a in accounts if a.id == account_id), None)
-
-                        log = TaskLog(
-                            task_id=self.task_id,
-                            account_id=account_id,
-                            action_type="reaction",
-                            target=f"{channel}/{post_id}",
-                            success=success,
-                            message=message,
-                            error=error,
-                            extra_data={"reaction": emoji}
-                        )
-                        db.add(log)
-
-                        if success:
-                            completed += 1
-                            task.completed_actions = completed
-                            self._record_account_action(account_id)
-                            account_had_success = True
-                            if account:
-                                account.last_used_at = datetime.now(timezone.utc)
-                        else:
-                            failed += 1
-                            task.failed_actions = failed
-                            if error:
-                                task.last_error = error
-
-                        db.commit()
-
-                        if self.on_progress:
-                            try:
-                                await self.on_progress(
-                                    self.task_id,
-                                    completed,
-                                    task.total_actions,
-                                    message or error or ""
-                                )
-                            except Exception as e:
-                                logger.warning(f"Progress callback error: {e}")
-
-                    # Mark account as done after processing all emojis
-                    if account_had_success:
-                        done_accounts.add(account_id)
-
-                    # Delay between actions
+                    # Delay between batches
                     if completed + failed < task.total_actions:
                         delay = random.uniform(task.min_delay, task.max_delay)
-                        logger.debug(f"Waiting {delay:.1f}s before next action")
+                        logger.debug(f"Waiting {delay:.1f}s before next batch")
                         await asyncio.sleep(delay)
 
                 if completed + failed >= task.total_actions:

@@ -55,6 +55,17 @@ class SessionManager:
         if not session_path.exists():
             raise SessionError(f"Session file not found: {session_path}")
 
+        # Check if file contains a StringSession string (not SQLite)
+        try:
+            raw = session_path.read_bytes()
+            # StringSession is a short base64 string (starts with '1'), typically < 512 bytes
+            if len(raw) < 1024:
+                text = raw.decode('utf-8', errors='ignore').strip()
+                if text and cls.validate_session_string(text):
+                    return text
+        except Exception:
+            pass
+
         try:
             api_id = api_id or cls.DEFAULT_API_ID
             api_hash = api_hash or cls.DEFAULT_API_HASH

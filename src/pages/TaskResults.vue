@@ -39,9 +39,9 @@ const filteredLogs = computed(() => {
   let logs = taskStore.taskLogs
 
   if (logsFilter.value === 'success') {
-    logs = logs.filter(log => log.success)
+    logs = logs.filter(log => log.success && log.action_type !== 'connect')
   } else if (logsFilter.value === 'failed') {
-    logs = logs.filter(log => !log.success)
+    logs = logs.filter(log => !log.success && log.action_type !== 'connect')
   }
 
   if (logsSearch.value.trim()) {
@@ -182,6 +182,15 @@ function translateLogText(text?: string | null): string {
     'No messages found in channel': 'taskResults.logs.translate.noMessagesFoundInChannel',
     'All eligible accounts exhausted before reaching total actions': 'taskResults.logs.translate.allEligibleAccountsExhausted',
     'Task stopped before reaching total actions': 'taskResults.logs.translate.taskStoppedBeforeTotal',
+    'Connected': 'taskResults.logs.translate.connected',
+    'Proxy test failed': 'taskResults.logs.translate.proxyTestFailed',
+    'No discussion group linked': 'taskResults.logs.translate.noDiscussionGroupLinked',
+    'Chat write forbidden': 'taskResults.logs.translate.chatWriteForbidden',
+    'Account joined too many channels': 'taskResults.logs.translate.accountJoinedTooManyChannels',
+    'Channel is private, cannot join': 'taskResults.logs.translate.channelPrivateCannotJoin',
+    'No valid target channels remaining': 'taskResults.logs.translate.noValidTargetChannelsRemaining',
+    'All accounts exhausted or blacklisted': 'taskResults.logs.translate.allAccountsExhaustedOrBlacklisted',
+    'Failed to resolve any channels for monitoring': 'taskResults.logs.translate.failedToResolveChannels',
   }
 
   const mappedKey = exactMap[value]
@@ -210,6 +219,21 @@ function translateLogText(text?: string | null): string {
   const skippedByStatusMatch = value.match(/^Account skipped by status:\s*(.+)$/i)
   if (skippedByStatusMatch) {
     return t('taskResults.logs.translate.accountSkippedByStatus', { status: skippedByStatusMatch[1] })
+  }
+
+  const joinFailedMatch = value.match(/^Join failed:\s*(.+)$/i)
+  if (joinFailedMatch) {
+    return t('taskResults.logs.translate.joinFailed', { reason: joinFailedMatch[1] })
+  }
+
+  const spamblockMatch = value.match(/^Spamblock:\s*(.+)$/i)
+  if (spamblockMatch) {
+    return t('taskResults.logs.translate.spamblock', { detail: spamblockMatch[1] })
+  }
+
+  const reactionsUnavailableMatch = value.match(/^Requested reactions not available in channel\. Available: (.+)$/i)
+  if (reactionsUnavailableMatch) {
+    return t('taskResults.logs.translate.reactionsNotAvailable', { available: reactionsUnavailableMatch[1] })
   }
 
   return value
@@ -418,7 +442,7 @@ watch(() => task.value?.status, async (newStatus, oldStatus) => {
     if (newStatus === 'completed') {
       toast.add({ severity: 'success', summary: t('taskResults.messages.completed'), detail: `${task.value?.completed_actions}/${task.value?.total_actions}`, life: 4000 })
     } else if (newStatus === 'failed') {
-      toast.add({ severity: 'error', summary: t('taskResults.messages.failed'), detail: task.value?.last_error || '', life: 5000 })
+      toast.add({ severity: 'error', summary: t('taskResults.messages.failed'), detail: translateLogText(task.value?.last_error) || '', life: 5000 })
     } else if (newStatus === 'cancelled') {
       toast.add({ severity: 'warn', summary: t('taskResults.messages.cancelled'), life: 3000 })
     }
@@ -520,7 +544,7 @@ watch(() => task.value?.status, async (newStatus, oldStatus) => {
                 {{ t('taskResults.time.completedIn', { time: formatDuration(stats?.duration || 0) }) }}
               </span>
               <span v-else-if="task.last_error" class="status-error">
-                {{ task.last_error }}
+                {{ translateLogText(task.last_error) }}
               </span>
             </div>
           </div>
@@ -606,6 +630,10 @@ watch(() => task.value?.status, async (newStatus, oldStatus) => {
                     <span class="config-label">{{ t('taskResults.config.postId') }}</span>
                     <span class="config-value">{{ task.config?.post_id }}</span>
                   </div>
+                  <div v-if="task.config?.invite_link" class="config-row">
+                    <span class="config-label">{{ t('taskResults.config.inviteLink') }}</span>
+                    <span class="config-value">{{ task.config.invite_link }}</span>
+                  </div>
                 </template>
 
                 <!-- For Comments -->
@@ -621,6 +649,14 @@ watch(() => task.value?.status, async (newStatus, oldStatus) => {
                         {{ ch }}
                       </span>
                     </div>
+                  </div>
+                  <div v-if="task.config?.invite_links?.length" class="config-row">
+                    <span class="config-label">{{ t('taskResults.config.inviteLink') }}</span>
+                    <span class="config-value">{{ task.config.invite_links[0] }}</span>
+                  </div>
+                  <div v-if="task.config?.post_id" class="config-row">
+                    <span class="config-label">{{ t('taskResults.config.postId') }}</span>
+                    <span class="config-value">#{{ task.config.post_id }}</span>
                   </div>
                   <div class="config-row">
                     <span class="config-label">{{ t('taskResults.config.templates') }}</span>
@@ -645,6 +681,10 @@ watch(() => task.value?.status, async (newStatus, oldStatus) => {
                 <div class="config-row">
                   <span class="config-label">{{ t('taskResults.config.delay') }}</span>
                   <span class="config-value">{{ task.min_delay }} — {{ task.max_delay }} {{ t('taskResults.time.seconds') }}</span>
+                </div>
+                <div v-if="task.max_concurrent > 1" class="config-row">
+                  <span class="config-label">{{ t('taskResults.config.concurrent') }}</span>
+                  <span class="config-value">{{ task.max_concurrent }}</span>
                 </div>
                 <div class="config-row">
                   <span class="config-label">{{ t('taskResults.config.createdAt') }}</span>
@@ -754,6 +794,15 @@ watch(() => task.value?.status, async (newStatus, oldStatus) => {
                 <i class="pi pi-history"></i>
                 <h3>{{ t('taskResults.logs.title') }}</h3>
                 <span class="logs-count">{{ t('taskResults.logs.entries', { count: filteredLogs.length }) }}</span>
+                <button
+                  v-if="taskStore.logsHasMore"
+                  class="show-all-logs-btn"
+                  @click="taskStore.fetchAllTaskLogs(taskId)"
+                  :title="t('taskResults.logs.showAll')"
+                >
+                  <i class="pi pi-list"></i>
+                  {{ t('taskResults.logs.showAll') }}
+                </button>
               </div>
 
               <div class="logs-filters">
@@ -770,14 +819,14 @@ watch(() => task.value?.status, async (newStatus, oldStatus) => {
                     @click="logsFilter = 'success'"
                   >
                     {{ t('taskResults.logs.successful') }}
-                    <span class="filter-count success">{{ taskStore.taskLogs.filter(l => l.success).length }}</span>
+                    <span class="filter-count success">{{ taskStore.taskLogs.filter(l => l.success && l.action_type !== 'connect').length }}</span>
                   </button>
                   <button
                     :class="['filter-tab', { active: logsFilter === 'failed' }]"
                     @click="logsFilter = 'failed'"
                   >
                     {{ t('taskResults.logs.failed') }}
-                    <span class="filter-count danger">{{ taskStore.taskLogs.filter(l => !l.success).length }}</span>
+                    <span class="filter-count danger">{{ taskStore.taskLogs.filter(l => !l.success && l.action_type !== 'connect').length }}</span>
                   </button>
                 </div>
                 <div class="search-input">
@@ -1446,6 +1495,31 @@ watch(() => task.value?.status, async (newStatus, oldStatus) => {
   font-size: 12px;
   color: #8b8b95;
   margin-left: auto;
+}
+
+.show-all-logs-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: #a855f7;
+  background: rgba(168, 85, 247, 0.1);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.show-all-logs-btn:hover {
+  background: rgba(168, 85, 247, 0.2);
+  border-color: rgba(168, 85, 247, 0.5);
+}
+
+.show-all-logs-btn i {
+  font-size: 11px;
+  color: #a855f7;
 }
 
 .logs-filters {

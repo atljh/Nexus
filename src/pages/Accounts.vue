@@ -573,10 +573,14 @@ async function parseFiles() {
 
   parsing.value = true
 
+  // Grab files and clear immediately to prevent duplicate processing
+  const filesToParse = [...pendingFiles.value]
+  pendingFiles.value = []
+
   try {
-    const sessionFiles = pendingFiles.value.filter(f => f.name.endsWith('.session'))
-    const jsonFiles = pendingFiles.value.filter(f => f.name.endsWith('.json'))
-    const zipFiles = pendingFiles.value.filter(f => f.name.endsWith('.zip'))
+    const sessionFiles = filesToParse.filter(f => f.name.endsWith('.session'))
+    const jsonFiles = filesToParse.filter(f => f.name.endsWith('.json'))
+    const zipFiles = filesToParse.filter(f => f.name.endsWith('.zip'))
     const tdataFile = zipFiles[0] // Only one tdata at a time
 
     console.log('[Import] Files to parse:', {
@@ -666,21 +670,32 @@ async function distributeFromPool() {
     }
 
     try {
-      // Check if proxy already exists
-      const existing = proxyStore.proxies.find(
-        p => p.host === parsed.host && p.port === parsed.port
-      )
-      if (existing) {
-        createdProxyIds.push(existing.id)
-        addImportLog('info', `Проксі вже існує: ${parsed.host}:${parsed.port}`)
-        continue
-      }
-
       const proxyData: any = {
         ...parsed,
         username: parsed.username || null,
         password: parsed.password || null
       }
+
+      // Check if proxy already exists by host:port
+      const existing = proxyStore.proxies.find(
+        p => p.host === parsed.host && p.port === parsed.port
+      )
+      if (existing) {
+        // Update existing proxy if credentials or type changed
+        const needsUpdate =
+          existing.type !== parsed.type ||
+          (existing.username || null) !== (parsed.username || null) ||
+          (existing.password || null) !== (parsed.password || null)
+        if (needsUpdate) {
+          await window.api.put(`/api/proxy/${existing.id}`, proxyData)
+          addImportLog('info', `Проксі оновлено: ${parsed.host}:${parsed.port}`)
+        } else {
+          addImportLog('info', `Проксі вже існує: ${parsed.host}:${parsed.port}`)
+        }
+        createdProxyIds.push(existing.id)
+        continue
+      }
+
       const newProxy = await window.api.post('/api/proxy', proxyData) as { id: number }
       createdProxyIds.push(newProxy.id)
       addImportLog('success', `Проксі додано: ${parsed.host}:${parsed.port}`)

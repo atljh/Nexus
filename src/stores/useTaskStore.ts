@@ -152,6 +152,17 @@ export const useTaskStore = defineStore('task', () => {
     }
   }
 
+  async function fetchAllTaskLogs(taskId: number): Promise<void> {
+    try {
+      const response = await window.api.get(`/api/tasks/${taskId}/logs?limit=1000&offset=0`) as TaskLogsResponse
+      const logs = Array.isArray(response) ? response : (response.data || [])
+      taskLogs.value = logs
+      logsHasMore.value = false
+    } catch (e) {
+      console.error('Failed to fetch all task logs:', e)
+    }
+  }
+
   async function fetchStats() {
     try {
       const response = await window.api.get('/api/tasks/stats/summary') as TaskStats
@@ -441,6 +452,7 @@ export const useTaskStore = defineStore('task', () => {
     fetchActiveTasks,
     fetchTask,
     fetchTaskLogs,
+    fetchAllTaskLogs,
     fetchStats,
     createLikesTask,
     createCommentsTask,

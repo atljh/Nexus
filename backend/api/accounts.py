@@ -1924,52 +1924,32 @@ async def parse_tdata_folder(
         }
 
     try:
-        # Group files by their tdata root path
-        # Supports:
-        #   1) Standard: "parent/account1/tdata/key_data" -> group by "parent/account1/tdata"
-        #   2) Non-standard names: "tdata-1/key_data", "tdata-9/D877.../map0" -> group by "tdata-1", "tdata-9"
+        # Group files by their tdata root path.
+        # A tdata root is any folder that directly contains key_data or key_datas.
+        # This handles any naming convention: tdata, tdata-1, tdata-9, my_account, etc.
         tdata_groups: dict[str, list[tuple[UploadFile, str]]] = {}
 
+        # Step 1: Find all tdata root paths by locating key_data/key_datas files
+        tdata_roots: set[str] = set()
         for file in tdata_files:
             filename = file.filename or ""
             normalized = filename.replace('\\', '/')
-            # Strategy 1: path contains /tdata/ subfolder (standard structure)
-            match = re.search(r'^(.*?/tdata|tdata)/', normalized)
-            if match:
-                tdata_root = match.group(1)
-                # Get relative path after tdata/
-                if normalized.startswith('tdata/'):
-                    rel_path = normalized[6:]  # Remove "tdata/"
-                else:
-                    rel_path = normalized.split('/tdata/', 1)[-1]
-                if tdata_root not in tdata_groups:
-                    tdata_groups[tdata_root] = []
-                tdata_groups[tdata_root].append((file, rel_path))
+            parts = normalized.split('/')
+            basename = parts[-1]
+            if basename in ("key_data", "key_datas") and len(parts) >= 2:
+                tdata_root = '/'.join(parts[:-1])
+                tdata_roots.add(tdata_root)
 
-        # Fallback: folders are tdata themselves but named differently (tdata-1, tdata-9, etc.)
-        # Group files by their top-level folder, then validate each group has key_data
-        if not tdata_groups:
-            # Collect all files grouped by their root folder
-            root_groups: dict[str, list[tuple[UploadFile, str]]] = {}
-            for f in tdata_files:
-                normalized = (f.filename or "").replace('\\', '/')
-                parts = normalized.split('/')
-                if len(parts) >= 2:
-                    root = parts[0]
-                    rel_path = '/'.join(parts[1:])
-                    root_groups.setdefault(root, []).append((f, rel_path))
-                else:
-                    # Single file without folder — skip
-                    pass
-
-            # Only include groups that have key_data/key_datas (valid tdata folders)
-            for root, group_files in root_groups.items():
-                has_key = any(
-                    rp.split('/')[-1] in ("key_data", "key_datas")
-                    for _, rp in group_files
-                )
-                if has_key:
-                    tdata_groups[root] = group_files
+        # Step 2: Assign each file to its tdata root (longest prefix match)
+        sorted_roots = sorted(tdata_roots, key=len, reverse=True)
+        for file in tdata_files:
+            filename = file.filename or ""
+            normalized = filename.replace('\\', '/')
+            for root in sorted_roots:
+                if normalized.startswith(root + '/'):
+                    rel_path = normalized[len(root) + 1:]
+                    tdata_groups.setdefault(root, []).append((file, rel_path))
+                    break
 
         if not tdata_groups:
             return {

@@ -29,6 +29,7 @@ const accountStore = useAccountStore()
 // Form state
 const channel = ref('')
 const postId = ref<number | null>(null)
+const inviteLink = ref('')
 const selectedReactions = ref<string[]>(['👍'])
 const emojiMode = ref<'single' | 'random' | 'all'>('single')
 const minDelay = ref(30)
@@ -36,12 +37,33 @@ const maxDelay = ref(120)
 const maxConcurrent = ref(1)
 const selectedAccountIds = ref<number[]>([])
 const parsedFromLink = ref(false)
+const isPrivateChannel = computed(() => channel.value.startsWith('-100'))
 
 // UI state
 const isCreating = ref(false)
 
-// Parse t.me links: https://t.me/channel/12345 → channel + postId
+// Parse t.me links:
+//   https://t.me/channel/12345 → @channel + postId
+//   https://t.me/c/3548071275/129 → -1003548071275 + postId (private channel)
+//   https://t.me/+XXXXX → invite link (kept as-is)
 function parseTelegramLink(input: string): { channel: string; postId: number | null } | null {
+  // Private channel format: t.me/c/CHANNEL_ID/POST_ID
+  const privateMatch = input.match(/(?:https?:\/\/)?t\.me\/c\/(\d+)(?:\/(\d+))?/)
+  if (privateMatch) {
+    return {
+      channel: '-100' + privateMatch[1],
+      postId: privateMatch[2] ? parseInt(privateMatch[2], 10) : null
+    }
+  }
+  // Invite link format: t.me/+HASH or t.me/joinchat/HASH
+  const inviteMatch = input.match(/(?:https?:\/\/)?t\.me\/(\+[a-zA-Z0-9_-]+|joinchat\/[a-zA-Z0-9_-]+)/)
+  if (inviteMatch) {
+    return {
+      channel: inviteMatch[0].replace(/^https?:\/\//, ''),
+      postId: null
+    }
+  }
+  // Public channel: t.me/username/POST_ID
   const match = input.match(/(?:https?:\/\/)?t\.me\/([a-zA-Z0-9_]+)(?:\/(\d+))?/)
   if (match) {
     return {
@@ -62,13 +84,56 @@ watch(channel, (val) => {
   const parsed = parseTelegramLink(val)
   if (parsed) {
     skipWatch = true
-    channel.value = '@' + parsed.channel
+    // Don't prefix with @ for numeric IDs (private channels) or invite links
+    if (parsed.channel.startsWith('-100') || parsed.channel.includes('t.me/')) {
+      channel.value = parsed.channel
+    } else {
+      channel.value = '@' + parsed.channel
+    }
     if (parsed.postId) {
       postId.value = parsed.postId
     }
     parsedFromLink.value = true
   }
 })
+
+// Form persistence
+const FORM_KEY = 'nexus_autolikes_form'
+
+function saveForm() {
+  localStorage.setItem(FORM_KEY, JSON.stringify({
+    channel: channel.value,
+    postId: postId.value,
+    inviteLink: inviteLink.value,
+    selectedReactions: selectedReactions.value,
+    emojiMode: emojiMode.value,
+    minDelay: minDelay.value,
+    maxDelay: maxDelay.value,
+    maxConcurrent: maxConcurrent.value,
+    selectedAccountIds: selectedAccountIds.value,
+    parsedFromLink: parsedFromLink.value
+  }))
+}
+
+function loadForm() {
+  try {
+    const saved = localStorage.getItem(FORM_KEY)
+    if (!saved) return
+    const data = JSON.parse(saved)
+    if (data.channel) { skipWatch = true; channel.value = data.channel }
+    if (data.postId) postId.value = data.postId
+    if (data.inviteLink) inviteLink.value = data.inviteLink
+    if (data.selectedReactions?.length) selectedReactions.value = data.selectedReactions
+    if (data.emojiMode) emojiMode.value = data.emojiMode
+    if (data.minDelay != null) minDelay.value = data.minDelay
+    if (data.maxDelay != null) maxDelay.value = data.maxDelay
+    if (data.maxConcurrent != null) maxConcurrent.value = data.maxConcurrent
+    if (data.selectedAccountIds?.length) selectedAccountIds.value = data.selectedAccountIds
+    if (data.parsedFromLink) parsedFromLink.value = data.parsedFromLink
+  } catch { /* ignore */ }
+}
+
+watch([channel, postId, inviteLink, selectedReactions, emojiMode, minDelay, maxDelay, maxConcurrent, selectedAccountIds], saveForm, { deep: true })
 
 // Emoji mode options
 const emojiModeOptions = computed(() => [
@@ -152,6 +217,7 @@ async function createTask() {
       config: {
         channel: channel.value.trim(),
         post_id: postId.value || undefined,
+        invite_link: inviteLink.value.trim() || undefined,
         reactions: selectedReactions.value,
         emoji_mode: emojiMode.value
       },
@@ -162,6 +228,7 @@ async function createTask() {
     })
 
     if (task) {
+      localStorage.removeItem(FORM_KEY)
       // Warn if some accounts were skipped
       if ((task as any).skipped_accounts) {
         toast.add({
@@ -338,6 +405,7 @@ async function refreshTasks() {
 
 // Initialize
 onMounted(async () => {
+  loadForm()
   await Promise.all([
     taskStore.fetchTasks('likes'),
     accountStore.fetchAccounts()
@@ -448,6 +516,21 @@ onUnmounted(() => {
                     <i class="pi pi-check-circle"></i>
                     {{ postId ? t('autoLikes.linkParsedWithPost', { channel, postId }) : t('autoLikes.linkParsed', { channel }) }}
                   </small>
+                  <div v-if="isPrivateChannel" class="invite-link-field">
+                    <label class="form-label">
+                      <i class="pi pi-link"></i>
+                      {{ t('autoLikes.inviteLink') }}
+                    </label>
+                    <InputText
+                      v-model="inviteLink"
+                      :placeholder="t('autoLikes.inviteLinkPlaceholder')"
+                      class="w-full"
+                    />
+                    <small class="input-hint">
+                      <i class="pi pi-info-circle"></i>
+                      {{ t('autoLikes.inviteLinkHint') }}
+                    </small>
+                  </div>
                 </div>
               </div>
 
@@ -1047,6 +1130,10 @@ onUnmounted(() => {
 
 .parsed-link-hint i {
   font-size: 12px;
+}
+
+.invite-link-field {
+  margin-top: 12px;
 }
 
 /* Form Groups */

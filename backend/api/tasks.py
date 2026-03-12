@@ -22,6 +22,7 @@ class TaskConfig(BaseModel):
     """Configuration for a task."""
     channel: str = Field(..., description="Channel username or link")
     post_id: Optional[int] = Field(None, description="Specific post ID")
+    invite_link: Optional[str] = Field(None, description="Invite link for private channels")
     reactions: List[str] = Field(["👍"], description="List of reaction emojis")
     emoji_mode: str = Field("single", description="single | random | all")
 
@@ -45,6 +46,8 @@ class CreateLikesTaskRequest(BaseModel):
 class CommentsTaskConfig(BaseModel):
     """Configuration for comments task."""
     channels: List[str] = Field(..., description="List of target channels")
+    invite_links: Optional[List[str]] = Field(None, description="Invite links for private channels")
+    post_id: Optional[int] = Field(None, description="Specific post ID to comment on")
     templates: List[str] = Field(default=[], description="Comment templates with spintax")
     rotation_mode: str = Field("random", description="random or round_robin")
     comments_per_account: int = Field(10, ge=1, le=100, description="Max comments per account")
@@ -452,9 +455,12 @@ def create_likes_task(request: CreateLikesTaskRequest, db: Session = Depends(get
 
     # Normalize channel
     channel = request.config.channel.strip()
-    if channel.startswith("https://t.me/") or channel.startswith("http://t.me/"):
+    # Strip @ from numeric IDs (e.g. @-1003548071275 → -1003548071275)
+    if channel.startswith("@") and channel[1:].lstrip("-").isdigit():
+        channel = channel[1:]
+    elif channel.startswith("https://t.me/") or channel.startswith("http://t.me/"):
         channel = "@" + channel.split("t.me/")[1].split("/")[0]
-    elif not channel.startswith("@"):
+    elif not channel.startswith("@") and not channel.lstrip("-").isdigit():
         channel = "@" + channel
 
     # Validate emoji_mode
@@ -464,15 +470,19 @@ def create_likes_task(request: CreateLikesTaskRequest, db: Session = Depends(get
     # Create task — each account sends one reaction, so total = accounts count
     total = len(accounts)
 
+    task_config = {
+        "channel": channel,
+        "post_id": request.config.post_id,
+        "reactions": request.config.reactions,
+        "emoji_mode": request.config.emoji_mode,
+    }
+    if request.config.invite_link:
+        task_config["invite_link"] = request.config.invite_link
+
     task = Task(
         task_type="likes",
         status="pending",
-        config={
-            "channel": channel,
-            "post_id": request.config.post_id,
-            "reactions": request.config.reactions,
-            "emoji_mode": request.config.emoji_mode,
-        },
+        config=task_config,
         total_actions=total,
         min_delay=request.min_delay,
         max_delay=request.max_delay,
@@ -508,9 +518,12 @@ def create_comments_task(request: CreateCommentsTaskRequest, db: Session = Depen
     channels = []
     for ch in request.config.channels:
         ch = ch.strip()
-        if ch.startswith("https://t.me/") or ch.startswith("http://t.me/"):
+        # Strip @ from numeric IDs (e.g. @-1003548071275 → -1003548071275)
+        if ch.startswith("@") and ch[1:].lstrip("-").isdigit():
+            ch = ch[1:]
+        elif ch.startswith("https://t.me/") or ch.startswith("http://t.me/"):
             ch = "@" + ch.split("t.me/")[1].split("/")[0]
-        elif not ch.startswith("@"):
+        elif not ch.startswith("@") and not ch.lstrip("-").isdigit():
             ch = "@" + ch
         channels.append(ch)
 
@@ -521,6 +534,8 @@ def create_comments_task(request: CreateCommentsTaskRequest, db: Session = Depen
         "rotation_mode": request.config.rotation_mode,
         "comments_per_account": request.config.comments_per_account,
         "mode": request.config.mode,
+        **({"invite_links": request.config.invite_links} if request.config.invite_links else {}),
+        **({"post_id": request.config.post_id} if request.config.post_id else {}),
         "comment_mode": request.config.comment_mode,
         "comment_probability": request.config.comment_probability,
         "keywords": request.config.keywords,
@@ -897,7 +912,7 @@ def get_task_account_stats(task_id: int, db: Session = Depends(get_db)):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # Count per-account success/fail using SQL aggregation
+    # Count per-account success/fail using SQL aggregation (exclude connect logs)
     log_stats = db.query(
         TaskLog.account_id,
         func.count(case((TaskLog.success == True, 1))).label("success"),
@@ -905,6 +920,7 @@ def get_task_account_stats(task_id: int, db: Session = Depends(get_db)):
     ).filter(
         TaskLog.task_id == task_id,
         TaskLog.account_id.isnot(None),
+        TaskLog.action_type != "connect",
     ).group_by(TaskLog.account_id).all()
 
     # Build per-account stats

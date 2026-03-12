@@ -21,21 +21,145 @@ import type { Task, CommentTemplate } from '@/types'
 import { DEFAULT_COMMENT_TEMPLATES } from '@/types'
 
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
+
+// Spintax examples — cannot go through vue-i18n (curly braces conflict)
+const spintaxPlaceholder = computed(() =>
+  locale.value === 'uk'
+    ? '{Чудово|Круто|Клас}! {Дуже|Супер} {корисно|цікаво}!'
+    : '{Great|Awesome|Nice}! {Very|Super} {useful|interesting}!'
+)
+const spintaxHintText = computed(() =>
+  locale.value === 'uk'
+    ? 'Використовуйте {варіант1|варіант2|варіант3} для випадкових варіацій'
+    : 'Use {option1|option2|option3} for random variations'
+)
 const toast = useToast()
 const taskStore = useTaskStore()
 const accountStore = useAccountStore()
 
 // Form state
-const channels = ref<string[]>([])
+const channelInput = ref('')
+const inviteLinkInput = ref('')
+const parsedFromLink = ref(false)
 const selectedTemplateIds = ref<number[]>([])
 const customTemplates = ref<string[]>([])
 const rotationMode = ref<'random' | 'round_robin'>('random')
-const commentsPerAccount = ref(10)
-const totalActions = ref(50)
+const commentsPerAccount = ref(1)
+const totalActions = ref(1)
 const minDelay = ref(60)
 const maxDelay = ref(300)
+const maxConcurrent = ref(1)
 const selectedAccountIds = ref<number[]>([])
+const isPrivateChannel = computed(() => channelInput.value.startsWith('-100'))
+
+// Parse t.me links:
+//   t.me/channel/123 → @channel + postId 123
+//   t.me/c/3548071275/129 → -1003548071275 + postId 129
+//   t.me/+HASH or t.me/joinchat/HASH → kept as invite link
+const detectedPostId = ref<number | null>(null)
+
+function parseTelegramLink(input: string): { channel: string; postId?: number } | null {
+  // Private channel: t.me/c/CHANNEL_ID/POST_ID
+  const privateMatch = input.match(/(?:https?:\/\/)?t\.me\/c\/(\d+)(?:\/(\d+))?/)
+  if (privateMatch) {
+    return {
+      channel: '-100' + privateMatch[1],
+      postId: privateMatch[2] ? parseInt(privateMatch[2], 10) : undefined
+    }
+  }
+  // Invite link: t.me/+HASH or t.me/joinchat/HASH — keep full link for backend
+  const inviteMatch = input.match(/(?:https?:\/\/)?t\.me\/(\+[a-zA-Z0-9_-]+|joinchat\/[a-zA-Z0-9_-]+)/)
+  if (inviteMatch) {
+    return { channel: 't.me/' + inviteMatch[1] }
+  }
+  // Public channel: t.me/username/POST_ID
+  const match = input.match(/(?:https?:\/\/)?t\.me\/([a-zA-Z0-9_]+)(?:\/(\d+))?/)
+  if (match) {
+    return {
+      channel: match[1],
+      postId: match[2] ? parseInt(match[2], 10) : undefined
+    }
+  }
+  return null
+}
+
+// Watch channel input for link pasting (mirrors AutoLikes pattern)
+let skipWatch = false
+watch(channelInput, (val) => {
+  if (skipWatch) {
+    skipWatch = false
+    return
+  }
+  const parsed = parseTelegramLink(val)
+  if (parsed) {
+    skipWatch = true
+    if (parsed.channel.startsWith('-100') || parsed.channel.includes('t.me/')) {
+      channelInput.value = parsed.channel
+    } else {
+      channelInput.value = '@' + parsed.channel
+    }
+    if (parsed.postId) {
+      detectedPostId.value = parsed.postId
+    }
+    parsedFromLink.value = true
+  }
+})
+
+// Sync defaults: commentsPerAccount=1, totalActions = accounts count
+watch(selectedAccountIds, (ids) => {
+  const count = ids.length || 1
+  if (commentsPerAccount.value === 1) {
+    totalActions.value = count
+  }
+})
+watch(commentsPerAccount, (perAcc) => {
+  totalActions.value = perAcc * (selectedAccountIds.value.length || 1)
+})
+
+// Form persistence
+const FORM_KEY = 'nexus_autocomments_form'
+
+function saveForm() {
+  localStorage.setItem(FORM_KEY, JSON.stringify({
+    channelInput: channelInput.value,
+    inviteLinkInput: inviteLinkInput.value,
+    parsedFromLink: parsedFromLink.value,
+    detectedPostId: detectedPostId.value,
+    selectedTemplateIds: selectedTemplateIds.value,
+    customTemplates: customTemplates.value,
+    rotationMode: rotationMode.value,
+    commentsPerAccount: commentsPerAccount.value,
+    totalActions: totalActions.value,
+    minDelay: minDelay.value,
+    maxDelay: maxDelay.value,
+    maxConcurrent: maxConcurrent.value,
+    selectedAccountIds: selectedAccountIds.value
+  }))
+}
+
+function loadForm() {
+  try {
+    const saved = localStorage.getItem(FORM_KEY)
+    if (!saved) return
+    const data = JSON.parse(saved)
+    if (data.channelInput) channelInput.value = data.channelInput
+    if (data.inviteLinkInput) inviteLinkInput.value = data.inviteLinkInput
+    if (data.parsedFromLink) parsedFromLink.value = data.parsedFromLink
+    if (data.detectedPostId != null) detectedPostId.value = data.detectedPostId
+    if (data.selectedTemplateIds?.length) selectedTemplateIds.value = data.selectedTemplateIds
+    if (data.customTemplates?.length) customTemplates.value = data.customTemplates
+    if (data.rotationMode) rotationMode.value = data.rotationMode
+    if (data.commentsPerAccount != null) commentsPerAccount.value = data.commentsPerAccount
+    if (data.totalActions != null) totalActions.value = data.totalActions
+    if (data.minDelay != null) minDelay.value = data.minDelay
+    if (data.maxDelay != null) maxDelay.value = data.maxDelay
+    if (data.maxConcurrent != null) maxConcurrent.value = data.maxConcurrent
+    if (data.selectedAccountIds?.length) selectedAccountIds.value = data.selectedAccountIds
+  } catch { /* ignore */ }
+}
+
+watch([channelInput, inviteLinkInput, parsedFromLink, detectedPostId, selectedTemplateIds, customTemplates, rotationMode, commentsPerAccount, totalActions, minDelay, maxDelay, maxConcurrent, selectedAccountIds], saveForm, { deep: true })
 
 // Template management
 const showTemplateDialog = ref(false)
@@ -101,7 +225,8 @@ function timeAgo(dateStr: string): string {
 
 // Create task and auto-start
 async function createTask() {
-  if (channels.value.length === 0) {
+  const channelVal = channelInput.value.trim()
+  if (!channelVal) {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
@@ -111,16 +236,18 @@ async function createTask() {
     return
   }
 
-  // Validate all channel formats
-  const invalidChannel = channels.value.find(ch => {
-    const clean = ch.startsWith('@') ? ch.slice(1) : ch
-    return !/^[a-zA-Z0-9_]{5,32}$/.test(clean)
-  })
-  if (invalidChannel) {
+  // Validate channel format (allow @username, numeric IDs, invite links)
+  const isValidChannel = (() => {
+    if (/^-?\d+$/.test(channelVal)) return true
+    if (channelVal.startsWith('t.me/+') || channelVal.startsWith('t.me/joinchat/')) return true
+    const clean = channelVal.startsWith('@') ? channelVal.slice(1) : channelVal
+    return /^[a-zA-Z0-9_]{5,32}$/.test(clean)
+  })()
+  if (!isValidChannel) {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: t('autoComments.errors.invalidChannel', { channel: invalidChannel }),
+      detail: t('autoComments.errors.invalidChannel', { channel: channelVal }),
       life: 3000
     })
     return
@@ -148,9 +275,12 @@ async function createTask() {
 
   isCreating.value = true
   try {
+    const cleanChannel = channelVal.startsWith('@') ? channelVal.slice(1) : channelVal
     const task = await taskStore.createCommentsTask({
       config: {
-        channels: channels.value,
+        channels: [cleanChannel],
+        invite_links: inviteLinkInput.value.trim() ? [inviteLinkInput.value.trim()] : undefined,
+        post_id: detectedPostId.value || undefined,
         templates: selectedTemplates.value,
         rotation_mode: rotationMode.value,
         comments_per_account: commentsPerAccount.value,
@@ -159,10 +289,12 @@ async function createTask() {
       account_ids: selectedAccountIds.value,
       total_actions: totalActions.value,
       min_delay: minDelay.value,
-      max_delay: maxDelay.value
+      max_delay: maxDelay.value,
+      max_concurrent: maxConcurrent.value
     })
 
     if (task) {
+      localStorage.removeItem(FORM_KEY)
       // Warn if some accounts were skipped
       if ((task as any).skipped_accounts) {
         toast.add({
@@ -428,6 +560,7 @@ function viewTaskDetails(task: Task) {
 
 // Initialize
 onMounted(async () => {
+  loadForm()
   await Promise.all([
     taskStore.fetchTasks('comments'),
     taskStore.fetchTemplates(),
@@ -541,41 +674,36 @@ onUnmounted(() => {
               <div class="form-section">
                 <div class="form-section-header">
                   <i class="pi pi-hashtag"></i>
-                  <span>{{ t('autoComments.targetChannels') }}</span>
+                  <span>{{ t('autoComments.targetPost') }}</span>
                 </div>
                 <div class="form-group">
-                  <AutoComplete
-                    v-model="channels"
-                    :placeholder="t('autoComments.channelsPlaceholder')"
-                    class="w-full custom-chips"
-                    separator=","
-                    multiple
-                    :typeahead="false"
-                  />
-                  <small class="input-hint">
-                    <i class="pi pi-info-circle"></i>
-                    {{ t('autoComments.channelsHint') }}
-                  </small>
-                </div>
-              </div>
-
-              <div class="form-section">
-                <div class="form-section-header">
-                  <i class="pi pi-cog"></i>
-                  <span>{{ t('autoComments.operatingMode') }}</span>
-                </div>
-                <div class="form-group">
-                  <label class="form-label">
-                    <i class="pi pi-sync"></i>
-                    {{ t('autoComments.rotationMode') }}
-                  </label>
-                  <Select
-                    v-model="rotationMode"
-                    :options="rotationOptions"
-                    option-label="label"
-                    option-value="value"
+                  <InputText
+                    v-model="channelInput"
+                    :placeholder="t('autoComments.channelPlaceholder')"
                     class="w-full"
                   />
+                  <small v-if="parsedFromLink" class="parsed-link-hint">
+                    <i class="pi pi-check-circle"></i>
+                    {{ detectedPostId
+                      ? t('autoComments.linkParsedWithPost', { channel: channelInput, postId: detectedPostId })
+                      : t('autoComments.linkParsed', { channel: channelInput })
+                    }}
+                  </small>
+                  <div v-if="isPrivateChannel" class="invite-link-field">
+                    <label class="form-label">
+                      <i class="pi pi-link"></i>
+                      {{ t('autoComments.inviteLink') }}
+                    </label>
+                    <InputText
+                      v-model="inviteLinkInput"
+                      :placeholder="t('autoComments.inviteLinkPlaceholder')"
+                      class="w-full"
+                    />
+                    <small class="input-hint">
+                      <i class="pi pi-info-circle"></i>
+                      {{ t('autoComments.inviteLinkHint') }}
+                    </small>
+                  </div>
                 </div>
               </div>
 
@@ -609,6 +737,31 @@ onUnmounted(() => {
                       buttonLayout="horizontal"
                       decrementButtonClass="decrement-btn"
                       incrementButtonClass="increment-btn"
+                    />
+                  </div>
+                </div>
+                <div class="form-grid-2" style="margin-top: 12px;">
+                  <div class="form-group">
+                    <label class="form-label">{{ t('autoComments.concurrent') }}</label>
+                    <InputNumber
+                      v-model="maxConcurrent"
+                      :min="1"
+                      :max="10"
+                      class="w-full"
+                      showButtons
+                      buttonLayout="horizontal"
+                      decrementButtonClass="decrement-btn"
+                      incrementButtonClass="increment-btn"
+                    />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">{{ t('autoComments.rotationMode') }}</label>
+                    <Select
+                      v-model="rotationMode"
+                      :options="rotationOptions"
+                      option-label="label"
+                      option-value="value"
+                      class="w-full"
                     />
                   </div>
                 </div>
@@ -746,8 +899,8 @@ onUnmounted(() => {
           <div class="create-action">
             <button
               class="launch-btn"
-              :class="{ ready: channels.length > 0 && selectedTemplates.length > 0 && selectedAccountIds.length > 0, loading: isCreating }"
-              :disabled="channels.length === 0 || selectedTemplates.length === 0 || selectedAccountIds.length === 0 || isCreating"
+              :class="{ ready: channelInput.trim() && selectedTemplates.length > 0 && selectedAccountIds.length > 0, loading: isCreating }"
+              :disabled="!channelInput.trim() || selectedTemplates.length === 0 || selectedAccountIds.length === 0 || isCreating"
               @click="createTask"
             >
               <span class="launch-btn-glow"></span>
@@ -757,8 +910,8 @@ onUnmounted(() => {
                 <span>{{ t('autoComments.startTask') }}</span>
               </span>
               <span class="launch-btn-badges">
-                <span :class="['badge', { ok: channels.length > 0 }]">
-                  <i :class="channels.length > 0 ? 'pi pi-check' : 'pi pi-minus'"></i>
+                <span :class="['badge', { ok: channelInput.trim() }]">
+                  <i :class="channelInput.trim() ? 'pi pi-check' : 'pi pi-minus'"></i>
                   {{ t('autoComments.badgeChannels') }}
                 </span>
                 <span :class="['badge', { ok: selectedTemplates.length > 0 }]">
@@ -935,14 +1088,14 @@ onUnmounted(() => {
             </label>
             <Textarea
               v-model="newTemplateContent"
-              :placeholder="t('autoComments.templateContentPlaceholder')"
+              :placeholder="spintaxPlaceholder"
               class="w-full"
               rows="5"
               autoResize
             />
             <div class="spintax-hint">
               <i class="pi pi-lightbulb"></i>
-              <span>{{ t('autoComments.spintaxHint') }}</span>
+              <span>{{ spintaxHintText }}</span>
             </div>
           </div>
 
@@ -1408,6 +1561,10 @@ onUnmounted(() => {
 
 .input-hint i {
   font-size: 11px;
+}
+
+.invite-link-field {
+  margin-top: 12px;
 }
 
 /* Templates */
