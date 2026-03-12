@@ -129,29 +129,11 @@ class BaseClient:
             self.lang_code = lang_code or "en"
             self.system_lang_code = system_lang_code or "en-US"
 
-    def _format_proxy(self, proxy: Dict) -> Tuple:
+    @staticmethod
+    def _format_proxy(proxy: Dict) -> Tuple:
         """Format proxy dict to Telethon tuple format"""
-        import socks
-
-        proxy_type = proxy.get("type", "socks5").lower()
-
-        if proxy_type == "socks5":
-            ptype = socks.SOCKS5
-        elif proxy_type == "socks4":
-            ptype = socks.SOCKS4
-        elif proxy_type in ("http", "https"):
-            ptype = socks.HTTP
-        else:
-            ptype = socks.SOCKS5
-
-        return (
-            ptype,
-            proxy.get("host") or proxy.get("addr"),
-            int(proxy.get("port", 1080)),
-            True,  # rdns
-            proxy.get("username"),
-            proxy.get("password"),
-        )
+        from telegram.proxy_utils import format_proxy
+        return format_proxy(proxy)
 
     def _create_client(self) -> TelegramClient:
         """Create TelegramClient instance with device fingerprint"""
@@ -477,32 +459,24 @@ async def validate_session(
             if me_deleted:
                 return False, {"telegram_id": me.id, "username": me.username, "first_name": me.first_name, "last_name": me.last_name, "phone": me.phone}, "frozen"
 
-            # Frozen check #2 — help.GetAppConfig (official Telegram API, read-only, safe)
-            # Ref: https://core.telegram.org/api/auth#frozen-accounts
-            try:
-                from telethon.tl.functions.help import GetAppConfigRequest
-                app_config_result = await client._client(GetAppConfigRequest(hash=0))
+            if check_frozen:
+                # Frozen check #2 — help.GetAppConfig (official Telegram API, read-only, safe)
+                # Ref: https://core.telegram.org/api/auth#frozen-accounts
+                try:
+                    from telethon.tl.functions.help import GetAppConfigRequest
+                    app_config_result = await client._client(GetAppConfigRequest(hash=0))
 
-                freeze_since = None
-                if hasattr(app_config_result, 'config'):
-                    for item in app_config_result.config.value:
-                        if item.key == 'freeze_since_date':
-                            freeze_since = int(item.value.value)
-                            break
+                    freeze_since = None
+                    if hasattr(app_config_result, 'config'):
+                        for item in app_config_result.config.value:
+                            if item.key == 'freeze_since_date':
+                                freeze_since = int(item.value.value)
+                                break
 
-                if freeze_since and freeze_since > 0:
-                    return False, {"telegram_id": me.id, "username": me.username, "first_name": me.first_name, "last_name": me.last_name, "phone": me.phone}, "frozen"
-            except Exception as e:
-                logger.warning(f"[FrozenCheck] GetAppConfig failed: {e}")
-
-            # Frozen check #3 — active probe
-            try:
-                from telethon.tl.functions.contacts import SearchRequest
-                await client._client(SearchRequest(q='telegram', limit=1))
-            except Exception as e:
-                error_str = str(e).lower()
-                if "frozen" in error_str:
-                    return False, {"telegram_id": me.id, "username": me.username, "first_name": me.first_name, "last_name": me.last_name, "phone": me.phone}, "frozen"
+                    if freeze_since and freeze_since > 0:
+                        return False, {"telegram_id": me.id, "username": me.username, "first_name": me.first_name, "last_name": me.last_name, "phone": me.phone}, "frozen"
+                except Exception as e:
+                    logger.warning(f"[FrozenCheck] GetAppConfig failed: {e}")
 
             user_info = {
                 "telegram_id": me.id,

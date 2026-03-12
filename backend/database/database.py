@@ -41,6 +41,13 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
 
+
+@event.listens_for(engine.sync_engine, "connect")
+def _set_sqlite_pragma_async(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
 SessionLocal = sessionmaker(
     bind=sync_engine,
     class_=Session,
@@ -84,6 +91,8 @@ def _run_schema_migrations():
             migrations.append("ALTER TABLE accounts ADD COLUMN last_check_error_code VARCHAR(64)")
         if "last_check_error" not in columns:
             migrations.append("ALTER TABLE accounts ADD COLUMN last_check_error TEXT")
+        if "is_premium" not in columns:
+            migrations.append("ALTER TABLE accounts ADD COLUMN is_premium BOOLEAN DEFAULT 0")
 
         for migration in migrations:
             conn.exec_driver_sql(migration)

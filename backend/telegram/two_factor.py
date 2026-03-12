@@ -61,31 +61,11 @@ class TwoFactorManager:
     def __init__(self, connection_timeout: int = 30):
         self.connection_timeout = connection_timeout
 
-    def _format_proxy(self, proxy: Optional[Dict]) -> Optional[Tuple]:
+    @staticmethod
+    def _format_proxy(proxy: Optional[Dict]) -> Optional[Tuple]:
         """Format proxy dict to Telethon tuple format."""
-        if not proxy:
-            return None
-
-        import socks
-
-        proxy_type = proxy.get("type", "socks5").lower()
-        if proxy_type == "socks5":
-            ptype = socks.SOCKS5
-        elif proxy_type == "socks4":
-            ptype = socks.SOCKS4
-        elif proxy_type in ("http", "https"):
-            ptype = socks.HTTP
-        else:
-            ptype = socks.SOCKS5
-
-        return (
-            ptype,
-            proxy.get("host") or proxy.get("addr"),
-            int(proxy.get("port", 1080)),
-            True,  # rdns
-            proxy.get("username"),
-            proxy.get("password"),
-        )
+        from telegram.proxy_utils import format_proxy
+        return format_proxy(proxy)
 
     def _create_client(
         self,

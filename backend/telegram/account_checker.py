@@ -79,32 +79,11 @@ class AccountChecker:
         self.delay_between = delay_between
         self._semaphore: Optional[asyncio.Semaphore] = None
 
-    def _format_proxy(self, proxy: Optional[Dict]) -> Optional[tuple]:
+    @staticmethod
+    def _format_proxy(proxy: Optional[Dict]) -> Optional[tuple]:
         """Format proxy dict to Telethon tuple format"""
-        if not proxy:
-            return None
-
-        import socks
-
-        proxy_type = proxy.get("type", "socks5").lower()
-
-        if proxy_type == "socks5":
-            ptype = socks.SOCKS5
-        elif proxy_type == "socks4":
-            ptype = socks.SOCKS4
-        elif proxy_type in ("http", "https"):
-            ptype = socks.HTTP
-        else:
-            ptype = socks.SOCKS5
-
-        return (
-            ptype,
-            proxy.get("host") or proxy.get("addr"),
-            int(proxy.get("port", 1080)),
-            True,  # rdns
-            proxy.get("username"),
-            proxy.get("password"),
-        )
+        from telegram.proxy_utils import format_proxy
+        return format_proxy(proxy)
 
     @staticmethod
     def _normalize_device_fingerprint(device_fingerprint: Optional[Any]) -> Dict[str, Any]:
@@ -233,19 +212,6 @@ class AccountChecker:
                     return result
             except Exception as e:
                 logger.debug(f"[FrozenCheck] GetAppConfig failed for account {account_id}: {e}")
-
-            # Frozen check #3 — active probe: try an action that frozen accounts can't do
-            # contacts.SearchRequest is read-only but restricted for frozen accounts
-            try:
-                from telethon.tl.functions.contacts import SearchRequest
-                await client(SearchRequest(q='telegram', limit=1))
-            except Exception as e:
-                error_str = str(e).lower()
-                logger.debug(f"[FrozenCheck] Account {account_id}: active probe: {type(e).__name__}: {e}")
-                if "frozen" in error_str:
-                    result.status = AccountStatus.FROZEN
-                    result.error = f"Account frozen: {e}"
-                    return result
 
             result.status = AccountStatus.VALID
 
