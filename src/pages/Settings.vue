@@ -4,11 +4,16 @@ import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import Button from 'primevue/button'
 import Select from 'primevue/select'
+import Dialog from 'primevue/dialog'
+import { useToast } from 'primevue/usetoast'
 import { setLocale, getLocale } from '@/i18n'
 
 const { t } = useI18n()
+const toast = useToast()
 
 const currentLocale = ref(getLocale())
+const showClearConfirm = ref(false)
+const isClearing = ref(false)
 
 const languages = [
   { label: 'English', value: 'en', flag: '🇬🇧' },
@@ -18,6 +23,19 @@ const languages = [
 function changeLanguage(locale: 'en' | 'uk') {
   currentLocale.value = locale
   setLocale(locale)
+}
+
+async function clearAllData() {
+  isClearing.value = true
+  try {
+    await window.api.delete('/api/settings/clear-all')
+    showClearConfirm.value = false
+    toast.add({ severity: 'success', summary: t('common.success'), detail: t('settings.dataCleared'), life: 3000 })
+  } catch {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: t('settings.clearFailed'), life: 3000 })
+  } finally {
+    isClearing.value = false
+  }
 }
 </script>
 
@@ -79,7 +97,6 @@ function changeLanguage(locale: 'en' | 'uk') {
               <div class="setting-title">{{ t('settings.dataLocation') }}</div>
               <div class="setting-desc">~/.Nexus</div>
             </div>
-            <Button :label="t('settings.change')" severity="secondary" size="small" />
           </div>
 
           <div class="setting-divider"></div>
@@ -89,10 +106,19 @@ function changeLanguage(locale: 'en' | 'uk') {
               <div class="setting-title danger">{{ t('settings.clearAllData') }}</div>
               <div class="setting-desc">{{ t('settings.clearAllDataDesc') }}</div>
             </div>
-            <Button :label="t('settings.clear')" severity="danger" size="small" />
+            <Button :label="t('settings.clear')" severity="danger" size="small" @click="showClearConfirm = true" />
           </div>
         </div>
       </div>
+
+      <!-- Clear Confirmation Dialog -->
+      <Dialog v-model:visible="showClearConfirm" :header="t('settings.clearConfirmTitle')" modal :style="{ width: '400px' }">
+        <p class="confirm-text">{{ t('settings.clearConfirmBody') }}</p>
+        <template #footer>
+          <Button :label="t('common.cancel')" severity="secondary" @click="showClearConfirm = false" />
+          <Button :label="t('settings.clear')" severity="danger" :loading="isClearing" @click="clearAllData" />
+        </template>
+      </Dialog>
 
       <!-- About -->
       <div class="about-section">
@@ -261,5 +287,11 @@ function changeLanguage(locale: 'en' | 'uk') {
 .about-copyright {
   font-size: 12px;
   color: #4b5563;
+}
+
+.confirm-text {
+  font-size: 14px;
+  color: #9ca3af;
+  line-height: 1.5;
 }
 </style>

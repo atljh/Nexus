@@ -29,7 +29,13 @@ export default {
     back: 'Назад',
     done: 'Готово',
     or: 'або',
-    configuration: 'Конфігурація'
+    configuration: 'Конфігурація',
+    time: {
+      justNow: 'щойно',
+      minutesShort: '{count} хв',
+      hoursShort: '{count} год',
+      daysShort: '{count} дн'
+    }
   },
 
   nav: {
@@ -60,7 +66,8 @@ export default {
     addProxy: 'Додати проксі',
     newLikeTask: 'Нове завдання лайків',
     active: 'активних',
-    working: 'робочих'
+    working: 'робочих',
+    tasksCompleted: 'Завдань завершено'
   },
 
   accounts: {
@@ -281,6 +288,14 @@ export default {
       proxyString: 'Рядок проксі',
       proxyStringPlaceholder: "socks5://user:pass{'@'}host:port",
       invalidProxyFormat: 'Невірний формат проксі',
+      proxyPool: 'Пул проксі',
+      proxyPoolEmpty: 'Пул проксі порожній',
+      noAccountsToDistribute: 'Немає акаунтів для розподілу',
+      distributeFromPool: 'Розподілити з пулу',
+      clearPool: 'Очистити пул',
+      showLogs: 'Показати логи ({count})',
+      hideLogs: 'Сховати логи',
+      clearLogs: 'Очистити логи',
       proxyAdded: 'Проксі додано',
       status: {
         pending: 'очікує',
@@ -377,6 +392,35 @@ export default {
     },
 
     addAccount: 'Додати акаунт',
+    allAccounts: 'Всі акаунти',
+    validAccounts: 'Валідні',
+    bannedAccounts: 'Забанені',
+    noRestrictions: 'Без обмежень',
+    withRestrictions: 'З обмеженнями',
+    checkSelected: 'Перевірити обрані',
+    checkProxiesBtn: 'Перевірити проксі',
+    createGroup: 'Створити групу',
+    createTag: 'Створити тег',
+    shownAccounts: 'Показано: {filtered} / {total}',
+    all: 'Всі',
+    groupPlaceholder: 'Група',
+    tagPlaceholder: 'Тег',
+    accountColumn: 'Акаунт',
+    geoColumn: 'Гео',
+    proxyColumn: 'Проксі',
+    agingColumn: 'Вілежка',
+    groupColumn: 'Група',
+    tagsColumn: 'Теги',
+    lastUsedColumn: 'Послід.',
+    time: {
+      today: 'Сьогодні',
+      yesterday: 'Вчора',
+      days: '{count} дн',
+      months: '{count} міс',
+      years: '{count} р',
+      daysMonths: '{months} міс {days} дн',
+      yearsMonths: '{years} р {months} міс'
+    },
 
     errors: {
       banned: 'Акаунт забанений',
@@ -421,6 +465,22 @@ export default {
     accounts: 'Акаунти',
     lastCheck: 'Остання перевірка',
     deleteConfirm: 'Видалити проксі {host}:{port}?',
+    bulkDeleteConfirm: 'Видалити {count} проксі?',
+    allProxies: 'Всі проксі',
+    working: 'Робочі',
+    slow: 'Повільні',
+    notWorking: 'Неробочі',
+    uncheckedLabel: 'Не перевірено',
+    deleteSelected: 'Видалити обрані',
+    shown: 'Показано: {filtered} / {total}',
+    searchPlaceholder: 'Пошук за IP, хостом, гео...',
+    proxyColumn: 'Проксі',
+    geoColumn: 'Гео',
+    checking: 'Перевірка...',
+    accountsShort: 'Акк.',
+    externalIp: 'Зовнішній IP',
+    lastCheckColumn: 'Перевірка',
+    actionsColumn: 'Дії',
 
     status: {
       unchecked: 'Не перевірено',
@@ -485,7 +545,8 @@ export default {
       duplicatesSkipped: 'Пропущено дублікатів: {count}',
       allDuplicates: 'Всі проксі вже існують',
       selectProxies: 'Оберіть проксі для додавання',
-      proxyParsed: 'Рядок розпізнано, перевірте дані'
+      proxyParsed: 'Рядок розпізнано, перевірте дані',
+      bulkDeleted: 'Видалено {count} проксі'
     }
   },
 
@@ -503,7 +564,11 @@ export default {
     themeDesc: 'Кольорова тема програми',
     themeLight: 'Світла',
     themeDark: 'Темна',
-    themeSystem: 'Системна'
+    themeSystem: 'Системна',
+    clearConfirmTitle: 'Очистити всі дані?',
+    clearConfirmBody: 'Це назавжди видалить всі акаунти, проксі, завдання та шаблони. Цю дію неможливо скасувати.',
+    dataCleared: 'Всі дані очищено',
+    clearFailed: 'Не вдалося очистити дані'
   },
 
   comingSoon: 'Скоро буде',
@@ -596,6 +661,7 @@ export default {
     },
     errors: {
       channelRequired: 'Вкажіть канал',
+      invalidChannel: 'Невірний формат каналу (використовуйте @username, 5-32 символи)',
       reactionsRequired: 'Оберіть хоча б одну реакцію',
       accountsRequired: 'Оберіть хоча б один акаунт'
     },
@@ -603,7 +669,8 @@ export default {
       taskCreated: 'Завдання створено',
       createFailed: 'Не вдалося створити завдання',
       taskStarted: 'Завдання запущено',
-      taskDeleted: 'Завдання видалено'
+      taskDeleted: 'Завдання видалено',
+      accountsSkipped: '{count} акаунтів пропущено (не валідні)'
     }
   },
 
@@ -706,6 +773,7 @@ export default {
     },
     errors: {
       channelsRequired: 'Додайте хоча б один канал',
+      invalidChannel: 'Невірний канал: {channel} (використовуйте @username, 5-32 символи)',
       templatesRequired: 'Оберіть або додайте хоча б один шаблон',
       accountsRequired: 'Оберіть хоча б один акаунт',
       templateRequired: 'Заповніть назву та текст шаблону'
@@ -717,7 +785,8 @@ export default {
       taskDeleted: 'Завдання видалено',
       templateCreated: 'Шаблон створено',
       templateDeleted: 'Шаблон видалено',
-      defaultsLoaded: 'Стандартні шаблони завантажено'
+      defaultsLoaded: 'Стандартні шаблони завантажено',
+      accountsSkipped: '{count} акаунтів пропущено (не валідні)'
     }
   },
 
@@ -798,6 +867,8 @@ export default {
       successful: 'Успішні',
       failed: 'Помилки',
       search: 'Пошук...',
+      newEntries: 'Нові записи',
+      loadMore: 'Завантажити ще...',
       translate: {
         actionNotExecuted: 'Дію не було виконано',
         staleAutoClosed: 'Завдання автоматично закрито як застаріле до обробки цього акаунта',
@@ -849,12 +920,16 @@ export default {
       stop: 'Зупинити',
       delete: 'Видалити',
       restart: 'Перезапустити',
+      duplicate: 'Дублювати',
+      duplicated: 'Завдання дубльовано',
       actionsOf: '{completed} з {total} дій виконано'
     },
     messages: {
       started: 'Завдання запущено',
       paused: 'Завдання призупинено',
       cancelled: 'Завдання скасовано',
+      completed: 'Завдання завершено',
+      failed: 'Завдання завершено з помилкою',
       deleted: 'Завдання видалено',
       restarted: 'Завдання перезапущено'
     },

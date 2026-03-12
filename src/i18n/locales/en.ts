@@ -29,7 +29,13 @@ export default {
     back: 'Back',
     done: 'Done',
     or: 'or',
-    configuration: 'Configuration'
+    configuration: 'Configuration',
+    time: {
+      justNow: 'now',
+      minutesShort: '{count} min',
+      hoursShort: '{count} hr',
+      daysShort: '{count} d'
+    }
   },
 
   nav: {
@@ -60,7 +66,8 @@ export default {
     addProxy: 'Add Proxy',
     newLikeTask: 'New Like Task',
     active: 'active',
-    working: 'working'
+    working: 'working',
+    tasksCompleted: 'Tasks completed'
   },
 
   accounts: {
@@ -281,6 +288,14 @@ export default {
       proxyString: 'Proxy String',
       proxyStringPlaceholder: "socks5://user:pass{'@'}host:port",
       invalidProxyFormat: 'Invalid proxy format',
+      proxyPool: 'Proxy pool',
+      proxyPoolEmpty: 'Proxy pool is empty',
+      noAccountsToDistribute: 'No accounts to distribute',
+      distributeFromPool: 'Distribute from pool',
+      clearPool: 'Clear pool',
+      showLogs: 'Show logs ({count})',
+      hideLogs: 'Hide logs',
+      clearLogs: 'Clear logs',
       proxyAdded: 'Proxy added',
       status: {
         pending: 'pending',
@@ -377,6 +392,35 @@ export default {
     },
 
     addAccount: 'Add Account',
+    allAccounts: 'All accounts',
+    validAccounts: 'Valid',
+    bannedAccounts: 'Banned',
+    noRestrictions: 'No restrictions',
+    withRestrictions: 'With restrictions',
+    checkSelected: 'Check selected',
+    checkProxiesBtn: 'Check proxies',
+    createGroup: 'Create group',
+    createTag: 'Create tag',
+    shownAccounts: 'Shown: {filtered} / {total}',
+    all: 'All',
+    groupPlaceholder: 'Group',
+    tagPlaceholder: 'Tag',
+    accountColumn: 'Account',
+    geoColumn: 'Geo',
+    proxyColumn: 'Proxy',
+    agingColumn: 'Age',
+    groupColumn: 'Group',
+    tagsColumn: 'Tags',
+    lastUsedColumn: 'Last used',
+    time: {
+      today: 'Today',
+      yesterday: 'Yesterday',
+      days: '{count} d',
+      months: '{count} mo',
+      years: '{count} yr',
+      daysMonths: '{months} mo {days} d',
+      yearsMonths: '{years} yr {months} mo'
+    },
 
     errors: {
       banned: 'Account banned',
@@ -421,6 +465,22 @@ export default {
     accounts: 'Accounts',
     lastCheck: 'Last Check',
     deleteConfirm: 'Delete proxy {host}:{port}?',
+    bulkDeleteConfirm: 'Delete {count} proxies?',
+    allProxies: 'All proxies',
+    working: 'Working',
+    slow: 'Slow',
+    notWorking: 'Not working',
+    uncheckedLabel: 'Unchecked',
+    deleteSelected: 'Delete selected',
+    shown: 'Shown: {filtered} / {total}',
+    searchPlaceholder: 'Search by IP, host, geo...',
+    proxyColumn: 'Proxy',
+    geoColumn: 'Geo',
+    checking: 'Checking...',
+    accountsShort: 'Acc.',
+    externalIp: 'External IP',
+    lastCheckColumn: 'Last check',
+    actionsColumn: 'Actions',
 
     status: {
       unchecked: 'Unchecked',
@@ -485,7 +545,8 @@ export default {
       duplicatesSkipped: 'Duplicates skipped: {count}',
       allDuplicates: 'All proxies already exist',
       selectProxies: 'Select proxies to add',
-      proxyParsed: 'String parsed, verify the data'
+      proxyParsed: 'String parsed, verify the data',
+      bulkDeleted: '{count} proxies deleted'
     }
   },
 
@@ -503,7 +564,11 @@ export default {
     themeDesc: 'Application color theme',
     themeLight: 'Light',
     themeDark: 'Dark',
-    themeSystem: 'System'
+    themeSystem: 'System',
+    clearConfirmTitle: 'Clear All Data?',
+    clearConfirmBody: 'This will permanently delete all accounts, proxies, tasks and templates. This action cannot be undone.',
+    dataCleared: 'All data has been cleared',
+    clearFailed: 'Failed to clear data'
   },
 
   comingSoon: 'Coming in Stage 3',
@@ -596,6 +661,7 @@ export default {
     },
     errors: {
       channelRequired: 'Please enter a channel',
+      invalidChannel: 'Invalid channel format (use @username, 5-32 characters)',
       reactionsRequired: 'Select at least one reaction',
       accountsRequired: 'Select at least one account'
     },
@@ -603,7 +669,8 @@ export default {
       taskCreated: 'Task created',
       createFailed: 'Failed to create task',
       taskStarted: 'Task started',
-      taskDeleted: 'Task deleted'
+      taskDeleted: 'Task deleted',
+      accountsSkipped: '{count} accounts skipped (not valid)'
     }
   },
 
@@ -706,6 +773,7 @@ export default {
     },
     errors: {
       channelsRequired: 'Add at least one channel',
+      invalidChannel: 'Invalid channel: {channel} (use @username, 5-32 characters)',
       templatesRequired: 'Select or add at least one template',
       accountsRequired: 'Select at least one account',
       templateRequired: 'Fill in template name and content'
@@ -717,7 +785,8 @@ export default {
       taskDeleted: 'Task deleted',
       templateCreated: 'Template created',
       templateDeleted: 'Template deleted',
-      defaultsLoaded: 'Default templates loaded'
+      defaultsLoaded: 'Default templates loaded',
+      accountsSkipped: '{count} accounts skipped (not valid)'
     }
   },
 
@@ -798,6 +867,8 @@ export default {
       successful: 'Successful',
       failed: 'Errors',
       search: 'Search...',
+      newEntries: 'New entries',
+      loadMore: 'Load more...',
       translate: {
         actionNotExecuted: 'Action was not executed',
         staleAutoClosed: 'Task auto-closed as stale before this account was processed',
@@ -849,12 +920,16 @@ export default {
       stop: 'Stop',
       delete: 'Delete',
       restart: 'Restart',
+      duplicate: 'Duplicate',
+      duplicated: 'Task duplicated',
       actionsOf: '{completed} of {total} actions done'
     },
     messages: {
       started: 'Task started',
       paused: 'Task paused',
       cancelled: 'Task cancelled',
+      completed: 'Task completed',
+      failed: 'Task failed',
       deleted: 'Task deleted',
       restarted: 'Task restarted'
     },

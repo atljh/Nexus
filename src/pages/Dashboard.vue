@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 
@@ -8,20 +8,24 @@ const { t } = useI18n()
 const stats = ref({
   accounts: { total: 0, active: 0 },
   proxies: { total: 0, working: 0 },
+  tasks: { running: 0, completed: 0 },
 })
 
 interface Account { id: number; status: string }
 interface ProxyItem { id: number; status: string }
+interface TaskStats { total: number; running: number; pending: number; completed: number; failed: number }
 interface AccountsResponse { data: Account[] }
 interface ProxiesResponse { data: ProxyItem[] }
 
 const loaded = ref(false)
+let refreshInterval: ReturnType<typeof setInterval> | null = null
 
-onMounted(async () => {
+async function loadStats() {
   try {
-    const [accountsRes, proxiesRes] = await Promise.all([
+    const [accountsRes, proxiesRes, taskStatsRes] = await Promise.all([
       window.api.get('/api/accounts') as Promise<AccountsResponse>,
-      window.api.get('/api/proxy') as Promise<ProxiesResponse>
+      window.api.get('/api/proxy') as Promise<ProxiesResponse>,
+      window.api.get('/api/tasks/stats/summary') as Promise<TaskStats>,
     ])
 
     const accounts = accountsRes.data || []
@@ -31,10 +35,21 @@ onMounted(async () => {
     stats.value.accounts.active = accounts.filter((a: Account) => a.status === 'valid').length
     stats.value.proxies.total = proxies.length
     stats.value.proxies.working = proxies.filter((p: ProxyItem) => p.status === 'working').length
+    stats.value.tasks.running = taskStatsRes.running || 0
+    stats.value.tasks.completed = taskStatsRes.completed || 0
   } catch (error) {
     console.error('Failed to load stats:', error)
   }
+}
+
+onMounted(async () => {
+  await loadStats()
   loaded.value = true
+  refreshInterval = setInterval(loadStats, 30000)
+})
+
+onUnmounted(() => {
+  if (refreshInterval) clearInterval(refreshInterval)
 })
 </script>
 
@@ -74,6 +89,20 @@ onMounted(async () => {
           </div>
           <div class="stat-value">{{ stats.proxies.total }}</div>
           <div class="stat-label">{{ t('dashboard.proxies') }}</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-top">
+            <div class="stat-icon stat-icon-pink">
+              <i class="pi pi-bolt"></i>
+            </div>
+            <div class="stat-badge" v-if="stats.tasks.running > 0">
+              <span class="stat-badge-dot stat-badge-dot-green"></span>
+              {{ stats.tasks.running }} active
+            </div>
+          </div>
+          <div class="stat-value">{{ stats.tasks.completed }}</div>
+          <div class="stat-label">{{ t('dashboard.tasksCompleted') || 'Tasks completed' }}</div>
         </div>
       </div>
 
@@ -163,7 +192,7 @@ onMounted(async () => {
 /* Stats Grid */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 14px;
 }
 
@@ -203,6 +232,10 @@ onMounted(async () => {
 
 .stat-icon-blue {
   background: linear-gradient(135deg, #3b82f6, #2563eb);
+}
+
+.stat-icon-pink {
+  background: linear-gradient(135deg, #ec4899, #be185d);
 }
 
 .stat-badge {

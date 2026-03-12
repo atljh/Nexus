@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
@@ -27,6 +27,9 @@ const showConfirmDialog = ref(false)
 const confirmAction = ref<'cancel' | 'delete' | 'restart' | null>(null)
 const pollingInterval = ref<number | null>(null)
 const dateLocale = computed(() => (locale.value === 'uk' ? 'uk-UA' : 'en-US'))
+const logsContainer = ref<HTMLElement | null>(null)
+const autoScroll = ref(true)
+const showAccountsCard = ref(true)
 
 // Get task ID from route
 const taskId = computed(() => Number(route.params.id))
@@ -294,6 +297,27 @@ async function deleteTask() {
   router.push(taskType === 'likes' ? '/autolikes' : '/autocomments')
 }
 
+async function duplicateTask() {
+  if (!task.value) return
+  const dup = await taskStore.duplicateTask(task.value.id)
+  if (dup) {
+    toast.add({ severity: 'success', summary: t('taskResults.actions.duplicated'), detail: `#${dup.id}`, life: 2000 })
+    router.push(`/task/${dup.id}`)
+  }
+}
+
+function scrollLogsToBottom() {
+  if (!autoScroll.value || !logsContainer.value) return
+  logsContainer.value.scrollTop = logsContainer.value.scrollHeight
+}
+
+function onLogsScroll() {
+  if (!logsContainer.value) return
+  const el = logsContainer.value
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+  autoScroll.value = atBottom
+}
+
 function showConfirm(action: 'cancel' | 'delete' | 'restart') {
   confirmAction.value = action
   showConfirmDialog.value = true
@@ -329,12 +353,14 @@ async function loadTask() {
       task.value = result
       await Promise.all([
         taskStore.fetchTaskLogs(taskId.value),
+        taskStore.fetchAccountStats(taskId.value),
         task.value.task_type === 'comments' ? taskStore.fetchTargetChannels(taskId.value) : Promise.resolve()
       ])
+      nextTick(() => scrollLogsToBottom())
     }
-  } catch (e) {
+  } catch (e: any) {
     console.error('Failed to load task:', e)
-    toast.add({ severity: 'error', summary: t('taskResults.loadError'), life: 3000 })
+    toast.add({ severity: 'error', summary: t('taskResults.loadError'), detail: e?.message || '', life: 3000 })
   } finally {
     loading.value = false
   }
@@ -379,12 +405,25 @@ onUnmounted(() => {
   stopPolling()
 })
 
-// Watch for status changes
-watch(() => task.value?.status, (newStatus) => {
+// Watch for status changes + completion notifications
+watch(() => task.value?.status, (newStatus, oldStatus) => {
   if (newStatus === 'running') {
     startPolling()
   } else {
     stopPolling()
+  }
+
+  // Notify on task completion/failure
+  if (oldStatus === 'running' && newStatus && newStatus !== 'running') {
+    if (newStatus === 'completed') {
+      toast.add({ severity: 'success', summary: t('taskResults.messages.completed'), detail: `${task.value?.completed_actions}/${task.value?.total_actions}`, life: 4000 })
+    } else if (newStatus === 'failed') {
+      toast.add({ severity: 'error', summary: t('taskResults.messages.failed'), detail: task.value?.last_error || '', life: 5000 })
+    } else if (newStatus === 'cancelled') {
+      toast.add({ severity: 'warn', summary: t('taskResults.messages.cancelled'), life: 3000 })
+    }
+    // Final fetch to get complete stats
+    taskStore.fetchAccountStats(taskId.value)
   }
 })
 </script>
@@ -447,6 +486,12 @@ watch(() => task.value?.status, (newStatus) => {
               :label="t('taskResults.actions.restart')"
               class="action-btn restart"
               @click="showConfirm('restart')"
+            />
+            <Button
+              icon="pi pi-copy"
+              :label="t('taskResults.actions.duplicate')"
+              class="action-btn duplicate"
+              @click="duplicateTask"
             />
             <Button
               v-if="task.status !== 'running' && task.status !== 'paused'"
@@ -645,6 +690,40 @@ watch(() => task.value?.status, (newStatus) => {
               </div>
             </div>
 
+            <!-- Accounts Card -->
+            <div v-if="taskStore.accountStats.length > 0 && showAccountsCard" class="accounts-card">
+              <div class="card-header">
+                <i class="pi pi-users"></i>
+                <h3>{{ t('taskResults.stats.accounts') }} ({{ taskStore.accountStats.length }})</h3>
+                <button class="toggle-card-btn" @click="showAccountsCard = !showAccountsCard">
+                  <i :class="showAccountsCard ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"></i>
+                </button>
+              </div>
+              <div class="accounts-list">
+                <div
+                  v-for="acc in taskStore.accountStats"
+                  :key="acc.account_id"
+                  class="account-stat-item"
+                >
+                  <div class="account-stat-info">
+                    <span class="account-stat-name">{{ acc.phone || acc.username || `#${acc.account_id}` }}</span>
+                    <span v-if="acc.status" :class="['account-stat-status', `status--${acc.status}`]">{{ acc.status }}</span>
+                  </div>
+                  <div class="account-stat-counts">
+                    <span class="account-stat-ok">{{ acc.success }}</span>
+                    <span class="account-stat-sep">/</span>
+                    <span class="account-stat-err">{{ acc.failed }}</span>
+                  </div>
+                  <div class="account-stat-bar">
+                    <div
+                      class="account-stat-bar-fill"
+                      :style="{ width: acc.total > 0 ? `${(acc.success / acc.total) * 100}%` : '0%' }"
+                    ></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- Templates Card (for comments) -->
             <div v-if="task.task_type === 'comments' && task.config?.templates" class="templates-card">
               <div class="card-header">
@@ -707,7 +786,7 @@ watch(() => task.value?.status, (newStatus) => {
                 </div>
               </div>
 
-              <div class="logs-list">
+              <div ref="logsContainer" class="logs-list" @scroll="onLogsScroll">
                 <div
                   v-for="log in filteredLogs"
                   :key="log.id"
@@ -721,10 +800,22 @@ watch(() => task.value?.status, (newStatus) => {
                   <span v-if="log.extra_data?.comment" class="log-comment">"{{ log.extra_data.comment }}"</span>
                 </div>
 
+                <div v-if="taskStore.logsHasMore && logsFilter === 'all' && !logsSearch" class="logs-load-more">
+                  <button class="load-more-btn" @click="taskStore.fetchTaskLogs(taskId, undefined, true)">
+                    {{ t('taskResults.logs.loadMore') }}
+                  </button>
+                </div>
+
                 <div v-if="filteredLogs.length === 0" class="logs-empty">
                   <i class="pi pi-inbox"></i>
                   <span>{{ t('taskResults.noLogs') }}</span>
                 </div>
+              </div>
+
+              <!-- Auto-scroll indicator -->
+              <div v-if="task?.status === 'running' && !autoScroll" class="autoscroll-hint" @click="autoScroll = true; scrollLogsToBottom()">
+                <i class="pi pi-arrow-down"></i>
+                {{ t('taskResults.logs.newEntries') }}
               </div>
             </div>
           </div>
@@ -1495,6 +1586,28 @@ watch(() => task.value?.status, (newStatus) => {
   font-style: italic;
 }
 
+.logs-load-more {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.load-more-btn {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: #9ca3af;
+  font-size: 12px;
+  padding: 6px 16px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.load-more-btn:hover {
+  border-color: rgba(168, 85, 247, 0.3);
+  color: #a855f7;
+}
+
 .logs-empty {
   display: flex;
   flex-direction: column;
@@ -1507,6 +1620,149 @@ watch(() => task.value?.status, (newStatus) => {
 
 .logs-empty i {
   font-size: 40px;
+}
+
+/* Auto-scroll hint */
+.autoscroll-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(168, 85, 247, 0.15);
+  border-top: 1px solid rgba(168, 85, 247, 0.3);
+  color: #c4b5fd;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.autoscroll-hint:hover {
+  background: rgba(168, 85, 247, 0.25);
+}
+
+/* Duplicate button */
+.action-btn.duplicate {
+  background: rgba(168, 85, 247, 0.15);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  color: #c4b5fd;
+}
+
+.action-btn.duplicate:hover {
+  background: rgba(168, 85, 247, 0.25);
+}
+
+/* Accounts Card */
+.accounts-card {
+  background: linear-gradient(180deg, #161619 0%, #111114 100%);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.toggle-card-btn {
+  background: none;
+  border: none;
+  color: #6e6e78;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+
+.toggle-card-btn:hover {
+  color: #ababb5;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.accounts-list {
+  padding: 12px 16px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.account-stat-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+
+.account-stat-item:last-child {
+  margin-bottom: 0;
+}
+
+.account-stat-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.account-stat-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e4e4e7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-stat-status {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #8b8b95;
+  flex-shrink: 0;
+}
+
+.account-stat-status.status--valid { color: #4ade80; background: rgba(34, 197, 94, 0.15); }
+.account-stat-status.status--banned { color: #f87171; background: rgba(239, 68, 68, 0.15); }
+.account-stat-status.status--spamblock { color: #fbbf24; background: rgba(245, 158, 11, 0.15); }
+.account-stat-status.status--session_expired { color: #f87171; background: rgba(239, 68, 68, 0.15); }
+
+.account-stat-counts {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-family: 'SF Mono', monospace;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.account-stat-ok {
+  color: #4ade80;
+  font-weight: 600;
+}
+
+.account-stat-sep {
+  color: #4b4b55;
+}
+
+.account-stat-err {
+  color: #f87171;
+  font-weight: 600;
+}
+
+.account-stat-bar {
+  width: 60px;
+  height: 4px;
+  background: rgba(239, 68, 68, 0.3);
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.account-stat-bar-fill {
+  height: 100%;
+  background: #4ade80;
+  border-radius: 2px;
+  transition: width 0.3s ease;
 }
 
 /* Not Found State */

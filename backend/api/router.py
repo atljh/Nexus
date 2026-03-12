@@ -6,6 +6,7 @@ from api.groups import router as groups_router
 from api.tags import router as tags_router
 from api.tasks import router as tasks_router
 from api.webk import router as webk_router
+from api.settings import router as settings_router
 
 api_router = APIRouter()
 
@@ -15,3 +16,4 @@ api_router.include_router(groups_router, prefix="/groups", tags=["groups"])
 api_router.include_router(tags_router, prefix="/tags", tags=["tags"])
 api_router.include_router(tasks_router, prefix="/tasks", tags=["tasks"])
 api_router.include_router(webk_router, prefix="/accounts", tags=["webk"])
+api_router.include_router(settings_router, prefix="/settings", tags=["settings"])
