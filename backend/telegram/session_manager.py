@@ -82,6 +82,8 @@ class SessionManager:
 
             session_string = string_session.save()
 
+            # Explicitly close the SQLite session to release file lock (Windows)
+            client.session.close()
             del string_session, client
 
             return session_string

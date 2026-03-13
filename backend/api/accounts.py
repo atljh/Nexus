@@ -1,5 +1,7 @@
 import json
 import os
+import sys
+import time
 import tempfile
 import zipfile
 import shutil
@@ -8,6 +10,24 @@ import re
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime, timezone
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_unlink(path: str | Path, retries: int = 3, delay: float = 0.3) -> None:
+    """Delete a file, retrying on Windows file-lock errors."""
+    for i in range(retries):
+        try:
+            Path(path).unlink(missing_ok=True)
+            return
+        except PermissionError:
+            if i < retries - 1:
+                time.sleep(delay)
+            else:
+                logger.warning(f"Could not delete temp file (locked): {path}")
+
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy import select
@@ -1076,7 +1096,7 @@ async def import_session_json_pairs(
             try:
                 session_string = await SessionManager.session_file_to_string(tmp_path)
             finally:
-                Path(tmp_path).unlink(missing_ok=True)
+                _safe_unlink(tmp_path)
 
             if not session_string:
                 errors.append({
@@ -1820,7 +1840,7 @@ async def parse_import_files(
                     print(f"[PARSE] Session conversion ERROR for '{base_name}': {conv_err}")
                     raise
                 finally:
-                    Path(tmp_path).unlink(missing_ok=True)
+                    _safe_unlink(tmp_path)
 
                 if not session_string:
                     print(f"[PARSE] Empty session string for '{base_name}'")
