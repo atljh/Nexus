@@ -1715,6 +1715,23 @@ async def parse_import_files(
     Returns list of parsed accounts for preview.
     """
     import uuid
+    import traceback
+
+    try:
+        return await _parse_import_files_inner(session_files, json_files, tdata_file)
+    except Exception as e:
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _parse_import_files_inner(
+    session_files: List[UploadFile],
+    json_files: List[UploadFile],
+    tdata_file: Optional[UploadFile],
+):
+    import uuid
 
     parsed_accounts = []
     errors = []
