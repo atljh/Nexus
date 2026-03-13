@@ -70,13 +70,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global exception handler — catches errors that bypass endpoint try/except
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    print(f"[Backend ERROR] {request.method} {request.url}", file=sys.stderr)
-    traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stderr)
-    sys.stderr.flush()
-    return JSONResponse(status_code=500, content={"detail": str(exc)})
+# Middleware to catch errors at ASGI level (before FastAPI handlers)
+# This ensures errors during multipart parsing are logged and get CORS headers
+@app.middleware("http")
+async def catch_all_errors(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        print(f"[Backend ERROR] {request.method} {request.url}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
+        return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
 # Health check
