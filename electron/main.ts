@@ -14,10 +14,16 @@ const MAX_BACKEND_RESTARTS = 3
 const isDev = !app.isPackaged
 
 function resolveDevPythonPath(): string {
-  const candidates = [
-    path.join(__dirname, '../../backend/.venv/bin/python'),
-    path.join(__dirname, '../../backend/.venv/Scripts/python.exe')
-  ]
+  const isWin = process.platform === 'win32'
+  const candidates = isWin
+    ? [
+        path.join(__dirname, '../../backend/.venv/Scripts/python.exe'),
+        path.join(__dirname, '../../backend/.venv/bin/python'),
+      ]
+    : [
+        path.join(__dirname, '../../backend/.venv/bin/python'),
+        path.join(__dirname, '../../backend/.venv/Scripts/python.exe'),
+      ]
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) return candidate
   }
@@ -91,6 +97,7 @@ function startPythonBackend() {
       env: {
         ...process.env,
         PYTHONUNBUFFERED: '1',
+        PYTHONIOENCODING: 'utf-8',
         NEXUS_BACKEND_RELOAD: '1',
       }
     })
@@ -98,6 +105,7 @@ function startPythonBackend() {
     pythonProcess = spawn(pythonPath, [], {
       env: {
         ...process.env,
+        PYTHONIOENCODING: 'utf-8',
         NEXUS_BACKEND_RELOAD: '0',
       }
     })
