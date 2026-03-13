@@ -1,7 +1,10 @@
 import asyncio
 import os
+import sys
+import traceback
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
@@ -66,6 +69,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Global exception handler — catches errors that bypass endpoint try/except
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    print(f"[Backend ERROR] {request.method} {request.url}", file=sys.stderr)
+    traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stderr)
+    sys.stderr.flush()
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
+
 
 # Health check
 @app.get("/health")
