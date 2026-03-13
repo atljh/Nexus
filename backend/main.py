@@ -95,7 +95,10 @@ app.include_router(api_router, prefix="/api")
 
 if __name__ == "__main__":
     reload_enabled = os.getenv("NEXUS_BACKEND_RELOAD", "0") == "1"
-    if reload_enabled:
+    # On Windows, reload=True spawns a subprocess that silently swallows
+    # exceptions (e.g. multipart parsing errors), so we disable it.
+    is_windows = sys.platform == "win32"
+    if reload_enabled and not is_windows:
         uvicorn.run(
             "main:app",
             host="127.0.0.1",
