@@ -20,6 +20,8 @@ export default {
     warning: 'Увага',
     info: 'Інформація',
     noData: 'Немає даних',
+    copy: 'Копіювати',
+    copied: 'Скопійовано!',
     actions: 'Дії',
     status: 'Статус',
     type: 'Тип',
@@ -217,6 +219,7 @@ export default {
       proxyCheckComplete: 'Перевірка проксі: {working}/{total} працюють',
       noProxiesToCheck: 'Немає проксі у обраних акаунтів',
       bulk2FAComplete: '2FA встановлено: {succeeded} успішно, {failed} невдало',
+      bulkProfileComplete: 'Профіль оновлено: {succeeded} успішно, {failed} невдало',
       sessionJsonImported: 'Імпортовано {count} акаунтів з пар session+json',
       sessionJsonErrors: '{count} файлів не вдалося імпортувати'
     },
@@ -238,12 +241,31 @@ export default {
       set2FATitle: 'Масове встановлення 2FA',
       set2FADescription: 'Встановити 2FA пароль для {count} обраних акаунтів',
       set2FANote: 'Пароль буде збережено і його можна переглянути в таблиці. Акаунти з вже встановленим 2FA буде пропущено.',
+      editProfile: 'Редагувати профіль',
+      editProfileTitle: 'Масове оновлення профілю',
+      editProfileDescription: 'Оновити профіль для {count} обраних акаунтів',
+      autoGenerate: 'Автогенерація',
+      manual: 'Вручну',
+      autoGenerateNote: 'Кожен акаунт отримає унікальне випадкове ім\'я та біо. Мова визначається за гео акаунту.',
+      manualNote: 'Однакові значення будуть застосовані до всіх обраних акаунтів. Залиште поля порожніми щоб зберегти поточні.',
+      applyProfile: 'Застосувати',
       setProxy: 'Призначити проксі',
       noProxy: 'Без проксі',
       setGroup: 'Призначити групу',
       noGroup: 'Без групи',
+      terminateSessions: 'Кікнути сесії',
       delete: 'Видалити',
       clearSelection: 'Скасувати вибір'
+    },
+
+    sessions: {
+      terminate: 'Кікнути інші сесії',
+      confirmTerminate: 'Завершити всі інші сесії цього акаунту?',
+      confirmBulkTerminate: 'Завершити інші сесії для {count} обраних акаунтів?',
+      terminated: '{count} сесій завершено',
+      bulkTerminated: 'Сесії кікнуті: {succeeded} акаунтів успішно, {failed} невдало ({terminated} сесій всього)',
+      noOtherSessions: 'Інших сесій не знайдено',
+      freshSession: 'Не вдалося: сесія створена менше 24 годин тому',
     },
 
     importFlow: {
@@ -332,12 +354,31 @@ export default {
       setSuccess: '2FA успішно увімкнено',
       changeSuccess: 'Пароль 2FA успішно змінено',
       removeSuccess: '2FA успішно видалено',
+      savedPassword: 'Пароль',
       errors: {
         alreadyEnabled: '2FA вже увімкнено',
         notEnabled: '2FA не увімкнено',
         invalidPassword: 'Невірний пароль',
         passwordMismatch: 'Паролі не співпадають'
       }
+    },
+
+    profile: {
+      title: 'Редагування профілю',
+      fetching: 'Завантаження профілю з Telegram...',
+      firstName: 'Ім\'я',
+      firstNamePlaceholder: 'Введіть ім\'я',
+      lastName: 'Прізвище',
+      lastNamePlaceholder: 'Введіть прізвище',
+      bio: 'Біо',
+      bioPlaceholder: 'Напишіть щось про себе',
+      username: 'Username',
+      usernamePlaceholder: 'username',
+      updateSuccess: 'Профіль оновлено в Telegram',
+      gender: 'Стать',
+      genderRandom: 'Випадково',
+      genderMale: 'Чоловіча',
+      genderFemale: 'Жіноча',
     },
 
     auth: {
@@ -411,6 +452,7 @@ export default {
     agingColumn: 'Вілежка',
     groupColumn: 'Група',
     tagsColumn: 'Теги',
+    twoFAColumn: '2FA',
     lastUsedColumn: 'Послід.',
     time: {
       today: 'Сьогодні',

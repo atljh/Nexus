@@ -33,7 +33,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from database.database import get_session
 from database.models import Account, Proxy, AccountGroup, AccountTag
@@ -50,6 +50,9 @@ from telegram import (
     auth_service,
     OFFICIAL_APIS,
 )
+from telegram.profile_service import profile_service
+from telegram.profile_data import generate_random_profile
+from telegram.session_service import session_service
 from telegram.device_generator import generate_device_fingerprint
 from telegram.account_metadata import (
     extract_api_credentials as extract_api_credentials_from_metadata,
@@ -1486,9 +1489,6 @@ async def bulk_set_2fa(
             if not account.session_string:
                 return {"id": account.id, "success": False, "error": "No session string"}
 
-            if account.has_2fa:
-                return {"id": account.id, "success": False, "error": "2FA already enabled"}
-
             proxy_config = None
             if account.proxy:
                 proxy_config = {
@@ -1519,6 +1519,9 @@ async def bulk_set_2fa(
                     account.two_fa_set_at = datetime.now(timezone.utc)
                     return {"id": account.id, "success": True}
                 else:
+                    # Sync DB flag if Telegram says 2FA is already enabled
+                    if "already enabled" in (set_result.error or "").lower():
+                        account.has_2fa = True
                     return {"id": account.id, "success": False, "error": set_result.error}
             except Exception as e:
                 return {"id": account.id, "success": False, "error": str(e)}
@@ -1535,6 +1538,398 @@ async def bulk_set_2fa(
         "total": len(accounts),
         "succeeded": success_count,
         "failed": len(accounts) - success_count,
+    }
+
+
+# ============================================================
+# Profile Update Endpoints
+# ============================================================
+
+class ProfileUpdateRequest(BaseModel):
+    first_name: Optional[str] = Field(None, max_length=64)
+    last_name: Optional[str] = Field(None, max_length=64)
+    bio: Optional[str] = Field(None, max_length=140)
+    username: Optional[str] = Field(None, max_length=32)
+
+
+class BulkProfileUpdateRequest(BaseModel):
+    account_ids: List[int]
+    first_name: Optional[str] = Field(None, max_length=64)
+    last_name: Optional[str] = Field(None, max_length=64)
+    bio: Optional[str] = Field(None, max_length=140)
+    username: Optional[str] = Field(None, max_length=32)
+    auto_generate: bool = False
+    gender: Optional[str] = None  # "male" | "female"
+    max_concurrent: int = 2
+
+
+@router.get("/{account_id}/profile/current")
+async def get_current_profile(
+    account_id: int,
+    session: AsyncSession = Depends(get_session)
+):
+    """Fetch current profile from Telegram."""
+    query = select(Account).options(
+        selectinload(Account.proxy)
+    ).where(Account.id == account_id)
+
+    result = await session.execute(query)
+    account = result.scalar_one_or_none()
+
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if not account.session_string:
+        raise HTTPException(status_code=400, detail="No session string")
+
+    proxy_config = None
+    if account.proxy:
+        proxy_config = {
+            "type": account.proxy.type,
+            "host": account.proxy.host,
+            "port": account.proxy.port,
+            "username": account.proxy.username,
+            "password": account.proxy.password,
+        }
+    resolved_api_id, resolved_api_hash, resolved_device_fp = _resolve_account_connection_params(account)
+
+    profile = await profile_service.get_current_profile(
+        account.session_string,
+        proxy=proxy_config,
+        api_id=resolved_api_id,
+        api_hash=resolved_api_hash,
+        device_fingerprint=resolved_device_fp,
+    )
+
+    if "error" in profile:
+        raise HTTPException(status_code=400, detail=profile["error"])
+
+    return profile
+
+
+@router.post("/{account_id}/profile/update")
+async def update_profile(
+    account_id: int,
+    data: ProfileUpdateRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    """Update profile fields in Telegram and save to DB."""
+    query = select(Account).options(
+        selectinload(Account.proxy)
+    ).where(Account.id == account_id)
+
+    result = await session.execute(query)
+    account = result.scalar_one_or_none()
+
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if not account.session_string:
+        raise HTTPException(status_code=400, detail="No session string")
+
+    proxy_config = None
+    if account.proxy:
+        proxy_config = {
+            "type": account.proxy.type,
+            "host": account.proxy.host,
+            "port": account.proxy.port,
+            "username": account.proxy.username,
+            "password": account.proxy.password,
+        }
+    resolved_api_id, resolved_api_hash, resolved_device_fp = _resolve_account_connection_params(account)
+
+    update_result = await profile_service.update_profile(
+        account.session_string,
+        first_name=data.first_name,
+        last_name=data.last_name,
+        bio=data.bio,
+        username=data.username,
+        proxy=proxy_config,
+        api_id=resolved_api_id,
+        api_hash=resolved_api_hash,
+        device_fingerprint=resolved_device_fp,
+    )
+
+    # Save updated fields to DB
+    if update_result.new_values:
+        if "first_name" in update_result.new_values:
+            account.first_name = update_result.new_values["first_name"]
+        if "last_name" in update_result.new_values:
+            account.last_name = update_result.new_values["last_name"]
+        if "username" in update_result.new_values:
+            account.username = update_result.new_values["username"]
+        await session.commit()
+
+    return {
+        "success": update_result.success,
+        "updated_fields": update_result.updated_fields,
+        "errors": update_result.errors,
+        "new_values": update_result.new_values,
+    }
+
+
+@router.post("/profile/bulk-update")
+async def bulk_update_profile(
+    data: BulkProfileUpdateRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    """Update profile on multiple accounts. Supports auto-generation."""
+    import asyncio
+
+    query = select(Account).options(
+        selectinload(Account.proxy)
+    ).where(Account.id.in_(data.account_ids))
+
+    result = await session.execute(query)
+    accounts = list(result.scalars().all())
+
+    if not accounts:
+        return {"success": False, "results": [], "error": "No accounts found"}
+
+    semaphore = asyncio.Semaphore(data.max_concurrent)
+    results = []
+
+    async def update_account_profile(account):
+        async with semaphore:
+            if not account.session_string:
+                return {"id": account.id, "success": False, "error": "No session string"}
+
+            # Determine profile data
+            if data.auto_generate:
+                # Detect locale from account geo
+                locale = "ua" if account.geo and account.geo.lower() in ("ua", "uk") else "en"
+                profile = generate_random_profile(gender=data.gender, locale=locale)
+                fn = profile["first_name"]
+                ln = profile["last_name"]
+                bio = profile["bio"]
+            else:
+                fn = data.first_name
+                ln = data.last_name
+                bio = data.bio
+
+            username = data.username  # None = don't change
+
+            proxy_config = None
+            if account.proxy:
+                proxy_config = {
+                    "type": account.proxy.type,
+                    "host": account.proxy.host,
+                    "port": account.proxy.port,
+                    "username": account.proxy.username,
+                    "password": account.proxy.password,
+                }
+            resolved_api_id, resolved_api_hash, resolved_device_fp = _resolve_account_connection_params(account)
+
+            try:
+                update_result = await profile_service.update_profile(
+                    account.session_string,
+                    first_name=fn,
+                    last_name=ln,
+                    bio=bio,
+                    username=username,
+                    proxy=proxy_config,
+                    api_id=resolved_api_id,
+                    api_hash=resolved_api_hash,
+                    device_fingerprint=resolved_device_fp,
+                )
+
+                # Save to DB
+                if update_result.new_values:
+                    if "first_name" in update_result.new_values:
+                        account.first_name = update_result.new_values["first_name"]
+                    if "last_name" in update_result.new_values:
+                        account.last_name = update_result.new_values["last_name"]
+                    if "username" in update_result.new_values:
+                        account.username = update_result.new_values["username"]
+
+                return {
+                    "id": account.id,
+                    "success": update_result.success,
+                    "updated_fields": update_result.updated_fields,
+                    "new_values": update_result.new_values,
+                    "errors": update_result.errors,
+                }
+            except Exception as e:
+                return {"id": account.id, "success": False, "error": str(e)}
+
+    tasks = [update_account_profile(acc) for acc in accounts]
+    results = await asyncio.gather(*tasks)
+
+    await session.commit()
+
+    success_count = sum(1 for r in results if r.get("success"))
+    return {
+        "success": True,
+        "results": results,
+        "total": len(accounts),
+        "succeeded": success_count,
+        "failed": len(accounts) - success_count,
+    }
+
+
+# ============================================================
+# Session Management Endpoints
+# ============================================================
+
+@router.get("/{account_id}/sessions")
+async def get_sessions(
+    account_id: int,
+    session: AsyncSession = Depends(get_session)
+):
+    """Get all active sessions for an account."""
+    query = select(Account).options(
+        selectinload(Account.proxy)
+    ).where(Account.id == account_id)
+
+    result = await session.execute(query)
+    account = result.scalar_one_or_none()
+
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if not account.session_string:
+        raise HTTPException(status_code=400, detail="No session string")
+
+    proxy_config = None
+    if account.proxy:
+        proxy_config = {
+            "type": account.proxy.type,
+            "host": account.proxy.host,
+            "port": account.proxy.port,
+            "username": account.proxy.username,
+            "password": account.proxy.password,
+        }
+    resolved_api_id, resolved_api_hash, resolved_device_fp = _resolve_account_connection_params(account)
+
+    sessions_result = await session_service.get_sessions(
+        account.session_string,
+        proxy=proxy_config,
+        api_id=resolved_api_id,
+        api_hash=resolved_api_hash,
+        device_fingerprint=resolved_device_fp,
+    )
+
+    if "error" in sessions_result and sessions_result["error"]:
+        raise HTTPException(status_code=400, detail=sessions_result["error"])
+
+    return sessions_result
+
+
+@router.post("/{account_id}/sessions/terminate")
+async def terminate_other_sessions(
+    account_id: int,
+    session: AsyncSession = Depends(get_session)
+):
+    """Terminate all other sessions for an account."""
+    query = select(Account).options(
+        selectinload(Account.proxy)
+    ).where(Account.id == account_id)
+
+    result = await session.execute(query)
+    account = result.scalar_one_or_none()
+
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if not account.session_string:
+        raise HTTPException(status_code=400, detail="No session string")
+
+    proxy_config = None
+    if account.proxy:
+        proxy_config = {
+            "type": account.proxy.type,
+            "host": account.proxy.host,
+            "port": account.proxy.port,
+            "username": account.proxy.username,
+            "password": account.proxy.password,
+        }
+    resolved_api_id, resolved_api_hash, resolved_device_fp = _resolve_account_connection_params(account)
+
+    terminate_result = await session_service.terminate_other_sessions(
+        account.session_string,
+        proxy=proxy_config,
+        api_id=resolved_api_id,
+        api_hash=resolved_api_hash,
+        device_fingerprint=resolved_device_fp,
+    )
+
+    return {
+        "success": terminate_result.success,
+        "terminated_count": terminate_result.terminated_count,
+        "total_other_sessions": terminate_result.total_other_sessions,
+        "errors": terminate_result.errors,
+    }
+
+
+class BulkTerminateRequest(BaseModel):
+    account_ids: List[int]
+    max_concurrent: int = 2
+
+
+@router.post("/sessions/bulk-terminate")
+async def bulk_terminate_sessions(
+    data: BulkTerminateRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    """Terminate other sessions on multiple accounts."""
+    import asyncio
+
+    query = select(Account).options(
+        selectinload(Account.proxy)
+    ).where(Account.id.in_(data.account_ids))
+
+    result = await session.execute(query)
+    accounts = list(result.scalars().all())
+
+    if not accounts:
+        return {"success": False, "results": [], "error": "No accounts found"}
+
+    semaphore = asyncio.Semaphore(data.max_concurrent)
+    results = []
+
+    async def terminate_for_account(account):
+        async with semaphore:
+            if not account.session_string:
+                return {"id": account.id, "success": False, "error": "No session string"}
+
+            proxy_config = None
+            if account.proxy:
+                proxy_config = {
+                    "type": account.proxy.type,
+                    "host": account.proxy.host,
+                    "port": account.proxy.port,
+                    "username": account.proxy.username,
+                    "password": account.proxy.password,
+                }
+            resolved_api_id, resolved_api_hash, resolved_device_fp = _resolve_account_connection_params(account)
+
+            try:
+                term_result = await session_service.terminate_other_sessions(
+                    account.session_string,
+                    proxy=proxy_config,
+                    api_id=resolved_api_id,
+                    api_hash=resolved_api_hash,
+                    device_fingerprint=resolved_device_fp,
+                )
+
+                return {
+                    "id": account.id,
+                    "success": term_result.success,
+                    "terminated_count": term_result.terminated_count,
+                    "total_other_sessions": term_result.total_other_sessions,
+                    "errors": term_result.errors,
+                }
+            except Exception as e:
+                return {"id": account.id, "success": False, "error": str(e)}
+
+    tasks = [terminate_for_account(acc) for acc in accounts]
+    results = await asyncio.gather(*tasks)
+
+    success_count = sum(1 for r in results if r.get("success"))
+    total_terminated = sum(r.get("terminated_count", 0) for r in results)
+    return {
+        "success": True,
+        "results": results,
+        "total": len(accounts),
+        "succeeded": success_count,
+        "failed": len(accounts) - success_count,
+        "total_terminated": total_terminated,
     }
 
 

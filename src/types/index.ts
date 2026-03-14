@@ -400,6 +400,106 @@ export interface TwoFAResult {
 }
 
 // ============================================================
+// Profile Update Types
+// ============================================================
+
+export interface ProfileUpdateRequest {
+  first_name?: string
+  last_name?: string
+  bio?: string
+  username?: string
+}
+
+export interface ProfileUpdateResult {
+  success: boolean
+  updated_fields: string[]
+  errors: Record<string, string>
+  new_values: Record<string, string>
+}
+
+export interface BulkProfileUpdateRequest {
+  account_ids: number[]
+  first_name?: string
+  last_name?: string
+  bio?: string
+  username?: string
+  auto_generate: boolean
+  gender?: 'male' | 'female'
+  max_concurrent?: number
+}
+
+export interface BulkProfileUpdateResult {
+  success: boolean
+  results: {
+    id: number
+    success: boolean
+    updated_fields?: string[]
+    new_values?: Record<string, string>
+    errors?: Record<string, string>
+    error?: string
+  }[]
+  total: number
+  succeeded: number
+  failed: number
+}
+
+export interface TelegramProfile {
+  first_name: string
+  last_name: string
+  username: string
+  bio: string
+  is_premium: boolean
+}
+
+// ============================================================
+// Session Management Types
+// ============================================================
+
+export interface TelegramSession {
+  hash: number
+  device_model: string
+  platform: string
+  system_version: string
+  api_id: number
+  app_name: string
+  app_version: string
+  ip: string
+  country: string
+  date_created: number
+  date_active: number
+  is_current: boolean
+}
+
+export interface SessionsResult {
+  sessions: TelegramSession[]
+  total: number
+  other_count: number
+}
+
+export interface TerminateResult {
+  success: boolean
+  terminated_count: number
+  total_other_sessions: number
+  errors: string[]
+}
+
+export interface BulkTerminateResult {
+  success: boolean
+  results: {
+    id: number
+    success: boolean
+    terminated_count?: number
+    total_other_sessions?: number
+    errors?: string[]
+    error?: string
+  }[]
+  total: number
+  succeeded: number
+  failed: number
+  total_terminated: number
+}
+
+// ============================================================
 // Account Authorization Types
 // ============================================================
 

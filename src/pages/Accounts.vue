@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, computed, watch, nextTick, defineAsyncComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import { useAccountStore, useProxyStore, useGroupStore, useTagStore } from '@/stores'
@@ -8,9 +8,11 @@ import { countryFlag } from '@/utils/formatters'
 import type { Account, AccountStatus, BulkAction } from '@/types'
 
 // Dialog components
-import TwoFADialog from '@/components/accounts/TwoFADialog.vue'
-import AddAccountDialog from '@/components/accounts/AddAccountDialog.vue'
-import WebViewer from '@/components/accounts/WebViewer.vue'
+// Lazy-load heavy dialog components for faster initial render
+const TwoFADialog = defineAsyncComponent(() => import('@/components/accounts/TwoFADialog.vue'))
+const AddAccountDialog = defineAsyncComponent(() => import('@/components/accounts/AddAccountDialog.vue'))
+const WebViewer = defineAsyncComponent(() => import('@/components/accounts/WebViewer.vue'))
+const ProfileEditDialog = defineAsyncComponent(() => import('@/components/accounts/ProfileEditDialog.vue'))
 
 import Button from 'primevue/button'
 import DataTable from 'primevue/datatable'
@@ -95,6 +97,19 @@ const showBulk2FADialog = ref(false)
 const bulk2FAPassword = ref('')
 const bulk2FAHint = ref('')
 const bulk2FALoading = ref(false)
+// Profile edit state
+const showProfileDialog = ref(false)
+const profileAccount = ref<Account | null>(null)
+// Bulk profile state
+const showBulkProfileDialog = ref(false)
+const bulkProfileMode = ref<'manual' | 'auto'>('auto')
+const bulkProfileFirstName = ref('')
+const bulkProfileLastName = ref('')
+const bulkProfileBio = ref('')
+const bulkProfileGender = ref<'male' | 'female' | undefined>(undefined)
+const bulkProfileLoading = ref(false)
+// Bulk terminate state
+const bulkTerminateLoading = ref(false)
 // Bulk proxy check state
 const bulkProxyChecking = ref(false)
 const checkingProxyIds = ref<Set<number>>(new Set())
@@ -145,8 +160,9 @@ function addImportLog(type: 'info' | 'success' | 'error' | 'warn', message: stri
 
 // Computed
 // Bridge: DataTable expects array of row objects, store holds array of IDs
+const selectedIdSet = computed(() => new Set(accountStore.selectedIds))
 const selectedRows = computed({
-  get: () => accountStore.filteredAccounts.filter(a => accountStore.selectedIds.includes(a.id)),
+  get: () => accountStore.filteredAccounts.filter(a => selectedIdSet.value.has(a.id)),
   set: (rows: Account[]) => {
     accountStore.selectedIds = rows.map(r => r.id)
   }
@@ -1493,6 +1509,106 @@ function openTwoFADialog(account: Account) {
   showTwoFADialog.value = true
 }
 
+function openProfileDialog(account: Account) {
+  profileAccount.value = account
+  showProfileDialog.value = true
+}
+
+async function handleBulkProfileUpdate() {
+  bulkProfileLoading.value = true
+  try {
+    const data: any = {
+      account_ids: selectedIds.value,
+      auto_generate: bulkProfileMode.value === 'auto',
+      max_concurrent: 2,
+    }
+
+    if (bulkProfileMode.value === 'auto') {
+      data.gender = bulkProfileGender.value || undefined
+    } else {
+      if (bulkProfileFirstName.value.trim()) data.first_name = bulkProfileFirstName.value.trim()
+      if (bulkProfileLastName.value.trim()) data.last_name = bulkProfileLastName.value.trim()
+      if (bulkProfileBio.value.trim()) data.bio = bulkProfileBio.value.trim()
+    }
+
+    const result = await accountStore.bulkUpdateProfile(data)
+
+    toast.add({
+      severity: result.succeeded > 0 ? 'success' : 'error',
+      summary: result.succeeded > 0 ? t('common.success') : t('common.error'),
+      detail: t('accounts.messages.bulkProfileComplete', { succeeded: result.succeeded, failed: result.failed }),
+      life: 5000
+    })
+
+    showBulkProfileDialog.value = false
+  } catch (error: any) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: error.message, life: 5000 })
+  } finally {
+    bulkProfileLoading.value = false
+    bulkProfileFirstName.value = ''
+    bulkProfileLastName.value = ''
+    bulkProfileBio.value = ''
+    bulkProfileGender.value = undefined
+  }
+}
+
+async function handleTerminateSessions(account: Account) {
+  if (!window.confirm(t('accounts.sessions.confirmTerminate'))) return
+
+  try {
+    const result = await accountStore.terminateOtherSessions(account.id)
+    if (result.success) {
+      toast.add({
+        severity: 'success',
+        summary: t('common.success'),
+        detail: t('accounts.sessions.terminated', { count: result.terminated_count }),
+        life: 3000
+      })
+    } else {
+      toast.add({
+        severity: 'warn',
+        summary: t('common.warning'),
+        detail: result.errors?.join(', ') || 'Failed',
+        life: 5000
+      })
+    }
+  } catch (error: any) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: error.message || error.detail, life: 5000 })
+  }
+}
+
+async function handleBulkTerminateSessions() {
+  if (!window.confirm(t('accounts.sessions.confirmBulkTerminate', { count: selectedIds.value.length }))) return
+
+  bulkTerminateLoading.value = true
+  try {
+    const result = await accountStore.bulkTerminateSessions(selectedIds.value)
+    toast.add({
+      severity: result.succeeded > 0 ? 'success' : 'error',
+      summary: result.succeeded > 0 ? t('common.success') : t('common.error'),
+      detail: t('accounts.sessions.bulkTerminated', {
+        succeeded: result.succeeded,
+        failed: result.failed,
+        terminated: result.total_terminated,
+      }),
+      life: 5000
+    })
+  } catch (error: any) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: error.message, life: 5000 })
+  } finally {
+    bulkTerminateLoading.value = false
+  }
+}
+
+function copyToClipboard(text: string) {
+  navigator.clipboard.writeText(text)
+  toast.add({
+    severity: 'info',
+    summary: t('common.copied'),
+    life: 1500
+  })
+}
+
 function openWebViewer(account: Account) {
   webViewerAccount.value = account
   showWebViewer.value = true
@@ -1611,13 +1727,40 @@ const tagOptions = computed(() =>
   tagStore.tags.map(tg => ({ label: tg.name, value: tg.id, color: tg.color }))
 )
 
-// Stats computed
-const totalAccounts = computed(() => accountStore.accounts.length)
-const validAccounts = computed(() => accountStore.accounts.filter(a => a.status === 'valid').length)
-const bannedAccounts = computed(() => accountStore.accounts.filter(a => ['banned', 'deactivated'].includes(a.status)).length)
-const premiumAccounts = computed(() => accountStore.accounts.filter(a => a.is_premium).length)
-const noRestrictionsAccounts = computed(() => accountStore.accounts.filter(a => a.status === 'valid' && !a.spamblock).length)
-const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.spamblock === true).length)
+// O(1) lookup maps for table cell rendering (avoids repeated .find()/.getById() per row)
+const proxyMap = computed(() => {
+  const m = new Map<number, typeof proxyStore.proxies[0]>()
+  for (const p of proxyStore.proxies) m.set(p.id, p)
+  return m
+})
+const groupMap = computed(() => {
+  const m = new Map<number, typeof groupStore.groups[0]>()
+  for (const g of groupStore.groups) m.set(g.id, g)
+  return m
+})
+const tagMap = computed(() => {
+  const m = new Map<number, typeof tagStore.tags[0]>()
+  for (const t of tagStore.tags) m.set(t.id, t)
+  return m
+})
+
+// Stats — single pass over accounts array instead of 6 separate .filter() calls
+const accountStats = computed(() => {
+  let valid = 0, banned = 0, premium = 0, noRestrictions = 0, restricted = 0
+  for (const a of accountStore.accounts) {
+    if (a.status === 'valid') { valid++; if (!a.spamblock) noRestrictions++ }
+    if (a.status === 'banned' || a.status === 'deactivated') banned++
+    if (a.is_premium) premium++
+    if (a.spamblock === true) restricted++
+  }
+  return { total: accountStore.accounts.length, valid, banned, premium, noRestrictions, restricted }
+})
+const totalAccounts = computed(() => accountStats.value.total)
+const validAccounts = computed(() => accountStats.value.valid)
+const bannedAccounts = computed(() => accountStats.value.banned)
+const premiumAccounts = computed(() => accountStats.value.premium)
+const noRestrictionsAccounts = computed(() => accountStats.value.noRestrictions)
+const restrictedAccounts = computed(() => accountStats.value.restricted)
 
 </script>
 
@@ -1750,7 +1893,8 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
           :value="accountStore.filteredAccounts"
           :loading="accountStore.loading"
           paginator
-          :rows="50"
+          :rows="25"
+          :rowsPerPageOptions="[25, 50, 100]"
           dataKey="id"
           class="custom-table"
           scrollable
@@ -1828,10 +1972,10 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
                 class="inline-proxy-dropdown"
               >
                 <template #value="{ value }">
-                  <div v-if="value && proxyStore.getById(value)" class="inline-proxy-value">
-                    <i class="pi pi-circle-fill proxy-dot" :class="'proxy-dot--' + proxyStore.getById(value)!.status"></i>
-                    <span v-if="proxyStore.getById(value)!.geo" class="proxy-geo-flag">{{ countryFlag(proxyStore.getById(value)!.geo) }}</span>
-                    <span class="proxy-addr">{{ proxyStore.getById(value)!.host }}:{{ proxyStore.getById(value)!.port }}</span>
+                  <div v-if="value && proxyMap.get(value)" class="inline-proxy-value">
+                    <i class="pi pi-circle-fill proxy-dot" :class="'proxy-dot--' + proxyMap.get(value)!.status"></i>
+                    <span v-if="proxyMap.get(value)!.geo" class="proxy-geo-flag">{{ countryFlag(proxyMap.get(value)!.geo) }}</span>
+                    <span class="proxy-addr">{{ proxyMap.get(value)!.host }}:{{ proxyMap.get(value)!.port }}</span>
                   </div>
                   <span v-else class="no-data">—</span>
                 </template>
@@ -1868,11 +2012,11 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
                 <template #value="{ value }">
                   <div class="inline-group-value">
                     <span
-                      v-if="value && groupStore.groups.find(g => g.id === value)"
+                      v-if="value && groupMap.get(value)"
                       class="group-dot"
-                      :style="{ background: groupStore.groups.find(g => g.id === value)?.color || '#8b8f9a' }"
+                      :style="{ background: groupMap.get(value)?.color || '#8b8f9a' }"
                     ></span>
-                    <span>{{ value ? (groupStore.groups.find(g => g.id === value)?.name || '—') : '—' }}</span>
+                    <span>{{ value ? (groupMap.get(value)?.name || '—') : '—' }}</span>
                   </div>
                 </template>
                 <template #option="{ option }">
@@ -1903,8 +2047,8 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
                       v-for="tagId in value.slice(0, 1)"
                       :key="tagId"
                       class="inline-tag-chip"
-                      :style="{ background: (tagStore.tags.find(t => t.id === tagId)?.color || '#8b8f9a') + '22', color: tagStore.tags.find(t => t.id === tagId)?.color || '#8b8f9a', borderColor: (tagStore.tags.find(t => t.id === tagId)?.color || '#8b8f9a') + '44' }"
-                    >{{ tagStore.tags.find(t => t.id === tagId)?.name }}</span>
+                      :style="{ background: (tagMap.get(tagId)?.color || '#8b8f9a') + '22', color: tagMap.get(tagId)?.color || '#8b8f9a', borderColor: (tagMap.get(tagId)?.color || '#8b8f9a') + '44' }"
+                    >{{ tagMap.get(tagId)?.name }}</span>
                     <span v-if="value.length > 1" class="inline-tag-more">+{{ value.length - 1 }}</span>
                   </div>
                   <span v-else class="no-data">—</span>
@@ -1919,13 +2063,25 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
             </template>
           </Column>
 
+          <Column :header="t('accounts.twoFAColumn')" style="min-width: 100px" sortable field="has_2fa">
+            <template #body="{ data }">
+              <div class="twofa-cell">
+                <i :class="data.has_2fa ? 'pi pi-lock' : 'pi pi-lock-open'" :style="{ color: data.has_2fa ? '#22c55e' : '#4b5563', fontSize: '12px' }"></i>
+                <span v-if="data.two_fa_password" class="twofa-password" @click="copyToClipboard(data.two_fa_password)" v-tooltip.top="t('common.copy')">
+                  {{ data.two_fa_password }}
+                </span>
+                <span v-else class="twofa-none">—</span>
+              </div>
+            </template>
+          </Column>
+
           <Column :header="t('accounts.lastUsedColumn')" style="min-width: 80px" sortable field="last_used_at">
             <template #body="{ data }">
               <span class="last-used-text">{{ formatLastUsed(data.last_used_at) }}</span>
             </template>
           </Column>
 
-          <Column header="" style="width: 120px">
+          <Column header="" style="width: 180px">
             <template #body="{ data }">
               <div class="actions-cell">
                 <button class="action-icon" @click="checkAccount(data)" v-tooltip.top="t('common.check')">
@@ -1934,8 +2090,14 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
                 <button class="action-icon" @click="openWebViewer(data)" :disabled="data.status !== 'valid' || !data.proxy || !data.telegram_id || !['working', 'slow', 'very_slow', 'unchecked'].includes(data.proxy?.status)" v-tooltip.top="'WebK'">
                   <i class="pi pi-external-link"></i>
                 </button>
+                <button class="action-icon" @click="openProfileDialog(data)" v-tooltip.top="t('accounts.profile.title')">
+                  <i class="pi pi-user-edit"></i>
+                </button>
                 <button class="action-icon" @click="openTwoFADialog(data)" v-tooltip.top="'2FA'">
                   <i :class="data.has_2fa ? 'pi pi-lock' : 'pi pi-lock-open'"></i>
+                </button>
+                <button class="action-icon" @click="handleTerminateSessions(data)" v-tooltip.top="t('accounts.sessions.terminate')">
+                  <i class="pi pi-sign-out"></i>
                 </button>
                 <button class="action-icon delete" @click="confirmDelete(data)" v-tooltip.top="t('common.delete')">
                   <i class="pi pi-trash"></i>
@@ -2020,7 +2182,7 @@ const restrictedAccounts = computed(() => accountStore.accounts.filter(a => a.sp
               <div class="proxy-dropdown-value">
                 <i class="pi pi-server"></i>
                 <span v-if="value">
-                  {{ proxyStore.getById(value)?.host }}:{{ proxyStore.getById(value)?.port }}
+                  {{ proxyMap.get(value)?.host }}:{{ proxyMap.get(value)?.port }}
                 </span>
                 <span v-else>{{ t('accounts.importFlow.selectProxy') }}</span>
               </div>
@@ -2156,7 +2318,7 @@ login:pass:1.2.3.4:8080"
                 >
                   <template #value="{ value }">
                     <span v-if="value" class="proxy-value-small">
-                      {{ proxyStore.getById(value)?.type }}://{{ proxyStore.getById(value)?.host }}:{{ proxyStore.getById(value)?.port }}
+                      {{ proxyMap.get(value)?.type }}://{{ proxyMap.get(value)?.host }}:{{ proxyMap.get(value)?.port }}
                     </span>
                     <span v-else class="placeholder-text">—</span>
                   </template>
@@ -2501,6 +2663,111 @@ login:pass:1.2.3.4:8080"
         @updated="accountStore.fetchAccounts"
       />
 
+      <!-- Profile Edit Dialog (single account) -->
+      <ProfileEditDialog
+        v-model:visible="showProfileDialog"
+        :account="profileAccount"
+        @updated="accountStore.fetchAccounts"
+      />
+
+      <!-- Bulk Profile Update Dialog -->
+      <Dialog
+        v-model:visible="showBulkProfileDialog"
+        :header="t('accounts.bulk.editProfileTitle')"
+        modal
+        :style="{ width: '460px' }"
+        class="custom-dialog"
+      >
+        <div class="form-field">
+          <p class="description">{{ t('accounts.bulk.editProfileDescription', { count: selectedIds.length }) }}</p>
+        </div>
+
+        <!-- Mode Toggle -->
+        <div class="mode-toggle">
+          <button
+            :class="['mode-btn', { active: bulkProfileMode === 'auto' }]"
+            @click="bulkProfileMode = 'auto'"
+          >
+            <i class="pi pi-sparkles"></i>
+            {{ t('accounts.bulk.autoGenerate') }}
+          </button>
+          <button
+            :class="['mode-btn', { active: bulkProfileMode === 'manual' }]"
+            @click="bulkProfileMode = 'manual'"
+          >
+            <i class="pi pi-pencil"></i>
+            {{ t('accounts.bulk.manual') }}
+          </button>
+        </div>
+
+        <!-- Auto mode -->
+        <template v-if="bulkProfileMode === 'auto'">
+          <div class="form-field">
+            <label class="form-label">{{ t('accounts.profile.gender') }}</label>
+            <div class="gender-options">
+              <button
+                :class="['gender-btn', { active: bulkProfileGender === undefined }]"
+                @click="bulkProfileGender = undefined"
+              >{{ t('accounts.profile.genderRandom') }}</button>
+              <button
+                :class="['gender-btn', { active: bulkProfileGender === 'male' }]"
+                @click="bulkProfileGender = 'male'"
+              >{{ t('accounts.profile.genderMale') }}</button>
+              <button
+                :class="['gender-btn', { active: bulkProfileGender === 'female' }]"
+                @click="bulkProfileGender = 'female'"
+              >{{ t('accounts.profile.genderFemale') }}</button>
+            </div>
+          </div>
+          <div class="hint-box">
+            <i class="pi pi-info-circle"></i>
+            <span>{{ t('accounts.bulk.autoGenerateNote') }}</span>
+          </div>
+        </template>
+
+        <!-- Manual mode -->
+        <template v-else>
+          <div class="form-field">
+            <label class="form-label">{{ t('accounts.profile.firstName') }}</label>
+            <InputText
+              v-model="bulkProfileFirstName"
+              :placeholder="t('accounts.profile.firstNamePlaceholder')"
+              class="w-full"
+            />
+          </div>
+          <div class="form-field">
+            <label class="form-label">{{ t('accounts.profile.lastName') }}</label>
+            <InputText
+              v-model="bulkProfileLastName"
+              :placeholder="t('accounts.profile.lastNamePlaceholder')"
+              class="w-full"
+            />
+          </div>
+          <div class="form-field">
+            <label class="form-label">{{ t('accounts.profile.bio') }}</label>
+            <InputText
+              v-model="bulkProfileBio"
+              :placeholder="t('accounts.profile.bioPlaceholder')"
+              class="w-full"
+            />
+          </div>
+          <div class="hint-box">
+            <i class="pi pi-info-circle"></i>
+            <span>{{ t('accounts.bulk.manualNote') }}</span>
+          </div>
+        </template>
+
+        <template #footer>
+          <Button :label="t('common.cancel')" severity="secondary" @click="showBulkProfileDialog = false" />
+          <Button
+            :label="t('accounts.bulk.applyProfile')"
+            icon="pi pi-check"
+            :loading="bulkProfileLoading"
+            @click="handleBulkProfileUpdate"
+          />
+        </template>
+      </Dialog>
+
       <!-- WebK Viewer -->
       <WebViewer
         v-model:visible="showWebViewer"
@@ -2546,6 +2813,21 @@ login:pass:1.2.3.4:8080"
               severity="secondary"
               size="small"
               @click="showBulk2FADialog = true"
+            />
+            <Button
+              :label="t('accounts.bulk.editProfile')"
+              icon="pi pi-user-edit"
+              severity="secondary"
+              size="small"
+              @click="showBulkProfileDialog = true"
+            />
+            <Button
+              :label="t('accounts.bulk.terminateSessions')"
+              icon="pi pi-sign-out"
+              severity="secondary"
+              size="small"
+              :loading="bulkTerminateLoading"
+              @click="handleBulkTerminateSessions"
             />
             <Button
               :label="t('accounts.bulk.actions')"
@@ -3124,6 +3406,33 @@ login:pass:1.2.3.4:8080"
 }
 
 /* Last used */
+.twofa-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.twofa-password {
+  font-size: 12px;
+  color: #d1d5db;
+  cursor: pointer;
+  font-family: monospace;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  transition: background 0.15s;
+}
+
+.twofa-password:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.twofa-none {
+  font-size: 12px;
+  color: #4b5563;
+}
+
 .last-used-text {
   font-size: 11px;
   color: #9ca3af;
@@ -3355,6 +3664,65 @@ login:pass:1.2.3.4:8080"
 .hint-box i {
   color: #a855f7;
   margin-top: 1px;
+}
+
+.mode-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.mode-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #9ca3af;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.mode-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.mode-btn.active {
+  background: rgba(168, 85, 247, 0.12);
+  border-color: #a855f7;
+  color: #e5e7eb;
+}
+
+.gender-options {
+  display: flex;
+  gap: 8px;
+}
+
+.gender-btn {
+  flex: 1;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #9ca3af;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.gender-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.gender-btn.active {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: #3b82f6;
+  color: #e5e7eb;
 }
 
 /* Color Picker */

@@ -20,6 +20,8 @@ export default {
     warning: 'Warning',
     info: 'Info',
     noData: 'No data',
+    copy: 'Copy',
+    copied: 'Copied!',
     actions: 'Actions',
     status: 'Status',
     type: 'Type',
@@ -217,6 +219,7 @@ export default {
       proxyCheckComplete: 'Proxy check: {working}/{total} working',
       noProxiesToCheck: 'No proxies assigned to selected accounts',
       bulk2FAComplete: '2FA set: {succeeded} succeeded, {failed} failed',
+      bulkProfileComplete: 'Profile updated: {succeeded} succeeded, {failed} failed',
       sessionJsonImported: 'Imported {count} accounts from session+json pairs',
       sessionJsonErrors: '{count} files failed to import'
     },
@@ -238,12 +241,31 @@ export default {
       set2FATitle: 'Bulk Set 2FA',
       set2FADescription: 'Set 2FA password for {count} selected accounts',
       set2FANote: 'Password will be saved and can be viewed in the table. Accounts that already have 2FA will be skipped.',
+      editProfile: 'Edit Profile',
+      editProfileTitle: 'Bulk Profile Update',
+      editProfileDescription: 'Update profile for {count} selected accounts',
+      autoGenerate: 'Auto Generate',
+      manual: 'Manual',
+      autoGenerateNote: 'Each account will get a unique random name and bio. Locale is detected from account geo.',
+      manualNote: 'Same values will be applied to all selected accounts. Leave fields empty to keep current.',
+      applyProfile: 'Apply',
       setProxy: 'Set Proxy',
       noProxy: 'No Proxy',
       setGroup: 'Set Group',
       noGroup: 'No Group',
+      terminateSessions: 'Kick Sessions',
       delete: 'Delete',
       clearSelection: 'Clear selection'
+    },
+
+    sessions: {
+      terminate: 'Kick other sessions',
+      confirmTerminate: 'Terminate all other sessions for this account?',
+      confirmBulkTerminate: 'Terminate other sessions for {count} selected accounts?',
+      terminated: '{count} sessions terminated',
+      bulkTerminated: 'Sessions kicked: {succeeded} accounts succeeded, {failed} failed ({terminated} sessions total)',
+      noOtherSessions: 'No other sessions found',
+      freshSession: 'Cannot terminate: session created less than 24 hours ago',
     },
 
     importFlow: {
@@ -332,12 +354,31 @@ export default {
       setSuccess: '2FA enabled successfully',
       changeSuccess: '2FA password changed successfully',
       removeSuccess: '2FA removed successfully',
+      savedPassword: 'Password',
       errors: {
         alreadyEnabled: '2FA is already enabled',
         notEnabled: '2FA is not enabled',
         invalidPassword: 'Invalid password',
         passwordMismatch: 'Passwords do not match'
       }
+    },
+
+    profile: {
+      title: 'Edit Profile',
+      fetching: 'Loading profile from Telegram...',
+      firstName: 'First Name',
+      firstNamePlaceholder: 'Enter first name',
+      lastName: 'Last Name',
+      lastNamePlaceholder: 'Enter last name',
+      bio: 'Bio',
+      bioPlaceholder: 'Write something about yourself',
+      username: 'Username',
+      usernamePlaceholder: 'username',
+      updateSuccess: 'Profile updated in Telegram',
+      gender: 'Gender',
+      genderRandom: 'Random',
+      genderMale: 'Male',
+      genderFemale: 'Female',
     },
 
     auth: {
@@ -411,6 +452,7 @@ export default {
     agingColumn: 'Age',
     groupColumn: 'Group',
     tagsColumn: 'Tags',
+    twoFAColumn: '2FA',
     lastUsedColumn: 'Last used',
     time: {
       today: 'Today',

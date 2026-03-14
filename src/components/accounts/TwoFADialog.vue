@@ -210,6 +210,17 @@ function resetForm() {
   activeTab.value = 0
 }
 
+function copyPassword() {
+  if (props.account?.two_fa_password) {
+    navigator.clipboard.writeText(props.account.two_fa_password)
+    toast.add({
+      severity: 'info',
+      summary: t('common.copied'),
+      life: 1500
+    })
+  }
+}
+
 function getAccountName(): string {
   if (!props.account) return ''
   if (props.account.username) return `@${props.account.username}`
@@ -258,6 +269,14 @@ function getAccountName(): string {
       <div v-if="status?.password_hint" class="hint-box">
         <i class="pi pi-info-circle"></i>
         <span>{{ t('accounts.twoFA.hint') }}: {{ status.password_hint }}</span>
+      </div>
+
+      <!-- Saved Password -->
+      <div v-if="account?.two_fa_password" class="saved-password-box" @click="copyPassword">
+        <i class="pi pi-key"></i>
+        <span class="saved-password-label">{{ t('accounts.twoFA.savedPassword') }}:</span>
+        <code class="saved-password-value">{{ account.two_fa_password }}</code>
+        <i class="pi pi-copy copy-icon"></i>
       </div>
 
       <!-- Tabs -->
@@ -479,6 +498,50 @@ function getAccountName(): string {
   margin-bottom: 16px;
   font-size: 13px;
   color: #a855f7;
+}
+
+.saved-password-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.saved-password-box:hover {
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.saved-password-box .pi-key {
+  color: #22c55e;
+  font-size: 14px;
+}
+
+.saved-password-label {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.saved-password-value {
+  font-size: 14px;
+  color: #e5e7eb;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.copy-icon {
+  margin-left: auto;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.saved-password-box:hover .copy-icon {
+  color: #22c55e;
 }
 
 .tab-content {

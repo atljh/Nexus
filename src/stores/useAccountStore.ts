@@ -19,7 +19,15 @@ import type {
   AuthStartResponse,
   AuthVerifyResponse,
   AuthStep,
-  AuthSessionInfo
+  AuthSessionInfo,
+  ProfileUpdateRequest,
+  ProfileUpdateResult,
+  BulkProfileUpdateRequest,
+  BulkProfileUpdateResult,
+  TelegramProfile,
+  SessionsResult,
+  TerminateResult,
+  BulkTerminateResult,
 } from '@/types'
 
 interface AccountsResponse {
@@ -531,6 +539,66 @@ export const useAccountStore = defineStore('accounts', () => {
   }
 
   // ============================================================
+  // Profile Methods
+  // ============================================================
+
+  async function getCurrentProfile(accountId: number): Promise<TelegramProfile> {
+    return await window.api.get(`/api/accounts/${accountId}/profile/current`) as TelegramProfile
+  }
+
+  async function updateProfile(accountId: number, data: ProfileUpdateRequest): Promise<ProfileUpdateResult> {
+    const result = await window.api.post(`/api/accounts/${accountId}/profile/update`, data) as ProfileUpdateResult
+
+    if (result.new_values) {
+      const account = accounts.value.find(a => a.id === accountId)
+      if (account) {
+        if (result.new_values.first_name !== undefined) account.first_name = result.new_values.first_name
+        if (result.new_values.last_name !== undefined) account.last_name = result.new_values.last_name
+        if (result.new_values.username !== undefined) account.username = result.new_values.username
+      }
+    }
+
+    return result
+  }
+
+  async function bulkUpdateProfile(data: BulkProfileUpdateRequest): Promise<BulkProfileUpdateResult> {
+    const result = await window.api.post('/api/accounts/profile/bulk-update', data) as BulkProfileUpdateResult
+
+    // Update local accounts
+    for (const r of result.results) {
+      if (r.success && r.new_values) {
+        const account = accounts.value.find(a => a.id === r.id)
+        if (account) {
+          if (r.new_values.first_name !== undefined) account.first_name = r.new_values.first_name
+          if (r.new_values.last_name !== undefined) account.last_name = r.new_values.last_name
+          if (r.new_values.username !== undefined) account.username = r.new_values.username
+        }
+      }
+    }
+
+    return result
+  }
+
+  // ============================================================
+  // Session Management Methods
+  // ============================================================
+
+  async function getSessions(accountId: number): Promise<SessionsResult> {
+    return await window.api.get(`/api/accounts/${accountId}/sessions`) as SessionsResult
+  }
+
+  async function terminateOtherSessions(accountId: number): Promise<TerminateResult> {
+    return await window.api.post(`/api/accounts/${accountId}/sessions/terminate`, {}) as TerminateResult
+  }
+
+  async function bulkTerminateSessions(accountIds: number[]): Promise<BulkTerminateResult> {
+    return await window.api.post('/api/accounts/sessions/bulk-terminate', {
+      account_ids: accountIds,
+      max_concurrent: 2,
+    }) as BulkTerminateResult
+  }
+
+  // ============================================================
   // Account Authorization Methods
   // ============================================================
 
@@ -682,6 +750,14 @@ export const useAccountStore = defineStore('accounts', () => {
     change2FA,
     remove2FA,
     bulkSet2FA,
+    // Profile
+    getCurrentProfile,
+    updateProfile,
+    bulkUpdateProfile,
+    // Sessions
+    getSessions,
+    terminateOtherSessions,
+    bulkTerminateSessions,
     // Auth
     startAuth,
     verifyAuthCode,
