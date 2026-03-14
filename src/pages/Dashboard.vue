@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import { useAccountStore } from '@/stores/useAccountStore'
@@ -38,14 +38,36 @@ async function loadStats() {
   ])
 }
 
+function startPolling() {
+  if (!refreshInterval) {
+    refreshInterval = setInterval(loadStats, 30000)
+  }
+}
+
+function stopPolling() {
+  if (refreshInterval) {
+    clearInterval(refreshInterval)
+    refreshInterval = null
+  }
+}
+
 onMounted(async () => {
   await loadStats()
   loaded.value = true
-  refreshInterval = setInterval(loadStats, 30000)
+  startPolling()
+})
+
+onActivated(() => {
+  loadStats()
+  startPolling()
+})
+
+onDeactivated(() => {
+  stopPolling()
 })
 
 onUnmounted(() => {
-  if (refreshInterval) clearInterval(refreshInterval)
+  stopPolling()
 })
 </script>
 
@@ -90,7 +112,7 @@ onUnmounted(() => {
         <div class="stat-card">
           <div class="stat-top">
             <div class="stat-icon stat-icon-pink">
-              <i class="pi pi-bolt"></i>
+              <i class="pi pi-play"></i>
             </div>
             <div class="stat-badge" v-if="stats.tasks.running > 0">
               <span class="stat-badge-dot stat-badge-dot-green"></span>
@@ -105,7 +127,7 @@ onUnmounted(() => {
       <!-- Quick Actions -->
       <div class="section">
         <div class="section-label">
-          <i class="pi pi-bolt"></i>
+          <i class="pi pi-arrow-right"></i>
           <span>{{ t('dashboard.quickActions') }}</span>
         </div>
         <div class="actions-grid">

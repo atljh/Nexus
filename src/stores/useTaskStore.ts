@@ -56,7 +56,15 @@ export const useTaskStore = defineStore('task', () => {
   )
 
   // Actions
-  async function fetchTasks(taskType?: string, status?: TaskStatus) {
+  let _tasksFetchedAt = 0
+  let _tasksFetchedKey = ''
+  const CACHE_TTL = 5000
+
+  async function fetchTasks(taskType?: string, status?: TaskStatus, force = false) {
+    const cacheKey = `${taskType || ''}_${status || ''}`
+    if (!force && tasks.value.length > 0 && cacheKey === _tasksFetchedKey && Date.now() - _tasksFetchedAt < CACHE_TTL) {
+      return
+    }
     loading.value = true
     error.value = null
     currentTaskType.value = taskType || null
@@ -69,6 +77,8 @@ export const useTaskStore = defineStore('task', () => {
 
       const response = await window.api.get(endpoint) as TasksResponse
       tasks.value = Array.isArray(response) ? response : (response.data || [])
+      _tasksFetchedAt = Date.now()
+      _tasksFetchedKey = cacheKey
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to fetch tasks'
       console.error('Failed to fetch tasks:', e)
@@ -207,10 +217,16 @@ export const useTaskStore = defineStore('task', () => {
   // Comment Templates
   const templates = ref<CommentTemplate[]>([])
 
-  async function fetchTemplates() {
+  let _templatesFetchedAt = 0
+
+  async function fetchTemplates(force = false) {
+    if (!force && templates.value.length > 0 && Date.now() - _templatesFetchedAt < CACHE_TTL) {
+      return
+    }
     try {
       const response = await window.api.get('/api/tasks/templates') as CommentTemplate[]
       templates.value = Array.isArray(response) ? response : []
+      _templatesFetchedAt = Date.now()
     } catch (e) {
       console.error('Failed to fetch templates:', e)
     }

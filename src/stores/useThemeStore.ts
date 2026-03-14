@@ -3,6 +3,14 @@ import { ref } from 'vue'
 
 export type Theme = 'light' | 'dark' | 'system'
 
+let lightThemeLoaded = false
+
+async function loadLightThemeCSS() {
+  if (lightThemeLoaded) return
+  await import('@/assets/light-theme.css')
+  lightThemeLoaded = true
+}
+
 export const useThemeStore = defineStore('theme', () => {
   const theme = ref<Theme>('dark')
   const resolvedTheme = ref<'light' | 'dark'>('dark')
@@ -36,6 +44,8 @@ export const useThemeStore = defineStore('theme', () => {
       body?.classList.add('dark')
       body?.classList.remove('light')
     } else {
+      // Lazy-load light theme CSS on first use
+      loadLightThemeCSS()
       html.classList.add('light')
       html.classList.remove('dark')
       body?.classList.add('light')

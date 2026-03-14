@@ -55,20 +55,64 @@ export const useProxyStore = defineStore('proxies', () => {
   })
 
   // Actions
-  async function fetchProxies() {
-    loading.value = true
-    try {
-      const response = await window.api.get('/api/proxy') as ProxiesResponse
-      proxies.value = response.data || []
-    } finally {
-      loading.value = false
+  let _lastFetchedAt = 0
+  let _pendingFetch: Promise<void> | null = null
+  const CACHE_TTL = 5000
+
+  async function fetchProxies(force = false) {
+    if (!force && proxies.value.length > 0 && Date.now() - _lastFetchedAt < CACHE_TTL) {
+      return
     }
+    if (_pendingFetch) return _pendingFetch
+    loading.value = true
+    _pendingFetch = (async () => {
+      try {
+        const response = await window.api.get('/api/proxy') as ProxiesResponse
+        proxies.value = response.data || []
+        _lastFetchedAt = Date.now()
+      } finally {
+        loading.value = false
+        _pendingFetch = null
+      }
+    })()
+    return _pendingFetch
   }
 
   async function createProxy(data: ProxyCreate): Promise<Proxy> {
     const result = await window.api.post('/api/proxy', data) as Proxy
-    await fetchProxies()
+    await fetchProxies(true)
     return result
+  }
+
+  async function bulkCreateProxies(proxyList: ProxyCreate[]): Promise<{ created: number; skipped: number }> {
+    const lines = proxyList.map(p => {
+      let line = `${p.host}:${p.port}`
+      if (p.username) line += `:${p.username}`
+      if (p.password) line += `:${p.password}`
+      return line
+    })
+    // Group by type and send bulk requests
+    const byType = new Map<string, string[]>()
+    proxyList.forEach((p, i) => {
+      const type = p.type || 'socks5'
+      if (!byType.has(type)) byType.set(type, [])
+      byType.get(type)!.push(lines[i])
+    })
+
+    let totalCreated = 0
+    let totalSkipped = 0
+
+    for (const [type, typeLines] of byType) {
+      const result = await window.api.post('/api/proxy/bulk', {
+        proxies: typeLines,
+        type
+      }) as { created: number; skipped: number }
+      totalCreated += result.created
+      totalSkipped += result.skipped
+    }
+
+    await fetchProxies(true)
+    return { created: totalCreated, skipped: totalSkipped }
   }
 
   async function updateProxy(id: number, data: Partial<ProxyCreate>): Promise<Proxy> {
@@ -133,31 +177,16 @@ export const useProxyStore = defineStore('proxies', () => {
   }
 
   async function importProxies(text: string, type: Proxy['type'] = 'socks5') {
-    const lines = text.split('\n').filter(l => l.trim())
-    const results = { success: 0, failed: 0 }
+    const lines = text.split('\n').filter(l => l.trim()).map(l => l.trim())
+    if (lines.length === 0) return { success: 0, failed: 0 }
 
-    for (const line of lines) {
-      try {
-        const parts = line.trim().split(':')
-        if (parts.length >= 2) {
-          const data: ProxyCreate = {
-            type,
-            host: parts[0],
-            port: parseInt(parts[1]),
-            username: parts[2] || undefined,
-            password: parts[3] || undefined
-          }
+    const result = await window.api.post('/api/proxy/bulk', {
+      proxies: lines,
+      type
+    }) as { created: number; skipped: number }
 
-          await window.api.post('/api/proxy', data)
-          results.success++
-        }
-      } catch {
-        results.failed++
-      }
-    }
-
-    await fetchProxies()
-    return results
+    await fetchProxies(true)
+    return { success: result.created, failed: result.skipped }
   }
 
   function getById(id: number): Proxy | undefined {
@@ -217,6 +246,7 @@ export const useProxyStore = defineStore('proxies', () => {
     // Actions
     fetchProxies,
     createProxy,
+    bulkCreateProxies,
     updateProxy,
     deleteProxy,
     checkProxy,

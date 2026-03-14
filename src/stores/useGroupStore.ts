@@ -27,11 +27,18 @@ export const useGroupStore = defineStore('groups', () => {
   )
 
   // Actions
-  async function fetchGroups() {
+  let _lastFetchedAt = 0
+  const CACHE_TTL = 5000
+
+  async function fetchGroups(force = false) {
+    if (!force && groups.value.length > 0 && Date.now() - _lastFetchedAt < CACHE_TTL) {
+      return
+    }
     loading.value = true
     try {
       const response = await window.api.get('/api/groups') as GroupsResponse
       groups.value = response.data || []
+      _lastFetchedAt = Date.now()
     } finally {
       loading.value = false
     }
@@ -39,7 +46,7 @@ export const useGroupStore = defineStore('groups', () => {
 
   async function createGroup(data: GroupCreate): Promise<AccountGroup> {
     const result = await window.api.post('/api/groups', data) as AccountGroup
-    await fetchGroups()
+    await fetchGroups(true)
     return result
   }
 

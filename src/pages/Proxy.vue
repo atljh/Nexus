@@ -432,23 +432,20 @@ async function addSelectedProxies() {
   }
 
   try {
-    let addedCount = 0
+    const proxyList = selected.map(proxy => ({
+      type: proxy.type as Proxy['type'],
+      host: proxy.host,
+      port: proxy.port,
+      username: proxy.username || undefined,
+      password: proxy.password || undefined,
+    }))
 
-    for (const proxy of selected) {
-      await proxyStore.createProxy({
-        type: proxy.type as Proxy['type'],
-        host: proxy.host,
-        port: proxy.port,
-        username: proxy.username || undefined,
-        password: proxy.password || undefined,
-      })
-      addedCount++
-    }
+    const result = await proxyStore.bulkCreateProxies(proxyList)
 
     toast.add({
       severity: 'success',
       summary: t('common.success'),
-      detail: t('proxy.messages.addedCount', { count: addedCount }),
+      detail: t('proxy.messages.addedCount', { count: result.created }),
       life: 3000
     })
 

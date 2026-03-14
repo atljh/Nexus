@@ -38,7 +38,7 @@ function toggleTheme() {
       <div class="sidebar-header">
         <div class="logo">
           <div class="logo-icon">
-            <i class="pi pi-bolt"></i>
+            <i class="pi pi-send"></i>
           </div>
           <span class="logo-text">Nexus</span>
         </div>

@@ -159,7 +159,7 @@ function loadForm() {
   } catch { /* ignore */ }
 }
 
-watch([channelInput, inviteLinkInput, parsedFromLink, detectedPostId, selectedTemplateIds, customTemplates, rotationMode, commentsPerAccount, totalActions, minDelay, maxDelay, maxConcurrent, selectedAccountIds], saveForm, { deep: true })
+watch([channelInput, inviteLinkInput, parsedFromLink, detectedPostId, selectedTemplateIds, customTemplates, rotationMode, commentsPerAccount, totalActions, minDelay, maxDelay, maxConcurrent, selectedAccountIds], saveForm)
 
 // Template management
 const showTemplateDialog = ref(false)

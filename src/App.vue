@@ -43,7 +43,7 @@ async function checkBackend() {
       <div class="loading-content">
         <div class="loading-logo">
           <div class="loading-icon">
-            <i class="pi pi-bolt"></i>
+            <i class="pi pi-send"></i>
           </div>
           <span class="loading-brand">Nexus</span>
         </div>
@@ -68,7 +68,14 @@ async function checkBackend() {
     </div>
 
     <!-- Main app -->
-    <router-view v-else />
+    <router-view v-else v-slot="{ Component, route }">
+      <transition name="page" mode="out-in">
+        <keep-alive v-if="route.name !== 'taskResults'" :max="6">
+          <component :is="Component" :key="route.name" />
+        </keep-alive>
+        <component v-else :is="Component" :key="route.path" />
+      </transition>
+    </router-view>
 
     <!-- Version badge -->
     <div class="version-badge">
@@ -183,5 +190,22 @@ async function checkBackend() {
 
 .light .version-badge {
   color: #94a3b8;
+}
+
+/* Page transitions */
+.page-enter-active {
+  transition: opacity 0.15s ease;
+}
+
+.page-leave-active {
+  transition: opacity 0.1s ease;
+}
+
+.page-enter-from {
+  opacity: 0;
+}
+
+.page-leave-to {
+  opacity: 0;
 }
 </style>

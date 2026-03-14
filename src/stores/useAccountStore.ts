@@ -145,16 +145,29 @@ export const useAccountStore = defineStore('accounts', () => {
   })
 
   // Actions
-  async function fetchAccounts() {
-    loading.value = true
-    try {
-      const response = await window.api.get('/api/accounts') as AccountsResponse
-      accounts.value = response.data || []
-    } catch (e) {
-      console.error('Failed to fetch accounts:', e)
-    } finally {
-      loading.value = false
+  let _lastFetchedAt = 0
+  let _pendingFetch: Promise<void> | null = null
+  const CACHE_TTL = 5000 // 5 seconds
+
+  async function fetchAccounts(force = false) {
+    if (!force && accounts.value.length > 0 && Date.now() - _lastFetchedAt < CACHE_TTL) {
+      return
     }
+    if (_pendingFetch) return _pendingFetch
+    loading.value = true
+    _pendingFetch = (async () => {
+      try {
+        const response = await window.api.get('/api/accounts') as AccountsResponse
+        accounts.value = response.data || []
+        _lastFetchedAt = Date.now()
+      } catch (e) {
+        console.error('Failed to fetch accounts:', e)
+      } finally {
+        loading.value = false
+        _pendingFetch = null
+      }
+    })()
+    return _pendingFetch
   }
 
   async function checkAccount(id: number): Promise<CheckResult> {
@@ -227,7 +240,7 @@ export const useAccountStore = defineStore('accounts', () => {
       value
     })
 
-    await fetchAccounts()
+    await fetchAccounts(true)
     if (action === 'delete') {
       selectedIds.value = []
     }
@@ -241,7 +254,7 @@ export const useAccountStore = defineStore('accounts', () => {
     }
 
     const result = await window.api.upload('/api/accounts/import/tdata', files, fields) as ImportResponse
-    await fetchAccounts()
+    await fetchAccounts(true)
     return result
   }
 
@@ -253,7 +266,7 @@ export const useAccountStore = defineStore('accounts', () => {
     }
 
     const result = await window.api.upload('/api/accounts/import/json', files, fields) as ImportResponse
-    await fetchAccounts()
+    await fetchAccounts(true)
     return result
   }
 
@@ -262,7 +275,7 @@ export const useAccountStore = defineStore('accounts', () => {
       session_string: sessionString,
       proxy_id: proxyId
     }) as ImportResponse
-    await fetchAccounts()
+    await fetchAccounts(true)
     return result
   }
 
@@ -329,7 +342,7 @@ export const useAccountStore = defineStore('accounts', () => {
 
   async function assignProxies(request: AssignProxiesRequest): Promise<{ success: boolean; updated: number }> {
     const result = await window.api.post('/api/accounts/assign-proxies', request) as { success: boolean; updated: number }
-    await fetchAccounts()
+    await fetchAccounts(true)
     return result
   }
 
@@ -354,7 +367,7 @@ export const useAccountStore = defineStore('accounts', () => {
     }
 
     const result = await window.api.upload('/api/accounts/import/session-json', files, fields) as SessionJsonImportResult
-    await fetchAccounts()
+    await fetchAccounts(true)
     return result
   }
 
@@ -449,7 +462,7 @@ export const useAccountStore = defineStore('accounts', () => {
     accounts: ParsedAccount[]
   ): Promise<SaveResult> {
     const result = await window.api.post('/api/accounts/import/save', { accounts }) as SaveResult
-    await fetchAccounts()
+    await fetchAccounts(true)
     return result
   }
 
@@ -643,7 +656,7 @@ export const useAccountStore = defineStore('accounts', () => {
 
       if (result.status === 'success') {
         authStep.value = 'success'
-        await fetchAccounts() // Refresh account list
+        await fetchAccounts(true) // Refresh account list
       }
 
       return result

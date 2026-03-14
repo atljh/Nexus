@@ -133,7 +133,7 @@ function loadForm() {
   } catch { /* ignore */ }
 }
 
-watch([channel, postId, inviteLink, selectedReactions, emojiMode, minDelay, maxDelay, maxConcurrent, selectedAccountIds], saveForm, { deep: true })
+watch([channel, postId, inviteLink, selectedReactions, emojiMode, minDelay, maxDelay, maxConcurrent, selectedAccountIds], saveForm)
 
 // Emoji mode options
 const emojiModeOptions = computed(() => [

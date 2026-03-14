@@ -21,11 +21,18 @@ export const useTagStore = defineStore('tags', () => {
   )
 
   // Actions
-  async function fetchTags() {
+  let _lastFetchedAt = 0
+  const CACHE_TTL = 5000
+
+  async function fetchTags(force = false) {
+    if (!force && tags.value.length > 0 && Date.now() - _lastFetchedAt < CACHE_TTL) {
+      return
+    }
     loading.value = true
     try {
       const response = await window.api.get('/api/tags') as TagsResponse
       tags.value = response.data || []
+      _lastFetchedAt = Date.now()
     } finally {
       loading.value = false
     }
@@ -33,7 +40,7 @@ export const useTagStore = defineStore('tags', () => {
 
   async function createTag(data: TagCreate): Promise<AccountTag> {
     const result = await window.api.post('/api/tags', data) as AccountTag
-    await fetchTags()
+    await fetchTags(true)
     return result
   }
 

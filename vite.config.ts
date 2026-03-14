@@ -61,6 +61,14 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'primevue': ['primevue/config', '@primevue/themes/aura', 'primevue/toastservice', 'primevue/confirmationservice'],
+          'vendor': ['vue', 'vue-router', 'pinia', 'vue-i18n']
+        }
+      }
+    }
   }
 })

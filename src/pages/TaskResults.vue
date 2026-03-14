@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
@@ -425,6 +425,16 @@ onMounted(async () => {
   }
 })
 
+onActivated(() => {
+  if (task.value?.status === 'running') {
+    startPolling()
+  }
+})
+
+onDeactivated(() => {
+  stopPolling()
+})
+
 onUnmounted(() => {
   stopPolling()
 })
@@ -586,7 +596,7 @@ watch(() => task.value?.status, async (newStatus, oldStatus) => {
             </div>
           </div>
           <div class="stat-card">
-            <i class="pi pi-bolt stat-icon primary"></i>
+            <i class="pi pi-gauge stat-icon primary"></i>
             <div class="stat-content">
               <span class="stat-value">{{ stats?.avgTimePerAction || 0 }}{{ t('taskResults.time.seconds') }}</span>
               <span class="stat-label">{{ t('taskResults.stats.avgSpeed') }}</span>

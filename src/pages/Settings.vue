@@ -20,9 +20,9 @@ const languages = [
   { label: 'Українська', value: 'uk', flag: '🇺🇦' }
 ]
 
-function changeLanguage(locale: 'en' | 'uk') {
+async function changeLanguage(locale: 'en' | 'uk') {
   currentLocale.value = locale
-  setLocale(locale)
+  await setLocale(locale)
 }
 
 async function clearAllData() {
@@ -124,7 +124,7 @@ async function clearAllData() {
       <div class="about-section">
         <div class="about-logo">
           <div class="logo-icon">
-            <i class="pi pi-bolt"></i>
+            <i class="pi pi-send"></i>
           </div>
           <span class="logo-text">Nexus</span>
         </div>
