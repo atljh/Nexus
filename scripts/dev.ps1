@@ -45,7 +45,15 @@ $ReqFile = Join-Path $BackendDir "requirements.txt"
 if ((-not (Test-Path $DepsMarker)) -or ((Get-Item $ReqFile).LastWriteTime -gt (Get-Item $DepsMarker).LastWriteTime)) {
     Write-Host "  Installing Python dependencies..."
     & $VenvPython -m pip install -q --upgrade pip
-    & $VenvPython -m pip install -q -r $ReqFile
+    & $VenvPython -m pip install -q -r $ReqFile 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Retrying with zip fallback for git deps..." -ForegroundColor Yellow
+        $TempReq = Join-Path $env:TEMP "nexus_req_temp.txt"
+        Get-Content $ReqFile | Where-Object { $_ -notmatch "git\+" } | Set-Content $TempReq
+        & $VenvPython -m pip install -q -r $TempReq
+        Remove-Item $TempReq -ErrorAction SilentlyContinue
+        & $VenvPython -m pip install -q "https://github.com/ntqbit/tdesktop-decrypter/archive/refs/heads/master.zip" 2>$null
+    }
     New-Item -ItemType File -Force -Path $DepsMarker | Out-Null
     Write-Host "  Dependencies installed" -ForegroundColor Green
 } else {
