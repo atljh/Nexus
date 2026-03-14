@@ -317,6 +317,8 @@ export default {
       proxyPoolEmpty: 'Пул проксі порожній',
       noAccountsToDistribute: 'Немає акаунтів для розподілу',
       distributeFromPool: 'Розподілити з пулу',
+      distributeExisting: 'Розподілити проксі',
+      distributeExistingHint: 'Розподілити {count} наявних проксі рівномірно між акаунтами',
       clearPool: 'Очистити пул',
       showLogs: 'Показати логи ({count})',
       hideLogs: 'Сховати логи',

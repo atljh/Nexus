@@ -317,6 +317,8 @@ export default {
       proxyPoolEmpty: 'Proxy pool is empty',
       noAccountsToDistribute: 'No accounts to distribute',
       distributeFromPool: 'Distribute from pool',
+      distributeExisting: 'Distribute proxies',
+      distributeExistingHint: 'Distribute {count} existing proxies evenly across accounts',
       clearPool: 'Clear pool',
       showLogs: 'Show logs ({count})',
       hideLogs: 'Hide logs',

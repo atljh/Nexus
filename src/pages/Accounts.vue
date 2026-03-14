@@ -665,6 +665,24 @@ function assignBulkProxy() {
   })
 }
 
+function distributeExistingProxies() {
+  const proxies = proxyStore.proxies
+  if (proxies.length === 0 || parsedAccounts.value.length === 0) return
+
+  const proxyIds = proxies.map(p => p.id)
+  parsedAccounts.value.forEach((account, index) => {
+    account.proxy_id = proxyIds[index % proxyIds.length]
+  })
+
+  addImportLog('success', `Розподілено ${proxyIds.length} проксі на ${parsedAccounts.value.length} акаунтів`)
+  toast.add({
+    severity: 'success',
+    summary: t('common.success'),
+    detail: t('accounts.messages.proxiesDistributed', { count: parsedAccounts.value.length }),
+    life: 3000
+  })
+}
+
 async function distributeFromPool() {
   const lines = proxyPoolText.value.trim().split('\n').filter(line => line.trim())
   if (lines.length === 0) {
@@ -2236,6 +2254,15 @@ const restrictedAccounts = computed(() => accountStats.value.restricted)
               </div>
             </template>
           </Select>
+          <Button
+            :label="t('accounts.importFlow.distributeExisting')"
+            icon="pi pi-sync"
+            severity="info"
+            :outlined="true"
+            :disabled="parsedAccounts.length === 0 || proxyStore.proxies.length === 0"
+            @click="distributeExistingProxies"
+            v-tooltip.top="t('accounts.importFlow.distributeExistingHint', { count: proxyStore.proxies.length })"
+          />
           <Button
             :label="t('accounts.importFlow.proxyPool') + (proxyPoolCount > 0 ? ` (${proxyPoolCount})` : ` (${t('common.optional')})`)"
             :icon="showProxyPool ? 'pi pi-chevron-up' : 'pi pi-list'"
