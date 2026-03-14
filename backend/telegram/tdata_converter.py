@@ -209,20 +209,43 @@ class TDataConverter:
     def _find_tdesktop_decrypter(self) -> Path:
         """Find tdesktop-decrypter executable."""
         import sys
+        import platform
+
+        is_windows = platform.system() == "Windows"
+        exe_name = "tdesktop-decrypter.exe" if is_windows else "tdesktop-decrypter"
+
+        logger.info(f"Looking for {exe_name}, sys.executable={sys.executable}")
 
         # Try in same venv as current Python
         python_bin = Path(sys.executable).parent
-        tdesktop_cmd = python_bin / "tdesktop-decrypter"
-
+        tdesktop_cmd = python_bin / exe_name
+        logger.info(f"Checking: {tdesktop_cmd} -> exists={tdesktop_cmd.exists()}")
         if tdesktop_cmd.exists():
             return tdesktop_cmd
 
-        # Fallback: use PATH
+        # On Windows also check Scripts dir (venv layout differs)
+        if is_windows:
+            scripts_dir = python_bin  # sys.executable is already in Scripts/
+            # Also try parent/Scripts in case sys.executable is elsewhere
+            alt_scripts = Path(sys.executable).parent.parent / "Scripts" / exe_name
+            if alt_scripts.exists():
+                return alt_scripts
+
+        # Try relative to this file (PyInstaller bundle)
+        bundle_cmd = Path(__file__).parent.parent / exe_name
+        if bundle_cmd.exists():
+            return bundle_cmd
+
+        # Fallback: use PATH (shutil.which handles .exe on Windows)
         system_cmd = shutil.which("tdesktop-decrypter")
         if system_cmd:
             return Path(system_cmd)
 
-        raise FileNotFoundError("tdesktop-decrypter not found")
+        raise FileNotFoundError(
+            f"tdesktop-decrypter not found. "
+            f"Searched: {python_bin / exe_name}, PATH. "
+            f"sys.executable={sys.executable}"
+        )
 
     async def _create_telethon_session(
         self, account_data: Dict, output_path: Path
