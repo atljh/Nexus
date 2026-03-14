@@ -93,28 +93,30 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# Install requirements (handle git dependency fallback)
+# Install requirements: first non-git deps, then tdesktop-decrypter separately
 Write-Host "  Installing Python dependencies..."
 
-# Try normal install first
-& $VenvPython -m pip install -r $ReqFile -q 2>$null
+# Filter out git-based deps and install the rest
+$TempReq = Join-Path $env:TEMP "nexus_requirements_temp.txt"
+Get-Content $ReqFile | Where-Object { $_ -notmatch "git\+" -and $_.Trim() -ne "" } | Set-Content $TempReq
+$ErrorActionPreference = "Continue"
+& $VenvPython -m pip install -r $TempReq -q
+$ErrorActionPreference = "Stop"
+Remove-Item $TempReq -ErrorAction SilentlyContinue
+
+# Install tdesktop-decrypter (try git first, fallback to zip)
+Write-Host "  Installing tdesktop-decrypter..."
+$ErrorActionPreference = "Continue"
+& $VenvPython -m pip install "telegram-desktop-decrypter@git+https://github.com/ntqbit/tdesktop-decrypter.git" -q 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "  ! Some dependencies failed, trying with fallback..." -ForegroundColor Yellow
-
-    # Install everything except git-based deps
-    $TempReq = Join-Path $env:TEMP "nexus_requirements_temp.txt"
-    Get-Content $ReqFile | Where-Object { $_ -notmatch "git\+" } | Set-Content $TempReq
-    & $VenvPython -m pip install -r $TempReq -q
-    Remove-Item $TempReq -ErrorAction SilentlyContinue
-
-    # Install tdesktop-decrypter via zip (no git required)
-    Write-Host "  Installing tdesktop-decrypter (zip fallback)..."
-    & $VenvPython -m pip install "https://github.com/ntqbit/tdesktop-decrypter/archive/refs/heads/master.zip" -q
+    Write-Host "  Git install failed, trying zip..." -ForegroundColor Yellow
+    & $VenvPython -m pip install "https://github.com/ntqbit/tdesktop-decrypter/archive/refs/heads/master.zip" -q 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  X Failed to install tdesktop-decrypter" -ForegroundColor Red
         Write-Host "    Try manually: .venv\Scripts\pip install https://github.com/ntqbit/tdesktop-decrypter/archive/refs/heads/master.zip" -ForegroundColor Yellow
     }
 }
+$ErrorActionPreference = "Stop"
 
 # Verify tdesktop-decrypter
 $TdDecrypter = Join-Path $VenvDir "Scripts\tdesktop-decrypter.exe"
