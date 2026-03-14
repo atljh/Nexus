@@ -262,6 +262,11 @@ const bulkMenuItems = computed(() => [
     ]
   },
   {
+    label: t('accounts.bulk.distributeProxies'),
+    icon: 'pi pi-sync',
+    command: () => distributeProxiesEvenly()
+  },
+  {
     label: t('accounts.bulk.setGroup'),
     icon: 'pi pi-folder',
     items: [
@@ -1237,6 +1242,39 @@ function confirmDelete(account: Account) {
       }
     }
   })
+}
+
+async function distributeProxiesEvenly() {
+  const accountIds = selectedIds.value.length > 0
+    ? selectedIds.value
+    : accountStore.filteredAccounts.map(a => a.id)
+
+  if (accountIds.length === 0) {
+    toast.add({ severity: 'warn', summary: t('common.warning'), detail: t('accounts.messages.noAccounts'), life: 3000 })
+    return
+  }
+
+  const proxyIds = proxyStore.proxies.map(p => p.id)
+  if (proxyIds.length === 0) {
+    toast.add({ severity: 'warn', summary: t('common.warning'), detail: t('accounts.messages.noProxies'), life: 3000 })
+    return
+  }
+
+  try {
+    const result = await accountStore.assignProxies({
+      account_ids: accountIds,
+      proxy_ids: proxyIds,
+      mode: 'sequential'
+    })
+    toast.add({
+      severity: 'success',
+      summary: t('common.success'),
+      detail: t('accounts.messages.proxiesDistributed', { count: result.updated }),
+      life: 3000
+    })
+  } catch (error: any) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: error.message, life: 3000 })
+  }
 }
 
 async function handleBulkAction(action: BulkAction, value?: number) {
