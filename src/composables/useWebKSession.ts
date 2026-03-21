@@ -5,6 +5,7 @@
 import { ref, computed, onUnmounted, type Ref } from 'vue'
 import type {
   Account,
+  DeviceFingerprint,
   WebKSessionData,
   WebKSessionResponse,
   WebViewState,
@@ -20,6 +21,7 @@ export function useWebKSession(accountRef: Ref<Account | null>) {
   })
 
   const sessionData = ref<WebKSessionData | null>(null)
+  const sessionDeviceFingerprint = ref<DeviceFingerprint | null>(null)
   const healthStatus = ref<WebViewHealthStatus | null>(null)
   const preloadPath = ref<string | null>(null)
 
@@ -70,6 +72,7 @@ export function useWebKSession(accountRef: Ref<Account | null>) {
 
       if (response.success) {
         sessionData.value = response.session_data
+        sessionDeviceFingerprint.value = response.device_fingerprint
         return response
       } else {
         throw new Error('Failed to get session data')
@@ -118,8 +121,9 @@ export function useWebKSession(accountRef: Ref<Account | null>) {
         password: proxy.password ?? undefined,
       }
 
-      // Get device fingerprint from account metadata
-      const deviceFingerprint: WebViewDeviceFingerprint | undefined = acc.metadata?.device_fingerprint as
+      // Use the backend-provided device fingerprint for WebK.
+      // Account metadata may not contain the normalized fingerprint at all.
+      const deviceFingerprint = (sessionDeviceFingerprint.value ?? undefined) as
         | WebViewDeviceFingerprint
         | undefined
 
@@ -226,6 +230,7 @@ export function useWebKSession(accountRef: Ref<Account | null>) {
     }
     window.api.webview.removeHealthListener()
     sessionData.value = null
+    sessionDeviceFingerprint.value = null
     healthStatus.value = null
     state.value = {
       loading: false,

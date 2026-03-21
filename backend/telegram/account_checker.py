@@ -15,10 +15,13 @@ logger = logging.getLogger(__name__)
 from .telegram_client import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import (
+    AuthKeyDuplicatedError,
     AuthKeyUnregisteredError,
+    AuthKeyPermEmptyError,
     UserDeactivatedError,
     UserDeactivatedBanError,
     SessionRevokedError,
+    SessionExpiredError as TelethonSessionExpired,
     PhoneNumberBannedError,
     FloodWaitError,
     PhoneNumberInvalidError,
@@ -101,6 +104,18 @@ class AccountChecker:
             except json.JSONDecodeError:
                 return {}
         return {}
+
+    @staticmethod
+    def _apply_session_error(
+        result: AccountCheckResult,
+        error_code: str,
+        error: str,
+    ) -> AccountCheckResult:
+        """Normalize revoked/duplicated/unregistered sessions to a stable status."""
+        result.status = AccountStatus.SESSION_EXPIRED
+        result.error_code = error_code
+        result.error = error
+        return result
 
     async def check_single(
         self,
@@ -224,15 +239,26 @@ class AccountChecker:
 
             return result
 
-        except AuthKeyUnregisteredError as e:
-            result.status = AccountStatus.SESSION_EXPIRED
-            result.error_code = "auth_key_unregistered"
-            result.error = f"Session expired: {type(e).__name__}"
+        except AuthKeyDuplicatedError as e:
+            self._apply_session_error(
+                result,
+                "auth_key_duplicated",
+                f"Session duplicated across IPs: {type(e).__name__}",
+            )
 
-        except SessionRevokedError as e:
-            result.status = AccountStatus.SESSION_EXPIRED
-            result.error_code = "session_revoked"
-            result.error = f"Session expired: {type(e).__name__}"
+        except (AuthKeyUnregisteredError, AuthKeyPermEmptyError) as e:
+            self._apply_session_error(
+                result,
+                "auth_key_unregistered",
+                f"Session expired: {type(e).__name__}",
+            )
+
+        except (SessionRevokedError, TelethonSessionExpired) as e:
+            self._apply_session_error(
+                result,
+                "session_revoked" if isinstance(e, SessionRevokedError) else "session_expired",
+                f"Session expired: {type(e).__name__}",
+            )
 
         except UserDeactivatedError:
             result.status = AccountStatus.DEACTIVATED
@@ -272,6 +298,49 @@ class AccountChecker:
                 result.status = AccountStatus.FROZEN
                 result.error_code = "frozen"
                 result.error = f"Account frozen: {str(e)}"
+            elif "not authorized" in error_str or "not authorised" in error_str:
+                result.status = AccountStatus.NEEDS_REAUTH
+                result.error_code = "not_authorized"
+                result.error = f"Session requires re-authorization: {str(e)}"
+            elif (
+                ("auth" in error_str or "authorization" in error_str)
+                and "key" in error_str
+                and (
+                    "duplicat" in error_str
+                    or ("different" in error_str and "ip" in error_str)
+                )
+            ):
+                self._apply_session_error(
+                    result,
+                    "auth_key_duplicated",
+                    f"Session duplicated across IPs: {str(e)}",
+                )
+            elif (
+                ("auth" in error_str or "authorization" in error_str)
+                and "key" in error_str
+                and (
+                    "unregistered" in error_str
+                    or "not registered" in error_str
+                    or "perm empty" in error_str
+                )
+            ):
+                self._apply_session_error(
+                    result,
+                    "auth_key_unregistered",
+                    f"Session expired: {str(e)}",
+                )
+            elif "session" in error_str and ("revok" in error_str or "terminat" in error_str):
+                self._apply_session_error(
+                    result,
+                    "session_revoked",
+                    f"Session expired: {str(e)}",
+                )
+            elif "session" in error_str and "expir" in error_str:
+                self._apply_session_error(
+                    result,
+                    "session_expired",
+                    f"Session expired: {str(e)}",
+                )
             else:
                 result.status = AccountStatus.INVALID
                 result.error_code = "unknown_error"
