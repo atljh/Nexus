@@ -48,7 +48,7 @@ class AuthSession:
     phone_code_hash: str
     proxy: Optional[Dict] = None
     needs_password: bool = False
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc) + timedelta(minutes=10))
 
 
