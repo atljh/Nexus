@@ -8,6 +8,7 @@ from telegram.device_generator import (
     generate_device_fingerprint,
     detect_platform_from_api_id,
     generate_fingerprint_for_api,
+    get_tdesktop_fingerprint,
     OFFICIAL_APIS,
     ANDROID_DEVICES,
     IOS_DEVICES,
@@ -84,6 +85,23 @@ class TestGenerateDeviceFingerprint:
             fp = generate_device_fingerprint("id", platform=platform)
             base_version = APP_VERSIONS[platform]
             assert base_version in fp["app_version"]
+
+
+class TestGetTDesktopFingerprint:
+    """Tests for get_tdesktop_fingerprint()."""
+
+    def test_returns_stable_windows_tdesktop_defaults(self):
+        fp = get_tdesktop_fingerprint()
+        assert fp["api_id"] == OFFICIAL_APIS["desktop"]["api_id"]
+        assert fp["api_hash"] == OFFICIAL_APIS["desktop"]["api_hash"]
+        assert fp["device_model"] == "Desktop"
+        assert fp["system_version"] == "Windows 10"
+        assert fp["app_version"] == APP_VERSIONS["desktop"] + " x64"
+
+    def test_respects_lang_codes(self):
+        fp = get_tdesktop_fingerprint(lang_code="uk", system_lang_code="uk-UA")
+        assert fp["lang_code"] == "uk"
+        assert fp["system_lang_code"] == "uk-UA"
 
 
 class TestDetectPlatformFromApiId:

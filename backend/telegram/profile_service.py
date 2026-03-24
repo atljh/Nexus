@@ -13,10 +13,20 @@ from .telegram_client import TelegramClient
 from .session_manager import SessionManager
 from .device_generator import OFFICIAL_APIS
 
-from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest
+from telethon.tl.functions.account import (
+    SetPrivacyRequest,
+    UpdateProfileRequest,
+    UpdateUsernameRequest,
+)
 from telethon.tl.functions.photos import UploadProfilePhotoRequest, DeletePhotosRequest
 from telethon.tl.functions.users import GetFullUserRequest
-from telethon.tl.types import InputUserSelf
+from telethon.tl.types import (
+    InputPrivacyKeyAddedByPhone,
+    InputPrivacyKeyPhoneNumber,
+    InputPrivacyValueAllowContacts,
+    InputPrivacyValueDisallowAll,
+    InputUserSelf,
+)
 from telethon.errors import (
     FirstNameInvalidError,
     AboutTooLongError,
@@ -36,6 +46,14 @@ class ProfileUpdateResult:
     updated_fields: List[str] = field(default_factory=list)
     errors: Dict[str, str] = field(default_factory=dict)
     new_values: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class PrivacyUpdateResult:
+    """Result of a privacy update operation."""
+    success: bool
+    updated_fields: List[str] = field(default_factory=list)
+    errors: Dict[str, str] = field(default_factory=dict)
 
 
 class ProfileService:
@@ -249,6 +267,77 @@ class ProfileService:
 
         except Exception as e:
             return {"error": str(e)}
+        finally:
+            if client:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+    async def hide_phone_number(
+        self,
+        session_string: str,
+        proxy: Optional[Dict] = None,
+        api_id: Optional[int] = None,
+        api_hash: Optional[str] = None,
+        device_fingerprint: Optional[Dict] = None,
+    ) -> PrivacyUpdateResult:
+        """
+        Hide phone number in Telegram privacy settings.
+
+        Also limits phone-based discovery to contacts to match the common
+        "number hidden" setup used in Telegram clients.
+        """
+        client = None
+        result = PrivacyUpdateResult(success=True)
+
+        try:
+            client = self._create_client(
+                session_string, proxy, api_id, api_hash, device_fingerprint
+            )
+            await client.connect()
+
+            if not await client.is_user_authorized():
+                return PrivacyUpdateResult(
+                    success=False,
+                    errors={"auth": "Session not authorized"},
+                )
+
+            operations = [
+                (
+                    "phone_number_visibility",
+                    SetPrivacyRequest(
+                        key=InputPrivacyKeyPhoneNumber(),
+                        rules=[InputPrivacyValueDisallowAll()],
+                    ),
+                ),
+                (
+                    "phone_discovery",
+                    SetPrivacyRequest(
+                        key=InputPrivacyKeyAddedByPhone(),
+                        rules=[InputPrivacyValueAllowContacts()],
+                    ),
+                ),
+            ]
+
+            for index, (field_name, request) in enumerate(operations):
+                if index > 0:
+                    await asyncio.sleep(random.uniform(0.3, 0.8))
+
+                try:
+                    await client(request)
+                    result.updated_fields.append(field_name)
+                except FloodWaitError as e:
+                    result.errors[field_name] = f"Rate limited, wait {e.seconds}s"
+                    result.success = False
+                except Exception as e:
+                    result.errors[field_name] = str(e)
+                    result.success = False
+
+            return result
+
+        except Exception as e:
+            return PrivacyUpdateResult(success=False, errors={"connection": str(e)})
         finally:
             if client:
                 try:

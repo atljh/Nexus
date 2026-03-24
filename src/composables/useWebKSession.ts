@@ -67,7 +67,7 @@ export function useWebKSession(accountRef: Ref<Account | null>) {
 
     try {
       const response = (await window.api.get(
-        `/api/accounts/${acc.id}/webk-session?fetch_real_salt=true`
+        `/api/accounts/${acc.id}/webk-session?fetch_real_salt=false`
       )) as WebKSessionResponse
 
       if (response.success) {
@@ -192,6 +192,7 @@ export function useWebKSession(accountRef: Ref<Account | null>) {
 
       if (response.success) {
         sessionData.value = response.session_data
+        sessionDeviceFingerprint.value = response.device_fingerprint
         return true
       }
       return false

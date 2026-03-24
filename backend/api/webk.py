@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.database import get_session
 from database.models import Account
 from services.session_to_webk import convert_account_to_webk
+from telegram.account_metadata import resolve_account_connection_params
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ router = APIRouter(tags=["webk"])
 @router.get("/{account_id}/webk-session")
 async def get_webk_session(
     account_id: int,
-    fetch_real_salt: bool = True,
+    fetch_real_salt: bool = False,
     db: AsyncSession = Depends(get_session)
 ):
     """
@@ -70,9 +71,14 @@ async def get_webk_session(
             detail=f"Proxy is not working (status: {account.proxy.status})"
         )
 
-    # Use default API credentials if account doesn't have custom ones
-    api_id = account.api_id or WEBK_DEFAULT_API_ID
-    api_hash = account.api_hash or WEBK_DEFAULT_API_HASH
+    # Resolve connection params the same way as the rest of the backend.
+    # Falling back to official WebK credentials is acceptable only when the
+    # account does not carry its original api_id/api_hash metadata.
+    resolved_api_id, resolved_api_hash, resolved_device_fingerprint = (
+        resolve_account_connection_params(account)
+    )
+    api_id = resolved_api_id or WEBK_DEFAULT_API_ID
+    api_hash = resolved_api_hash or WEBK_DEFAULT_API_HASH
 
     # Prepare proxy config
     proxy_config = {
@@ -93,7 +99,7 @@ async def get_webk_session(
             api_id=api_id,
             api_hash=api_hash,
             proxy=proxy_config,
-            device_fingerprint=account.device_fingerprint,
+            device_fingerprint=resolved_device_fingerprint,
             fetch_real_salt=fetch_real_salt,
         )
 
@@ -105,7 +111,7 @@ async def get_webk_session(
             "success": True,
             "session_data": webk_data,
             "proxy": proxy_config,
-            "device_fingerprint": account.device_fingerprint,
+            "device_fingerprint": resolved_device_fingerprint,
             "account": {
                 "id": account.id,
                 "telegram_id": account.telegram_id,

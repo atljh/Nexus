@@ -404,6 +404,7 @@ async def validate_session(
     system_version: Optional[str] = None,
     app_version: Optional[str] = None,
     lang_code: Optional[str] = None,
+    system_lang_code: Optional[str] = None,
     check_frozen: bool = False,
 ) -> Tuple[bool, Optional[Dict], Optional[str]]:
     """
@@ -419,6 +420,7 @@ async def validate_session(
         system_version: Optional explicit system version
         app_version: Optional explicit app version
         lang_code: Optional language code
+        system_lang_code: Optional system language code
 
     Returns:
         Tuple[is_valid, user_info, error_code]
@@ -437,6 +439,7 @@ async def validate_session(
             system_version=system_version,
             app_version=app_version,
             lang_code=lang_code,
+            system_lang_code=system_lang_code,
         )
 
         async with client:

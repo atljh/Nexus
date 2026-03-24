@@ -16,9 +16,47 @@ from telethon.sessions import StringSession
 from telethon.crypto import AuthKey
 
 from .client import BaseClient
+from .device_generator import (
+    detect_platform_from_api_id,
+    generate_fingerprint_for_api,
+    get_tdesktop_fingerprint,
+)
 from .exceptions import TDataError, UnauthorizedError, SessionExpiredError
 
 logger = logging.getLogger("nexus.tdata_converter")
+
+
+def build_tdata_device_fingerprint(
+    api_id: int,
+    unique_id: str,
+    lang_code: str = "en",
+    system_lang_code: str = "en-US",
+) -> Dict[str, str]:
+    """
+    Build a stable device fingerprint for TDATA-derived sessions.
+
+    Desktop TDATA should stay on a conservative Telegram Desktop identity.
+    For non-desktop custom API overrides, keep the platform consistent with api_id.
+    """
+    if detect_platform_from_api_id(api_id) == "desktop":
+        tdesktop_fp = get_tdesktop_fingerprint(
+            lang_code=lang_code,
+            system_lang_code=system_lang_code,
+        )
+        return {
+            "device_model": tdesktop_fp["device_model"],
+            "system_version": tdesktop_fp["system_version"],
+            "app_version": tdesktop_fp["app_version"],
+            "lang_code": tdesktop_fp["lang_code"],
+            "system_lang_code": tdesktop_fp["system_lang_code"],
+        }
+
+    return generate_fingerprint_for_api(
+        unique_id=unique_id,
+        api_id=api_id,
+        lang_code=lang_code,
+        system_lang_code=system_lang_code,
+    )
 
 
 class TDataConverter:
@@ -400,6 +438,11 @@ class TDataConverter:
         Returns:
             Metadata dict with user info
         """
+        device_fingerprint = build_tdata_device_fingerprint(
+            api_id=api_id,
+            unique_id=session_string[:32],
+        )
+
         client = BaseClient(
             session_string=session_string,
             api_id=api_id,
@@ -407,6 +450,11 @@ class TDataConverter:
             proxy=proxy,
             connection_retries=3,
             timeout=10,
+            device_model=device_fingerprint["device_model"],
+            system_version=device_fingerprint["system_version"],
+            app_version=device_fingerprint["app_version"],
+            lang_code=device_fingerprint["lang_code"],
+            system_lang_code=device_fingerprint["system_lang_code"],
         )
 
         # Test proxy before connecting to Telegram
@@ -466,7 +514,7 @@ class TDataConverter:
                     "session_string": session_string,
                     "api_id": api_id,
                     "api_hash": api_hash,
-                    "device_fingerprint": {},
+                    "device_fingerprint": device_fingerprint,
                     "source": "tdata",
                     "converter_version": "tdesktop-decrypter",
                 }

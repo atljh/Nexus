@@ -108,6 +108,10 @@ const bulkProfileLastName = ref('')
 const bulkProfileBio = ref('')
 const bulkProfileGender = ref<'male' | 'female' | undefined>(undefined)
 const bulkProfileLoading = ref(false)
+const showBulkTagDialog = ref(false)
+const bulkTagId = ref<number | null>(null)
+const bulkTagLoading = ref(false)
+const bulkHidePhoneLoading = ref(false)
 // Bulk terminate state
 const bulkTerminateLoading = ref(false)
 // Bulk proxy check state
@@ -232,6 +236,11 @@ const proxyFilterOptions = computed(() =>
     value: p.id
   }))
 )
+
+const tagFilterOptions = computed(() => [
+  { label: t('accounts.noTag'), value: -1 },
+  ...tagStore.tags.map(tg => ({ label: tg.name, value: tg.id }))
+])
 
 const statusOptions = computed(() => [
   { label: t('accounts.allStatuses'), value: null },
@@ -1608,6 +1617,50 @@ async function handleBulkProfileUpdate() {
   }
 }
 
+function openBulkTagDialog() {
+  if (tagStore.tags.length === 0) {
+    toast.add({
+      severity: 'warn',
+      summary: t('common.warning'),
+      detail: t('accounts.messages.noTagsAvailable'),
+      life: 3000
+    })
+    return
+  }
+
+  showBulkTagDialog.value = true
+}
+
+async function handleBulkTagAssign() {
+  if (!bulkTagId.value) {
+    toast.add({
+      severity: 'warn',
+      summary: t('common.warning'),
+      detail: t('accounts.messages.selectTagFirst'),
+      life: 3000
+    })
+    return
+  }
+
+  bulkTagLoading.value = true
+  try {
+    const selectedCount = selectedIds.value.length
+    await accountStore.bulkAction('add_tag', bulkTagId.value)
+    toast.add({
+      severity: 'success',
+      summary: t('common.success'),
+      detail: t('accounts.messages.bulkTagComplete', { count: selectedCount }),
+      life: 4000
+    })
+    showBulkTagDialog.value = false
+    bulkTagId.value = null
+  } catch (error: any) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: error.message, life: 5000 })
+  } finally {
+    bulkTagLoading.value = false
+  }
+}
+
 async function handleTerminateSessions(account: Account) {
   if (!window.confirm(t('accounts.sessions.confirmTerminate'))) return
 
@@ -1653,6 +1706,28 @@ async function handleBulkTerminateSessions() {
     toast.add({ severity: 'error', summary: t('common.error'), detail: error.message, life: 5000 })
   } finally {
     bulkTerminateLoading.value = false
+  }
+}
+
+async function handleBulkHidePhone() {
+  if (!window.confirm(t('accounts.bulk.hidePhoneConfirm', { count: selectedIds.value.length }))) return
+
+  bulkHidePhoneLoading.value = true
+  try {
+    const result = await accountStore.bulkHidePhoneNumbers(selectedIds.value)
+    toast.add({
+      severity: result.succeeded > 0 ? 'success' : 'error',
+      summary: result.succeeded > 0 ? t('common.success') : t('common.error'),
+      detail: t('accounts.messages.bulkHidePhoneComplete', {
+        succeeded: result.succeeded,
+        failed: result.failed,
+      }),
+      life: 5000
+    })
+  } catch (error: any) {
+    toast.add({ severity: 'error', summary: t('common.error'), detail: error.message, life: 5000 })
+  } finally {
+    bulkHidePhoneLoading.value = false
   }
 }
 
@@ -1918,11 +1993,11 @@ const restrictedAccounts = computed(() => accountStats.value.restricted)
           />
           <Select
             :model-value="accountStore.filters.tag_id"
-            :options="[...tagStore.tags.map(tg => ({ label: tg.name, value: tg.id }))]"
+            :options="tagFilterOptions"
             optionLabel="label"
             optionValue="value"
             :placeholder="t('accounts.tagPlaceholder')"
-            @update:model-value="(val: number | null) => accountStore.setFilter('tag_id', val || undefined)"
+            @update:model-value="(val: number | null) => accountStore.setFilter('tag_id', val === null ? undefined : val)"
             class="filter-chip"
             showClear
           />
@@ -2833,6 +2908,47 @@ login:pass:1.2.3.4:8080"
         </template>
       </Dialog>
 
+      <Dialog
+        v-model:visible="showBulkTagDialog"
+        :header="t('accounts.bulk.setTagTitle')"
+        modal
+        :style="{ width: '420px' }"
+        class="custom-dialog"
+      >
+        <div class="form-field">
+          <p class="description">{{ t('accounts.bulk.setTagDescription', { count: selectedIds.length }) }}</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label">{{ t('accounts.tagPlaceholder') }}</label>
+          <Select
+            v-model="bulkTagId"
+            :options="tagOptions"
+            optionLabel="label"
+            optionValue="value"
+            :placeholder="t('accounts.tagPlaceholder')"
+            class="w-full"
+          >
+            <template #option="{ option }">
+              <div class="inline-tag-option">
+                <span class="tag-color-dot" :style="{ background: option.color }"></span>
+                <span>{{ option.label }}</span>
+              </div>
+            </template>
+          </Select>
+        </div>
+
+        <template #footer>
+          <Button :label="t('common.cancel')" severity="secondary" @click="showBulkTagDialog = false" />
+          <Button
+            :label="t('accounts.bulk.applyTag')"
+            icon="pi pi-tag"
+            :loading="bulkTagLoading"
+            :disabled="!bulkTagId"
+            @click="handleBulkTagAssign"
+          />
+        </template>
+      </Dialog>
+
       <!-- WebK Viewer -->
       <WebViewer
         v-model:visible="showWebViewer"
@@ -2885,6 +3001,21 @@ login:pass:1.2.3.4:8080"
               severity="secondary"
               size="small"
               @click="showBulkProfileDialog = true"
+            />
+            <Button
+              :label="t('accounts.bulk.hidePhone')"
+              icon="pi pi-eye-slash"
+              severity="secondary"
+              size="small"
+              :loading="bulkHidePhoneLoading"
+              @click="handleBulkHidePhone"
+            />
+            <Button
+              :label="t('accounts.bulk.setTag')"
+              icon="pi pi-tag"
+              severity="secondary"
+              size="small"
+              @click="openBulkTagDialog"
             />
             <Button
               :label="t('accounts.bulk.terminateSessions')"

@@ -132,6 +132,29 @@ APP_VERSIONS = {
 Platform = Literal["android", "ios", "desktop"]
 
 
+def get_tdesktop_fingerprint(
+    lang_code: str = "en",
+    system_lang_code: str = "en-US",
+) -> DeviceFingerprint:
+    """
+    Return a conservative Telegram Desktop fingerprint for TDATA-derived sessions.
+
+    For imported TDATA we should not randomly switch between Windows and macOS
+    fingerprints, because the source session was created by Telegram Desktop and
+    platform drift is riskier than using a stable Windows-compatible default.
+    """
+    api_config = OFFICIAL_APIS["desktop"]
+    return DeviceFingerprint(
+        api_id=api_config["api_id"],
+        api_hash=api_config["api_hash"],
+        device_model="Desktop",
+        system_version="Windows 10",
+        app_version=APP_VERSIONS["desktop"] + " x64",
+        lang_code=lang_code,
+        system_lang_code=system_lang_code,
+    )
+
+
 def generate_device_fingerprint(
     unique_id: str,
     platform: Platform = "android",

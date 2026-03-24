@@ -23,6 +23,8 @@ const { t } = useI18n()
 const accountRef = ref<Account | null>(null)
 const webviewReady = ref(false)
 const loadCount = ref(0)
+const autoRefreshTried = ref(false)
+let connectionFallbackTimer: ReturnType<typeof setTimeout> | null = null
 let webviewEl: any = null // Direct DOM reference, not Vue ref
 
 // Watch account prop
@@ -43,6 +45,7 @@ const {
   webkUrl,
   fetchSessionData,
   initializeWebView,
+  refreshSession,
   cleanup,
 } = useWebKSession(accountRef)
 
@@ -83,6 +86,7 @@ async function startViewer() {
   state.value.sessionInjected = false
   webviewReady.value = false
   loadCount.value = 0
+  autoRefreshTried.value = false
 
   try {
     // Fetch session data from backend FIRST
@@ -140,6 +144,7 @@ async function waitForWebviewAndAttach(): Promise<void> {
 }
 
 function stopViewer() {
+  clearConnectionFallbackTimer()
   if (webviewEl) {
     webviewEl.removeEventListener('dom-ready', onDomReady)
     webviewEl.removeEventListener('did-finish-load', onDidFinishLoad)
@@ -164,6 +169,56 @@ async function handleReload() {
     loadCount.value = 0
     webviewEl.reload()
   }
+}
+
+async function handleRefreshSession() {
+  if (!accountRef.value) return
+
+  state.value.loading = true
+  state.value.error = null
+  clearConnectionFallbackTimer()
+
+  try {
+    const refreshed = await refreshSession()
+    if (!refreshed) {
+      throw new Error('Failed to refresh session')
+    }
+
+    state.value.sessionInjected = false
+    loadCount.value = 0
+
+    if (webviewEl) {
+      webviewEl.reload()
+    }
+  } catch (error) {
+    state.value.error = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[WebViewer] Refresh session failed:', error)
+  } finally {
+    state.value.loading = false
+  }
+}
+
+function clearConnectionFallbackTimer() {
+  if (connectionFallbackTimer) {
+    clearTimeout(connectionFallbackTimer)
+    connectionFallbackTimer = null
+  }
+}
+
+function scheduleConnectionFallback() {
+  clearConnectionFallbackTimer()
+
+  connectionFallbackTimer = setTimeout(() => {
+    if (!props.visible || state.value.connected || autoRefreshTried.value || !state.value.sessionInjected) {
+      return
+    }
+
+    autoRefreshTried.value = true
+    console.warn('[WebViewer] WebK did not connect in time, trying one-shot real salt refresh')
+    handleRefreshSession().catch((error) => {
+      console.error('[WebViewer] Auto refresh session failed:', error)
+    })
+  }, 12000)
 }
 
 async function injectSessionToWebview(data: WebKSessionData): Promise<boolean> {
@@ -242,6 +297,7 @@ function onDomReady() {
       }
     })
   } else if (loadCount.value === 2) {
+    scheduleConnectionFallback()
     // Verify session persisted after reload
     webviewEl?.executeJavaScript(`
       (function() {
@@ -280,6 +336,7 @@ function onConsoleMessage(event: any) {
 
 // Cleanup
 onUnmounted(() => {
+  clearConnectionFallbackTimer()
   stopViewer()
 })
 </script>
@@ -293,6 +350,15 @@ onUnmounted(() => {
           <div class="webviewer-header">
             <span class="webviewer-title">{{ headerTitle }}</span>
             <div class="webviewer-controls">
+              <Button
+                icon="pi pi-key"
+                text
+                rounded
+                size="small"
+                :disabled="state.loading"
+                @click="handleRefreshSession"
+                v-tooltip.bottom="t('webviewer.refreshSession')"
+              />
               <Button
                 icon="pi pi-refresh"
                 text
@@ -325,12 +391,21 @@ onUnmounted(() => {
             <div v-else-if="state.error" class="webviewer-error">
               <i class="pi pi-exclamation-triangle" style="font-size: 2rem; color: var(--red-500)"></i>
               <span>{{ state.error }}</span>
-              <Button
-                :label="t('webviewer.reload')"
-                icon="pi pi-refresh"
-                size="small"
-                @click="startViewer"
-              />
+              <div class="webviewer-error-actions">
+                <Button
+                  :label="t('webviewer.refreshSession')"
+                  icon="pi pi-key"
+                  size="small"
+                  severity="secondary"
+                  @click="handleRefreshSession"
+                />
+                <Button
+                  :label="t('webviewer.reload')"
+                  icon="pi pi-refresh"
+                  size="small"
+                  @click="startViewer"
+                />
+              </div>
             </div>
 
             <!-- Cannot open state -->
@@ -429,6 +504,11 @@ onUnmounted(() => {
   font-size: 14px;
   text-align: center;
   padding: 20px;
+}
+
+.webviewer-error-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .webviewer-webview {

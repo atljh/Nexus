@@ -499,6 +499,20 @@ export interface BulkTerminateResult {
   total_terminated: number
 }
 
+export interface BulkPrivacyUpdateResult {
+  success: boolean
+  results: {
+    id: number
+    success: boolean
+    updated_fields?: string[]
+    errors?: Record<string, string>
+    error?: string
+  }[]
+  total: number
+  succeeded: number
+  failed: number
+}
+
 // ============================================================
 // Account Authorization Types
 // ============================================================

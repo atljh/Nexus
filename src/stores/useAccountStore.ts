@@ -28,6 +28,7 @@ import type {
   SessionsResult,
   TerminateResult,
   BulkTerminateResult,
+  BulkPrivacyUpdateResult,
 } from '@/types'
 
 interface AccountsResponse {
@@ -93,7 +94,9 @@ export const useAccountStore = defineStore('accounts', () => {
       result = result.filter(a => a.group_id === filters.value.group_id)
     }
 
-    if (filters.value.tag_id) {
+    if (filters.value.tag_id === -1) {
+      result = result.filter(a => (a.tags?.length || 0) === 0)
+    } else if (filters.value.tag_id) {
       result = result.filter(a => a.tags.some(t => t.id === filters.value.tag_id))
     }
 
@@ -611,6 +614,16 @@ export const useAccountStore = defineStore('accounts', () => {
     }) as BulkTerminateResult
   }
 
+  async function bulkHidePhoneNumbers(
+    accountIds: number[],
+    maxConcurrent: number = 2
+  ): Promise<BulkPrivacyUpdateResult> {
+    return await window.api.post('/api/accounts/privacy/hide-phone', {
+      account_ids: accountIds,
+      max_concurrent: maxConcurrent,
+    }) as BulkPrivacyUpdateResult
+  }
+
   // ============================================================
   // Account Authorization Methods
   // ============================================================
@@ -771,6 +784,7 @@ export const useAccountStore = defineStore('accounts', () => {
     getSessions,
     terminateOtherSessions,
     bulkTerminateSessions,
+    bulkHidePhoneNumbers,
     // Auth
     startAuth,
     verifyAuthCode,

@@ -53,7 +53,7 @@ from telegram import (
 from telegram.profile_service import profile_service
 from telegram.profile_data import generate_random_profile
 from telegram.session_service import session_service
-from telegram.device_generator import generate_device_fingerprint
+from telegram.device_generator import generate_device_fingerprint, get_tdesktop_fingerprint
 from telegram.account_metadata import (
     extract_api_credentials as extract_api_credentials_from_metadata,
     extract_device_fingerprint as extract_device_fingerprint_from_metadata,
@@ -226,8 +226,11 @@ async def get_accounts(
         query = query.where(Account.status == status)
     if group_id:
         query = query.where(Account.group_id == group_id)
-    if tag_id:
-        query = query.join(Account.tags).where(AccountTag.id == tag_id)
+    if tag_id is not None:
+        if tag_id == -1:
+            query = query.where(~Account.tags.any())
+        else:
+            query = query.join(Account.tags).where(AccountTag.id == tag_id)
 
     if limit > 0:
         query = query.offset(offset).limit(limit)
@@ -347,13 +350,28 @@ async def bulk_action(
     data: BulkActionRequest,
     session: AsyncSession = Depends(get_session)
 ):
-    valid_actions = ("delete", "set_proxy", "set_group")
+    valid_actions = ("delete", "set_proxy", "set_group", "add_tag", "remove_tag")
     if data.action not in valid_actions:
         raise HTTPException(status_code=400, detail=f"Invalid action. Must be one of: {', '.join(valid_actions)}")
 
     query = select(Account).where(Account.id.in_(data.account_ids))
+    if data.action in ("add_tag", "remove_tag"):
+        query = query.options(selectinload(Account.tags))
+
     result = await session.execute(query)
     accounts = result.scalars().all()
+
+    tag = None
+    if data.action in ("add_tag", "remove_tag"):
+        if data.value is None:
+            raise HTTPException(status_code=400, detail="Tag id is required for tag actions")
+
+        tag_result = await session.execute(
+            select(AccountTag).where(AccountTag.id == data.value)
+        )
+        tag = tag_result.scalar_one_or_none()
+        if not tag:
+            raise HTTPException(status_code=404, detail="Tag not found")
 
     if data.action == "delete":
         for acc in accounts:
@@ -364,6 +382,13 @@ async def bulk_action(
     elif data.action == "set_group":
         for acc in accounts:
             acc.group_id = data.value
+    elif data.action == "add_tag":
+        for acc in accounts:
+            if all(existing_tag.id != tag.id for existing_tag in acc.tags):
+                acc.tags.append(tag)
+    elif data.action == "remove_tag":
+        for acc in accounts:
+            acc.tags = [existing_tag for existing_tag in acc.tags if existing_tag.id != tag.id]
 
     await session.commit()
 
@@ -414,6 +439,7 @@ async def check_account(
         system_version=device_fp.get("system_version"),
         app_version=device_fp.get("app_version"),
         lang_code=device_fp.get("lang_code"),
+        system_lang_code=device_fp.get("system_lang_code"),
         check_frozen=True,
     )
 
@@ -666,6 +692,7 @@ async def import_json_session(
             system_version=device_fp.get("system_version"),
             app_version=device_fp.get("app_version"),
             lang_code=device_fp.get("lang_code"),
+            system_lang_code=device_fp.get("system_lang_code"),
             check_frozen=False,  # Don't do extra API calls during import
         )
 
@@ -1563,6 +1590,11 @@ class BulkProfileUpdateRequest(BaseModel):
     max_concurrent: int = 2
 
 
+class BulkHidePhoneRequest(BaseModel):
+    account_ids: List[int]
+    max_concurrent: int = 2
+
+
 @router.get("/{account_id}/profile/current")
 async def get_current_profile(
     account_id: int,
@@ -1754,6 +1786,72 @@ async def bulk_update_profile(
     results = await asyncio.gather(*tasks)
 
     await session.commit()
+
+    success_count = sum(1 for r in results if r.get("success"))
+    return {
+        "success": True,
+        "results": results,
+        "total": len(accounts),
+        "succeeded": success_count,
+        "failed": len(accounts) - success_count,
+    }
+
+
+@router.post("/privacy/hide-phone")
+async def bulk_hide_phone_number(
+    data: BulkHidePhoneRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    """Hide phone number on multiple accounts without opening WebK."""
+    import asyncio
+
+    query = select(Account).options(
+        selectinload(Account.proxy)
+    ).where(Account.id.in_(data.account_ids))
+
+    result = await session.execute(query)
+    accounts = list(result.scalars().all())
+
+    if not accounts:
+        return {"success": False, "results": [], "error": "No accounts found"}
+
+    semaphore = asyncio.Semaphore(data.max_concurrent)
+
+    async def hide_phone_for_account(account):
+        async with semaphore:
+            if not account.session_string:
+                return {"id": account.id, "success": False, "error": "No session string"}
+
+            proxy_config = None
+            if account.proxy:
+                proxy_config = {
+                    "type": account.proxy.type,
+                    "host": account.proxy.host,
+                    "port": account.proxy.port,
+                    "username": account.proxy.username,
+                    "password": account.proxy.password,
+                }
+            resolved_api_id, resolved_api_hash, resolved_device_fp = _resolve_account_connection_params(account)
+
+            try:
+                privacy_result = await profile_service.hide_phone_number(
+                    account.session_string,
+                    proxy=proxy_config,
+                    api_id=resolved_api_id,
+                    api_hash=resolved_api_hash,
+                    device_fingerprint=resolved_device_fp,
+                )
+
+                return {
+                    "id": account.id,
+                    "success": privacy_result.success,
+                    "updated_fields": privacy_result.updated_fields,
+                    "errors": privacy_result.errors,
+                }
+            except Exception as e:
+                return {"id": account.id, "success": False, "error": str(e)}
+
+    results = await asyncio.gather(*(hide_phone_for_account(acc) for acc in accounts))
 
     success_count = sum(1 for r in results if r.get("success"))
     return {
@@ -2175,10 +2273,7 @@ async def _parse_import_files_inner(
                 session_string = await parse_tdata_to_session(tdata_path)
 
                 # Generate desktop fingerprint for tdata sessions
-                tdata_fp = generate_device_fingerprint(
-                    unique_id=session_string[:32],
-                    platform="desktop",
-                )
+                tdata_fp = get_tdesktop_fingerprint()
 
                 parsed_accounts.append({
                     "temp_id": str(uuid.uuid4()),
@@ -2427,10 +2522,7 @@ async def parse_tdata_folder(
                         source_name = source_name.rsplit('/', 1)[-1] if '/' in source_name else source_name
 
                         # Generate desktop fingerprint for tdata sessions
-                        tdata_fp = generate_device_fingerprint(
-                            unique_id=session_string[:32],
-                            platform="desktop",
-                        )
+                        tdata_fp = get_tdesktop_fingerprint()
 
                         parsed_accounts.append({
                             "temp_id": str(uuid.uuid4()),
@@ -2591,6 +2683,7 @@ async def verify_parsed_accounts(
                 system_version=device_fp.get("system_version"),
                 app_version=device_fp.get("app_version"),
                 lang_code=device_fp.get("lang_code"),
+                system_lang_code=device_fp.get("system_lang_code"),
                 check_frozen=False,  # Don't do extra API calls during import
             )
 
