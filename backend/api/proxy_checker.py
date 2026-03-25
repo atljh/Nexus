@@ -159,6 +159,8 @@ class ProxyChecker:
             # If python-socks not installed, skip the check
             return {"success": True, "error": None}
 
+        last_error: Optional[str] = None
+
         for dc_host, dc_port in TELEGRAM_DC_SERVERS:
             try:
                 proxy = Proxy.from_url(proxy_url)
@@ -169,14 +171,18 @@ class ProxyChecker:
                 sock.close()
                 return {"success": True, "error": None}
             except asyncio.TimeoutError:
+                last_error = "Connection timeout"
                 continue
             except Exception as e:
                 logger.debug(f"SOCKS telegram test failed for {dc_host}: {e}")
+                last_error = str(e)
+                if "authentication failure" in last_error.lower():
+                    return {"success": False, "error": last_error}
                 continue
 
         return {
             "success": False,
-            "error": "Proxy cannot connect to Telegram servers. Telegram may be blocked on this proxy.",
+            "error": last_error or "Proxy cannot connect to Telegram servers. Telegram may be blocked on this proxy.",
         }
 
     async def _test_http_proxy_connect(

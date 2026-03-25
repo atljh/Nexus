@@ -14,6 +14,7 @@ from .session_manager import SessionManager
 from .device_generator import OFFICIAL_APIS
 
 from telethon.tl.functions.account import (
+    GetPrivacyRequest,
     SetPrivacyRequest,
     UpdateProfileRequest,
     UpdateUsernameRequest,
@@ -26,6 +27,8 @@ from telethon.tl.types import (
     InputPrivacyValueAllowContacts,
     InputPrivacyValueDisallowAll,
     InputUserSelf,
+    PrivacyValueAllowContacts,
+    PrivacyValueDisallowAll,
 )
 from telethon.errors import (
     FirstNameInvalidError,
@@ -108,6 +111,13 @@ class ProfileService:
             used_api_hash,
             **client_kwargs,
         )
+
+    @staticmethod
+    def _privacy_rules_match(rules: List[object], expected_rule_types: Tuple[type, ...]) -> bool:
+        """Treat exact matching privacy rules as already successful/idempotent."""
+        if len(rules) != len(expected_rule_types):
+            return False
+        return all(isinstance(rule, expected_type) for rule, expected_type in zip(rules, expected_rule_types))
 
     async def update_profile(
         self,
@@ -303,35 +313,58 @@ class ProfileService:
                     errors={"auth": "Session not authorized"},
                 )
 
+            # Mirror update_profile behavior so privacy changes don't start from a cold session.
+            try:
+                await client.get_dialogs(limit=3)
+                await asyncio.sleep(random.uniform(0.3, 0.8))
+            except Exception:
+                pass
+
             operations = [
-                (
-                    "phone_number_visibility",
-                    SetPrivacyRequest(
+                {
+                    "field_name": "phone_number_visibility",
+                    "key": InputPrivacyKeyPhoneNumber(),
+                    "request": SetPrivacyRequest(
                         key=InputPrivacyKeyPhoneNumber(),
                         rules=[InputPrivacyValueDisallowAll()],
                     ),
-                ),
-                (
-                    "phone_discovery",
-                    SetPrivacyRequest(
+                    "expected_rules": (PrivacyValueDisallowAll,),
+                },
+                {
+                    "field_name": "phone_discovery",
+                    "key": InputPrivacyKeyAddedByPhone(),
+                    "request": SetPrivacyRequest(
                         key=InputPrivacyKeyAddedByPhone(),
                         rules=[InputPrivacyValueAllowContacts()],
                     ),
-                ),
+                    "expected_rules": (PrivacyValueAllowContacts,),
+                },
             ]
 
-            for index, (field_name, request) in enumerate(operations):
+            for index, operation in enumerate(operations):
                 if index > 0:
                     await asyncio.sleep(random.uniform(0.3, 0.8))
 
+                field_name = operation["field_name"]
+                request = operation["request"]
+
                 try:
+                    current_privacy = await client(GetPrivacyRequest(operation["key"]))
+                    if self._privacy_rules_match(current_privacy.rules, operation["expected_rules"]):
+                        result.updated_fields.append(field_name)
+                        continue
+
                     await client(request)
                     result.updated_fields.append(field_name)
                 except FloodWaitError as e:
                     result.errors[field_name] = f"Rate limited, wait {e.seconds}s"
                     result.success = False
                 except Exception as e:
-                    result.errors[field_name] = str(e)
+                    error_text = str(e)
+                    if "not modified" in error_text.lower():
+                        result.updated_fields.append(field_name)
+                        continue
+                    result.errors[field_name] = error_text
                     result.success = False
 
             return result

@@ -620,7 +620,7 @@ export const useAccountStore = defineStore('accounts', () => {
 
   async function bulkHidePhoneNumbers(
     accountIds: number[],
-    maxConcurrent: number = 2
+    maxConcurrent: number = 1
   ): Promise<BulkPrivacyUpdateResult> {
     return await window.api.post('/api/accounts/privacy/hide-phone', {
       account_ids: accountIds,

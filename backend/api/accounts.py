@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel, Field
 
+from api.proxy_checker import proxy_checker, ProxyStatus
 from database.database import get_session
 from database.models import Account, Proxy, AccountGroup, AccountTag
 from utils.encryption import encryption_service
@@ -1593,7 +1594,7 @@ class BulkProfileUpdateRequest(BaseModel):
 
 class BulkHidePhoneRequest(BaseModel):
     account_ids: List[int]
-    max_concurrent: int = 2
+    max_concurrent: int = 1
 
 
 @router.get("/{account_id}/profile/current")
@@ -1717,6 +1718,32 @@ async def bulk_update_profile(
     if not accounts:
         return {"success": False, "results": [], "error": "No accounts found"}
 
+    unique_proxies: dict[int, Proxy] = {
+        account.proxy.id: account.proxy
+        for account in accounts
+        if account.proxy is not None
+    }
+    proxy_results = {}
+
+    if unique_proxies:
+        checked_at = datetime.now(timezone.utc)
+        check_results = await asyncio.gather(*[
+            proxy_checker.check_single(
+                proxy_id=proxy.id,
+                proxy_url=proxy.get_connection_string(),
+                lookup_geo=True,
+            )
+            for proxy in unique_proxies.values()
+        ])
+
+        for proxy, check_result in zip(unique_proxies.values(), check_results):
+            proxy.status = check_result.status.value
+            proxy.ping_ms = check_result.ping_ms
+            proxy.external_ip = check_result.external_ip
+            proxy.geo = check_result.geo
+            proxy.last_checked_at = checked_at
+            proxy_results[proxy.id] = check_result
+
     semaphore = asyncio.Semaphore(data.max_concurrent)
     results = []
 
@@ -1742,6 +1769,14 @@ async def bulk_update_profile(
 
             proxy_config = None
             if account.proxy:
+                proxy_result = proxy_results.get(account.proxy.id)
+                if proxy_result and proxy_result.status in {ProxyStatus.NOT_WORKING, ProxyStatus.TIMEOUT}:
+                    return {
+                        "id": account.id,
+                        "success": False,
+                        "error": proxy_result.error or f"Proxy {account.proxy.host}:{account.proxy.port} is unavailable",
+                    }
+
                 proxy_config = {
                     "type": account.proxy.type,
                     "host": account.proxy.host,
@@ -1816,6 +1851,32 @@ async def bulk_hide_phone_number(
     if not accounts:
         return {"success": False, "results": [], "error": "No accounts found"}
 
+    unique_proxies: dict[int, Proxy] = {
+        account.proxy.id: account.proxy
+        for account in accounts
+        if account.proxy is not None
+    }
+    proxy_results = {}
+
+    if unique_proxies:
+        checked_at = datetime.now(timezone.utc)
+        check_results = await asyncio.gather(*[
+            proxy_checker.check_single(
+                proxy_id=proxy.id,
+                proxy_url=proxy.get_connection_string(),
+                lookup_geo=True,
+            )
+            for proxy in unique_proxies.values()
+        ])
+
+        for proxy, check_result in zip(unique_proxies.values(), check_results):
+            proxy.status = check_result.status.value
+            proxy.ping_ms = check_result.ping_ms
+            proxy.external_ip = check_result.external_ip
+            proxy.geo = check_result.geo
+            proxy.last_checked_at = checked_at
+            proxy_results[proxy.id] = check_result
+
     semaphore = asyncio.Semaphore(data.max_concurrent)
 
     async def hide_phone_for_account(account):
@@ -1825,6 +1886,14 @@ async def bulk_hide_phone_number(
 
             proxy_config = None
             if account.proxy:
+                proxy_result = proxy_results.get(account.proxy.id)
+                if proxy_result and proxy_result.status in {ProxyStatus.NOT_WORKING, ProxyStatus.TIMEOUT}:
+                    return {
+                        "id": account.id,
+                        "success": False,
+                        "error": proxy_result.error or f"Proxy {account.proxy.host}:{account.proxy.port} is unavailable",
+                    }
+
                 proxy_config = {
                     "type": account.proxy.type,
                     "host": account.proxy.host,
@@ -1853,6 +1922,7 @@ async def bulk_hide_phone_number(
                 return {"id": account.id, "success": False, "error": str(e)}
 
     results = await asyncio.gather(*(hide_phone_for_account(acc) for acc in accounts))
+    await session.commit()
 
     success_count = sum(1 for r in results if r.get("success"))
     return {

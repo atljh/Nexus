@@ -5,7 +5,7 @@ import MainLayout from '@/layouts/MainLayout.vue'
 import { useAccountStore, useProxyStore, useGroupStore, useTagStore } from '@/stores'
 import { useDebouncedRef } from '@/composables'
 import { countryFlag } from '@/utils/formatters'
-import type { Account, AccountStatus, BulkAction } from '@/types'
+import type { Account, AccountStatus, BulkAction, BulkPrivacyUpdateResult, ProxyStatus } from '@/types'
 
 // Dialog components
 // Lazy-load heavy dialog components for faster initial render
@@ -1441,6 +1441,10 @@ async function handleBulk2FASet() {
 
   bulk2FALoading.value = true
   try {
+    if (await blockBulkActionIfSelectedProxiesUnavailable('accounts.bulk.set2FABlockedByProxy')) {
+      return
+    }
+
     const result = await accountStore.bulkSet2FA(
       selectedIds.value,
       bulk2FAPassword.value.trim(),
@@ -1582,6 +1586,10 @@ function openProfileDialog(account: Account) {
 async function handleBulkProfileUpdate() {
   bulkProfileLoading.value = true
   try {
+    if (await blockBulkActionIfSelectedProxiesUnavailable('accounts.bulk.editProfileBlockedByProxy')) {
+      return
+    }
+
     const data: any = {
       account_ids: selectedIds.value,
       auto_generate: bulkProfileMode.value === 'auto',
@@ -1709,20 +1717,98 @@ async function handleBulkTerminateSessions() {
   }
 }
 
-async function handleBulkHidePhone() {
-  if (!window.confirm(t('accounts.bulk.hidePhoneConfirm', { count: selectedIds.value.length }))) return
+function summarizeBulkPrivacyErrors(result: BulkPrivacyUpdateResult): string | null {
+  const uniqueErrors = Array.from(new Set(
+    result.results.flatMap(item => {
+      const detailedErrors = item.errors ? Object.values(item.errors) : []
+      return [item.error, ...detailedErrors].filter((value): value is string => Boolean(value))
+    })
+  )).slice(0, 3)
 
+  return uniqueErrors.length > 0 ? uniqueErrors.join('\n') : null
+}
+
+async function getUnavailableSelectedProxyLabels(): Promise<string[]> {
+  const selectedAccounts = accountStore.accounts.filter(account => selectedIds.value.includes(account.id))
+  const proxyIds = Array.from(new Set(
+    selectedAccounts
+      .map(account => account.proxy_id)
+      .filter((proxyId): proxyId is number => proxyId !== null)
+  ))
+
+  if (proxyIds.length === 0) {
+    return []
+  }
+
+  const checkResult = await proxyStore.checkBatchProxies(proxyIds, false)
+  const unavailableStatuses = new Set<ProxyStatus>(['not_working', 'timeout'])
+  const unavailableProxyIds = new Set(
+    checkResult.results
+      .filter(result => unavailableStatuses.has(result.status))
+      .map(result => result.id)
+  )
+
+  if (unavailableProxyIds.size === 0) {
+    return []
+  }
+
+  const accountCountsByProxy = new Map<number, number>()
+  selectedAccounts.forEach(account => {
+    if (account.proxy_id !== null && unavailableProxyIds.has(account.proxy_id)) {
+      accountCountsByProxy.set(account.proxy_id, (accountCountsByProxy.get(account.proxy_id) || 0) + 1)
+    }
+  })
+
+  return Array.from(unavailableProxyIds).map(proxyId => {
+    const proxy = proxyStore.getById(proxyId)
+    const count = accountCountsByProxy.get(proxyId) || 0
+    const proxyLabel = proxy ? `${proxy.host}:${proxy.port}` : `#${proxyId}`
+    return `${proxyLabel} (${t('accounts.bulk.accountsCount', { count })})`
+  })
+}
+
+async function blockBulkActionIfSelectedProxiesUnavailable(summaryKey: string): Promise<boolean> {
+  const unavailableProxies = await getUnavailableSelectedProxyLabels()
+  if (unavailableProxies.length === 0) {
+    return false
+  }
+
+  toast.add({
+    severity: 'error',
+    summary: t('common.error'),
+    detail: [
+      t(summaryKey),
+      ...unavailableProxies,
+    ].join('\n'),
+    life: 8000
+  })
+
+  return true
+}
+
+async function handleBulkHidePhone() {
   bulkHidePhoneLoading.value = true
   try {
+    if (await blockBulkActionIfSelectedProxiesUnavailable('accounts.bulk.hidePhoneBlockedByProxy')) {
+      return
+    }
+
+    if (!window.confirm(t('accounts.bulk.hidePhoneConfirm', { count: selectedIds.value.length }))) return
+
     const result = await accountStore.bulkHidePhoneNumbers(selectedIds.value)
+    await proxyStore.fetchProxies(true)
+    const errorDetails = summarizeBulkPrivacyErrors(result)
     toast.add({
       severity: result.succeeded > 0 ? 'success' : 'error',
       summary: result.succeeded > 0 ? t('common.success') : t('common.error'),
-      detail: t('accounts.messages.bulkHidePhoneComplete', {
-        succeeded: result.succeeded,
-        failed: result.failed,
-      }),
-      life: 5000
+      detail: [
+        t('accounts.messages.bulkHidePhoneComplete', {
+          succeeded: result.succeeded,
+          failed: result.failed,
+        }),
+        errorDetails,
+      ].filter(Boolean).join('\n'),
+      life: errorDetails ? 8000 : 5000
     })
   } catch (error: any) {
     toast.add({ severity: 'error', summary: t('common.error'), detail: error.message, life: 5000 })
@@ -1750,12 +1836,13 @@ function handleAccountAdded() {
 
 // Helper: country code to flag emoji
 
-// Helper: format aging time since registration
-function formatAging(registerTime: string | null): string {
+// Helper: format account age since registration/import timestamp
+function formatAccountAge(registerTime: string | null): string {
   if (!registerTime) return '—'
   const now = new Date()
   const reg = new Date(registerTime)
-  const diffMs = now.getTime() - reg.getTime()
+  if (Number.isNaN(reg.getTime())) return '—'
+  const diffMs = Math.max(0, now.getTime() - reg.getTime())
   const days = Math.floor(diffMs / (1000 * 60 * 60 * 24))
 
   if (days < 1) return t('accounts.time.today')
@@ -2116,7 +2203,7 @@ const restrictedAccounts = computed(() => accountStats.value.restricted)
 
           <Column :header="t('accounts.agingColumn')" style="min-width: 70px" sortable field="register_time">
             <template #body="{ data }">
-              <span class="aging-text">{{ formatAging(data.register_time) }}</span>
+              <span class="aging-text">{{ formatAccountAge(data.register_time) }}</span>
             </template>
           </Column>
 
