@@ -208,6 +208,8 @@ class WebViewManager {
   private sessions: Map<number, WebViewSession> = new Map()
   private proxyCredentials: Map<string, { username: string; password: string }> = new Map()
   private socksRelays: Map<number, SocksRelay> = new Map()
+  private requestHeaderState: Map<string, { acceptLanguage: string; proxyAuthHeader: string | null }> = new Map()
+  private configuredInterceptors: Set<string> = new Set()
   private loginHandlerRegistered = false
 
   /**
@@ -261,10 +263,22 @@ class WebViewManager {
   ): Promise<WebViewSession> {
     const existing = this.sessions.get(accountId)
     if (existing) {
+      const nextProxyConfig = proxyConfig ?? existing.proxyConfig
+      const nextDeviceFingerprint = deviceFingerprint ?? existing.deviceFingerprint
+
       if (proxyConfig) {
         await this.setupProxy(accountId, existing.session, existing.partition, proxyConfig)
-        existing.proxyConfig = proxyConfig
       }
+
+      if (nextDeviceFingerprint) {
+        this.setupUserAgent(existing.session, nextDeviceFingerprint)
+      }
+
+      this.updateRequestHeaderState(existing.partition, nextProxyConfig, nextDeviceFingerprint)
+      this.ensureRequestInterceptors(existing.session, existing.partition)
+
+      existing.proxyConfig = nextProxyConfig
+      existing.deviceFingerprint = nextDeviceFingerprint
       return existing
     }
 
@@ -279,7 +293,8 @@ class WebViewManager {
       this.setupUserAgent(sess, deviceFingerprint)
     }
 
-    this.setupRequestInterceptors(sess, proxyConfig, deviceFingerprint)
+    this.updateRequestHeaderState(partition, proxyConfig, deviceFingerprint)
+    this.ensureRequestInterceptors(sess, partition)
 
     const webViewSession: WebViewSession = {
       accountId,
@@ -337,6 +352,8 @@ class WebViewManager {
         password: proxy.password!,
       })
       this.registerGlobalLoginHandler()
+    } else {
+      this.proxyCredentials.delete(partition)
     }
 
     console.log(`[WebViewManager] Proxy configured successfully`)
@@ -370,8 +387,8 @@ class WebViewManager {
    * Setup unified request header interceptor.
    * Combines Accept-Language and Proxy-Authorization in a single handler.
    */
-  private setupRequestInterceptors(
-    sess: Session,
+  private updateRequestHeaderState(
+    partition: string,
     proxy?: ProxyConfig,
     fingerprint?: DeviceFingerprint
   ): void {
@@ -384,20 +401,36 @@ class WebViewManager {
       proxyAuthHeader = `Basic ${Buffer.from(`${proxy!.username}:${proxy!.password}`).toString('base64')}`
     }
 
+    this.requestHeaderState.set(partition, {
+      acceptLanguage: `${langCode},en;q=0.9`,
+      proxyAuthHeader,
+    })
+  }
+
+  private ensureRequestInterceptors(sess: Session, partition: string): void {
+    if (this.configuredInterceptors.has(partition)) return
+
     sess.webRequest.onBeforeSendHeaders({ urls: ['*://*/*'] }, (details, callback) => {
+      const state = this.requestHeaderState.get(partition)
       const headers: Record<string, string> = {
         ...details.requestHeaders,
-        'Accept-Language': `${langCode},en;q=0.9`,
       }
 
-      if (proxyAuthHeader) {
-        headers['Proxy-Authorization'] = proxyAuthHeader
+      if (state?.acceptLanguage) {
+        headers['Accept-Language'] = state.acceptLanguage
+      }
+
+      if (state?.proxyAuthHeader) {
+        headers['Proxy-Authorization'] = state.proxyAuthHeader
+      } else {
+        delete headers['Proxy-Authorization']
       }
 
       callback({ requestHeaders: headers })
     })
 
-    console.log(`[WebViewManager] Request interceptors configured (proxyAuth: ${!!proxyAuthHeader})`)
+    this.configuredInterceptors.add(partition)
+    console.log(`[WebViewManager] Request interceptors configured for ${partition}`)
   }
 
   /**
@@ -427,6 +460,7 @@ class WebViewManager {
     const webViewSession = this.sessions.get(accountId)
     if (webViewSession) {
       this.proxyCredentials.delete(webViewSession.partition)
+      this.requestHeaderState.delete(webViewSession.partition)
       await this.stopRelay(accountId)
       await this.clearSession(accountId)
       this.sessions.delete(accountId)

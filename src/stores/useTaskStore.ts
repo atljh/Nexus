@@ -41,6 +41,7 @@ export const useTaskStore = defineStore('task', () => {
   const error = ref<string | null>(null)
   const pollingInterval = ref<number | null>(null)
   const currentTaskType = ref<string | null>(null)
+  let isPollingTickRunning = false
 
   // Getters
   const activeTasks = computed(() =>
@@ -112,21 +113,26 @@ export const useTaskStore = defineStore('task', () => {
       const vanished = tasks.value.filter(
         t => (t.status === 'running' || t.status === 'pending') && !activeIds.has(t.id)
       )
-      for (const task of vanished) {
-        await fetchTask(task.id)
-        if (currentTask.value?.id === task.id) {
+      const currentTaskId = currentTask.value?.id ?? null
+      await Promise.all(vanished.map(async task => {
+        const shouldSyncCurrentTask = task.id === currentTaskId
+        await fetchTask(task.id, { setCurrent: shouldSyncCurrentTask })
+        if (shouldSyncCurrentTask) {
           await fetchTaskLogs(task.id)
         }
-      }
+      }))
     } catch (e) {
       console.error('Failed to fetch active tasks:', e)
     }
   }
 
-  async function fetchTask(taskId: number) {
+  async function fetchTask(taskId: number, options: { setCurrent?: boolean } = {}) {
+    const { setCurrent = true } = options
     try {
       const response = await window.api.get(`/api/tasks/${taskId}`) as TaskResponse
-      currentTask.value = response
+      if (setCurrent) {
+        currentTask.value = response
+      }
       // Update in list too
       const index = tasks.value.findIndex(t => t.id === taskId)
       if (index >= 0) {
@@ -394,9 +400,11 @@ export const useTaskStore = defineStore('task', () => {
   }
 
   // Polling for real-time updates
-  function startPolling(intervalMs = 2000) {
-    if (pollingInterval.value) return
-    pollingInterval.value = window.setInterval(async () => {
+  async function runPollingTick() {
+    if (isPollingTickRunning) return
+    isPollingTickRunning = true
+
+    try {
       if (hasRunningTasks.value) {
         await fetchActiveTasks()
         if (currentTask.value) {
@@ -413,6 +421,16 @@ export const useTaskStore = defineStore('task', () => {
         }
         stopPolling()
       }
+    } finally {
+      isPollingTickRunning = false
+    }
+  }
+
+  function startPolling(intervalMs = 2000) {
+    if (pollingInterval.value) return
+    void runPollingTick()
+    pollingInterval.value = window.setInterval(() => {
+      void runPollingTick()
     }, intervalMs)
   }
 
@@ -425,6 +443,7 @@ export const useTaskStore = defineStore('task', () => {
 
   function $reset() {
     stopPolling()
+    isPollingTickRunning = false
     error.value = null
     loading.value = false
     taskLogs.value = []

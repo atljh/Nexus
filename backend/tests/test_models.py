@@ -8,7 +8,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database.models import (
     _utc_iso,
+    _sanitize_account_metadata,
     _sanitize_task_config,
+    Account,
     Proxy,
     AccountGroup,
     AccountTag,
@@ -74,6 +76,33 @@ class TestSanitizeTaskConfig:
         assert _sanitize_task_config({}) == {}
 
 
+class TestSanitizeAccountMetadata:
+    """Tests for recursive account metadata masking."""
+
+    def test_masks_sensitive_keys_recursively(self):
+        metadata = {
+            "api_hash": "secret",
+            "nested": {
+                "session_string": "abc",
+                "password": "123",
+                "keep": "ok",
+            },
+            "items": [
+                {"app_hash": "hidden"},
+                {"value": "visible"},
+            ],
+        }
+
+        result = _sanitize_account_metadata(metadata)
+
+        assert result["api_hash"] == "***"
+        assert result["nested"]["session_string"] == "***"
+        assert result["nested"]["password"] == "***"
+        assert result["nested"]["keep"] == "ok"
+        assert result["items"][0]["app_hash"] == "***"
+        assert result["items"][1]["value"] == "visible"
+
+
 class TestProxyGetConnectionString:
     """Tests for Proxy.get_connection_string() using real instances."""
 
@@ -125,6 +154,37 @@ class TestProxyToDict:
         d = proxy.to_dict()
         # password should NOT be in to_dict output
         assert "password" not in d
+
+
+class TestAccountToDict:
+    """Tests for Account.to_dict() security filtering."""
+
+    @patch("database.models._is_loaded", return_value=False)
+    def test_secrets_excluded_from_api_payload(self, mock_loaded):
+        account = Account(
+            username="user",
+            phone="+123456",
+            status="valid",
+            api_id=123,
+            api_hash="super-secret",
+            two_fa_password="encrypted-value",
+            extra_data={
+                "api_hash": "super-secret",
+                "nested": {"session_string": "session", "keep": "ok"},
+            },
+            created_at=datetime(2024, 1, 1),
+        )
+        account.id = 1
+
+        data = account.to_dict()
+
+        assert data["api_id"] == 123
+        assert "api_hash" not in data
+        assert "two_fa_password" not in data
+        assert data["has_saved_two_fa_password"] is True
+        assert data["metadata"]["api_hash"] == "***"
+        assert data["metadata"]["nested"]["session_string"] == "***"
+        assert data["metadata"]["nested"]["keep"] == "ok"
 
 
 class TestTaskProgress:

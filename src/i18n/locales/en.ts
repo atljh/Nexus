@@ -369,7 +369,7 @@ export default {
       setSuccess: '2FA enabled successfully',
       changeSuccess: '2FA password changed successfully',
       removeSuccess: '2FA removed successfully',
-      savedPassword: 'Password',
+      savedPassword: 'Saved in app',
       errors: {
         alreadyEnabled: '2FA is already enabled',
         notEnabled: '2FA is not enabled',

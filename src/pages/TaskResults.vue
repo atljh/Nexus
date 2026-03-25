@@ -30,6 +30,8 @@ const dateLocale = computed(() => (locale.value === 'uk' ? 'uk-UA' : 'en-US'))
 const logsContainer = ref<HTMLElement | null>(null)
 const autoScroll = ref(true)
 const showAccountsCard = ref(true)
+let loadTaskPromise: Promise<void> | null = null
+let isPollingTickRunning = false
 
 // Get task ID from route
 const taskId = computed(() => Number(route.params.id))
@@ -278,6 +280,7 @@ async function startTask() {
     return
   }
   toast.add({ severity: 'info', summary: t('taskResults.messages.started'), life: 2000 })
+  taskStore.stopPolling()
   await loadTask()
   startPolling()
 }
@@ -370,35 +373,56 @@ async function executeConfirmAction() {
 
 // Load task data
 async function loadTask() {
-  loading.value = true
-  try {
-    const result = await taskStore.fetchTask(taskId.value)
-    if (result) {
-      task.value = result
-      await Promise.all([
-        taskStore.fetchTaskLogs(taskId.value),
-        taskStore.fetchAccountStats(taskId.value),
-        task.value.task_type === 'comments' ? taskStore.fetchTargetChannels(taskId.value) : Promise.resolve()
-      ])
-      nextTick(() => scrollLogsToBottom())
-    }
-  } catch (e: any) {
-    console.error('Failed to load task:', e)
-    toast.add({ severity: 'error', summary: t('taskResults.loadError'), detail: e?.message || '', life: 3000 })
-  } finally {
-    loading.value = false
+  if (loadTaskPromise) {
+    await loadTaskPromise
+    return
   }
+
+  loading.value = true
+  loadTaskPromise = (async () => {
+    try {
+      const result = await taskStore.fetchTask(taskId.value)
+      if (result) {
+        task.value = result
+        await Promise.all([
+          taskStore.fetchTaskLogs(taskId.value),
+          taskStore.fetchAccountStats(taskId.value),
+          task.value.task_type === 'comments' ? taskStore.fetchTargetChannels(taskId.value) : Promise.resolve()
+        ])
+        nextTick(() => scrollLogsToBottom())
+      }
+    } catch (e: any) {
+      console.error('Failed to load task:', e)
+      toast.add({ severity: 'error', summary: t('taskResults.loadError'), detail: e?.message || '', life: 3000 })
+    } finally {
+      loading.value = false
+      loadTaskPromise = null
+    }
+  })()
+
+  await loadTaskPromise
 }
 
 // Polling for running tasks
-function startPolling() {
-  if (pollingInterval.value) return
-  pollingInterval.value = window.setInterval(async () => {
+async function runPollingTick() {
+  if (isPollingTickRunning) return
+  isPollingTickRunning = true
+
+  try {
     if (task.value?.status === 'running') {
       await loadTask()
     } else {
       stopPolling()
     }
+  } finally {
+    isPollingTickRunning = false
+  }
+}
+
+function startPolling() {
+  if (pollingInterval.value) return
+  pollingInterval.value = window.setInterval(() => {
+    void runPollingTick()
   }, 2000)
 }
 
@@ -411,6 +435,7 @@ function stopPolling() {
 
 // Initialize
 onMounted(async () => {
+  taskStore.stopPolling()
   await loadTask()
 
   // Redirect if task not found
@@ -426,6 +451,7 @@ onMounted(async () => {
 })
 
 onActivated(() => {
+  taskStore.stopPolling()
   if (task.value?.status === 'running') {
     startPolling()
   }
@@ -437,6 +463,7 @@ onDeactivated(() => {
 
 onUnmounted(() => {
   stopPolling()
+  isPollingTickRunning = false
 })
 
 // Watch for status changes + completion notifications

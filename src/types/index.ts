@@ -12,8 +12,8 @@ export interface Account {
   geo: string | null
   register_time: string | null
   has_2fa: boolean
+  has_saved_two_fa_password: boolean
   password_hint: string | null
-  two_fa_password: string | null
   two_fa_set_at: string | null
   metadata: Record<string, unknown> | null
   proxy: Proxy | null
@@ -374,6 +374,7 @@ export const DEFAULT_COMMENT_TEMPLATES = [
 
 export interface TwoFAStatus {
   has_2fa: boolean
+  has_saved_two_fa_password?: boolean
   password_hint: string | null
   error: string | null
 }

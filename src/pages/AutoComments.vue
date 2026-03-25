@@ -58,6 +58,8 @@ const isPrivateChannel = computed(() => channelInput.value.startsWith('-100'))
 //   t.me/c/3548071275/129 → -1003548071275 + postId 129
 //   t.me/+HASH or t.me/joinchat/HASH → kept as invite link
 const detectedPostId = ref<number | null>(null)
+const FORM_SAVE_DELAY_MS = 250
+let formSaveTimer: number | null = null
 
 function parseTelegramLink(input: string): { channel: string; postId?: number } | null {
   // Private channel: t.me/c/CHANNEL_ID/POST_ID
@@ -138,6 +140,27 @@ function saveForm() {
   }))
 }
 
+function clearPendingFormSave() {
+  if (formSaveTimer !== null) {
+    window.clearTimeout(formSaveTimer)
+    formSaveTimer = null
+  }
+}
+
+function scheduleFormSave() {
+  clearPendingFormSave()
+  formSaveTimer = window.setTimeout(() => {
+    formSaveTimer = null
+    saveForm()
+  }, FORM_SAVE_DELAY_MS)
+}
+
+function flushPendingFormSave() {
+  if (formSaveTimer === null) return
+  clearPendingFormSave()
+  saveForm()
+}
+
 function loadForm() {
   try {
     const saved = localStorage.getItem(FORM_KEY)
@@ -159,7 +182,11 @@ function loadForm() {
   } catch { /* ignore */ }
 }
 
-watch([channelInput, inviteLinkInput, parsedFromLink, detectedPostId, selectedTemplateIds, customTemplates, rotationMode, commentsPerAccount, totalActions, minDelay, maxDelay, maxConcurrent, selectedAccountIds], saveForm)
+watch(
+  [channelInput, inviteLinkInput, parsedFromLink, detectedPostId, selectedTemplateIds, customTemplates, rotationMode, commentsPerAccount, totalActions, minDelay, maxDelay, maxConcurrent, selectedAccountIds],
+  scheduleFormSave,
+  { deep: true }
+)
 
 // Template management
 const showTemplateDialog = ref(false)
@@ -294,6 +321,7 @@ async function createTask() {
     })
 
     if (task) {
+      clearPendingFormSave()
       localStorage.removeItem(FORM_KEY)
       // Warn if some accounts were skipped
       if ((task as any).skipped_accounts) {
@@ -341,12 +369,8 @@ const pendingTasks = computed(() => taskStore.tasks.filter(t => t.status === 'pe
 // Batch actions
 async function startAllPending() {
   const tasks = [...pendingTasks.value]
-  let started = 0
-  for (const task of tasks) {
-    if (await taskStore.startTask(task.id)) {
-      started += 1
-    }
-  }
+  const results = await Promise.allSettled(tasks.map(task => taskStore.startTask(task.id)))
+  const started = results.filter(result => result.status === 'fulfilled' && result.value).length
   if (started > 0) {
     toast.add({
       severity: 'info',
@@ -366,12 +390,8 @@ async function startAllPending() {
 
 async function stopAllRunning() {
   const tasks = [...runningTasks.value]
-  let stopped = 0
-  for (const task of tasks) {
-    if (await taskStore.cancelTask(task.id)) {
-      stopped += 1
-    }
-  }
+  const results = await Promise.allSettled(tasks.map(task => taskStore.cancelTask(task.id)))
+  const stopped = results.filter(result => result.status === 'fulfilled' && result.value).length
   if (stopped > 0) {
     toast.add({
       severity: 'info',
@@ -432,9 +452,9 @@ async function deleteTemplate(template: CommentTemplate) {
 }
 
 async function loadDefaultTemplates() {
-  for (const template of DEFAULT_COMMENT_TEMPLATES) {
-    await taskStore.createTemplate(template.name, template.content)
-  }
+  await Promise.all(DEFAULT_COMMENT_TEMPLATES.map(template =>
+    taskStore.createTemplate(template.name, template.content)
+  ))
   toast.add({
     severity: 'success',
     summary: t('autoComments.messages.defaultsLoaded'),
@@ -573,9 +593,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  if (!taskStore.hasRunningTasks) {
-    taskStore.stopPolling()
-  }
+  flushPendingFormSave()
+  taskStore.stopPolling()
 })
 </script>
 

@@ -415,7 +415,7 @@ async def test_get_linked_chat_found(worker):
     linked = await worker._get_linked_chat(1, entity)
 
     assert linked == 999
-    assert worker._linked_chat_cache[100] == 999
+    assert worker._linked_chat_cache[(1, 100)] == 999
 
 
 @pytest.mark.asyncio
@@ -432,7 +432,7 @@ async def test_get_linked_chat_none(worker):
     linked = await worker._get_linked_chat(1, entity)
 
     assert linked is None
-    assert worker._linked_chat_cache[100] is None
+    assert worker._linked_chat_cache[(1, 100)] is None
 
 
 @pytest.mark.asyncio
@@ -442,7 +442,7 @@ async def test_get_linked_chat_cached(worker):
     mock_client.client = AsyncMock()
 
     worker._clients[1] = mock_client
-    worker._linked_chat_cache[100] = 999
+    worker._linked_chat_cache[(1, 100)] = 999
 
     entity = make_entity(100)
     linked = await worker._get_linked_chat(1, entity)
@@ -463,14 +463,18 @@ async def test_get_linked_chat_error_returns_none(worker):
     linked = await worker._get_linked_chat(1, entity)
 
     assert linked is None
-    assert worker._linked_chat_cache[100] is None
+    assert worker._linked_chat_cache[(1, 100)] is None
 
 
 @pytest.mark.asyncio
 async def test_join_discussion_group_already_member(worker):
     """If already a member, return success without joining."""
+    telegram_client = AsyncMock(return_value=MagicMock())
+    telegram_client.get_input_entity = AsyncMock(return_value="input_entity")
+    telegram_client.get_entity = AsyncMock()
+
     mock_client = MagicMock()
-    mock_client.client = AsyncMock(return_value=MagicMock())
+    mock_client.client = telegram_client
 
     worker._clients[1] = mock_client
 
@@ -478,6 +482,7 @@ async def test_join_discussion_group_already_member(worker):
 
     assert success is True
     assert error is None
+    telegram_client.get_input_entity.assert_awaited_once_with(999)
 
 
 @pytest.mark.asyncio
@@ -485,20 +490,20 @@ async def test_join_discussion_group_needs_join(worker):
     """If not a member, join the group."""
     from telethon.errors import UserNotParticipantError
 
-    mock_client = MagicMock()
-    call_count = 0
-
     async def mock_call(request):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            # GetParticipantRequest → not a participant
+        request_name = type(request).__name__
+        if request_name == "GetParticipantRequest":
             raise UserNotParticipantError(request=None)
-        else:
-            # JoinChannelRequest → success
+        if request_name == "JoinChannelRequest":
             return MagicMock()
+        raise AssertionError(f"Unexpected request: {request_name}")
 
-    mock_client.client = mock_call
+    telegram_client = AsyncMock(side_effect=mock_call)
+    telegram_client.get_input_entity = AsyncMock(return_value="input_entity")
+    telegram_client.get_entity = AsyncMock()
+
+    mock_client = MagicMock()
+    mock_client.client = telegram_client
     worker._clients[1] = mock_client
 
     success, error = await worker._join_discussion_group(1, 999)
@@ -508,22 +513,42 @@ async def test_join_discussion_group_needs_join(worker):
 
 
 @pytest.mark.asyncio
+async def test_join_discussion_group_uses_get_entity_fallback(worker):
+    """Fallback to get_entity when get_input_entity cannot resolve the group."""
+    telegram_client = AsyncMock(return_value=MagicMock())
+    telegram_client.get_input_entity = AsyncMock(side_effect=ValueError("not cached"))
+    telegram_client.get_entity = AsyncMock(return_value="resolved_entity")
+
+    mock_client = MagicMock()
+    mock_client.client = telegram_client
+    worker._clients[1] = mock_client
+
+    success, error = await worker._join_discussion_group(1, 999)
+
+    assert success is True
+    assert error is None
+    telegram_client.get_entity.assert_awaited_once_with(999)
+
+
+@pytest.mark.asyncio
 async def test_join_discussion_group_flood_wait_raises(worker):
     """FloodWaitError should be re-raised."""
     from telethon.errors import UserNotParticipantError, FloodWaitError
 
-    mock_client = MagicMock()
-    call_count = 0
-
     async def mock_call(request):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
+        request_name = type(request).__name__
+        if request_name == "GetParticipantRequest":
             raise UserNotParticipantError(request=None)
-        else:
+        if request_name == "JoinChannelRequest":
             raise FloodWaitError(request=None, capture=10)
+        raise AssertionError(f"Unexpected request: {request_name}")
 
-    mock_client.client = mock_call
+    telegram_client = AsyncMock(side_effect=mock_call)
+    telegram_client.get_input_entity = AsyncMock(return_value="input_entity")
+    telegram_client.get_entity = AsyncMock()
+
+    mock_client = MagicMock()
+    mock_client.client = telegram_client
     worker._clients[1] = mock_client
 
     with pytest.raises(FloodWaitError):
@@ -1177,7 +1202,7 @@ async def test_setup_channels_auto_join(worker):
 
 @pytest.mark.asyncio
 async def test_setup_channels_flood_wait_excludes_account(worker):
-    """FloodWait during setup should exclude account from pool."""
+    """FloodWait during setup should put the account on cooldown, not fail it permanently."""
     from telethon.errors import FloodWaitError
 
     entity = make_entity(100)
@@ -1191,7 +1216,8 @@ async def test_setup_channels_flood_wait_excludes_account(worker):
         db = MagicMock()
         await worker._setup_channels_for_account(1, [target], db)
 
-    assert 1 in worker._failed_accounts
+    assert 1 not in worker._failed_accounts
+    assert 1 in worker._flood_wait_until
 
 
 @pytest.mark.asyncio

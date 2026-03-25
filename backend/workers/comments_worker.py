@@ -858,45 +858,6 @@ class CommentsWorker:
                 entity_title=target.channel_title,
             )
 
-        except Exception as guest_err:
-            if ChatGuestSendForbiddenError and isinstance(guest_err, ChatGuestSendForbiddenError):
-                # Need to join discussion group first, then retry
-                logger.info(f"Account {account_id}: ChatGuestSendForbidden — joining discussion group and retrying")
-                linked_chat_id = await self._get_linked_chat(account_id, entity)
-                if linked_chat_id:
-                    dg_joined, _ = await self._join_discussion_group(account_id, linked_chat_id)
-                    if dg_joined:
-                        await asyncio.sleep(random.uniform(1, 2))
-                        try:
-                            sent = await client.client.send_message(
-                                entity=entity,
-                                message=comment,
-                                comment_to=post_id,
-                            )
-                            return SendResult(
-                                status=SendStatus.OK,
-                                message=f"Comment sent to {target.channel_username}/{post_id}",
-                                entity_id=target.channel_id,
-                                entity_title=target.channel_title,
-                                sent_message=sent,
-                            )
-                        except Exception as retry_err:
-                            return SendResult(
-                                status=SendStatus.ERROR,
-                                message="Cannot comment after joining discussion group",
-                                error=str(retry_err)[:100],
-                                entity_id=target.channel_id,
-                                entity_title=target.channel_title,
-                            )
-                return SendResult(
-                    status=SendStatus.WRITE_FORBIDDEN,
-                    message="Must join discussion group before commenting",
-                    error="ChatGuestSendForbiddenError",
-                    entity_id=target.channel_id,
-                    entity_title=target.channel_title,
-                )
-            raise  # Re-raise for other exceptions to be caught below
-
         except ChatWriteForbiddenError:
             return SendResult(
                 status=SendStatus.WRITE_FORBIDDEN,
@@ -934,6 +895,42 @@ class CommentsWorker:
             )
 
         except Exception as e:
+            if ChatGuestSendForbiddenError and isinstance(e, ChatGuestSendForbiddenError):
+                # Need to join the linked discussion group first, then retry once.
+                logger.info(f"Account {account_id}: ChatGuestSendForbidden — joining discussion group and retrying")
+                linked_chat_id = await self._get_linked_chat(account_id, entity)
+                if linked_chat_id:
+                    dg_joined, _ = await self._join_discussion_group(account_id, linked_chat_id)
+                    if dg_joined:
+                        await asyncio.sleep(random.uniform(1, 2))
+                        try:
+                            sent = await client.client.send_message(
+                                entity=entity,
+                                message=comment,
+                                comment_to=post_id,
+                            )
+                            return SendResult(
+                                status=SendStatus.OK,
+                                message=f"Comment sent to {target.channel_username}/{post_id}",
+                                entity_id=target.channel_id,
+                                entity_title=target.channel_title,
+                                sent_message=sent,
+                            )
+                        except Exception as retry_err:
+                            retry_result = ErrorClassifier.classify(retry_err)
+                            retry_result.message = "Cannot comment after joining discussion group"
+                            retry_result.entity_id = target.channel_id
+                            retry_result.entity_title = target.channel_title
+                            return retry_result
+
+                return SendResult(
+                    status=SendStatus.WRITE_FORBIDDEN,
+                    message="Must join discussion group before commenting",
+                    error="ChatGuestSendForbiddenError",
+                    entity_id=target.channel_id,
+                    entity_title=target.channel_title,
+                )
+
             result = ErrorClassifier.classify(e)
             result.entity_id = target.channel_id
             result.entity_title = target.channel_title

@@ -1309,6 +1309,7 @@ async def get_2fa_status(
 
     return {
         "has_2fa": check_result.has_2fa,
+        "has_saved_two_fa_password": bool(account.two_fa_password),
         "password_hint": check_result.password_hint,
         "error": check_result.error,
     }

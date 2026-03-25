@@ -38,6 +38,8 @@ const maxConcurrent = ref(1)
 const selectedAccountIds = ref<number[]>([])
 const parsedFromLink = ref(false)
 const isPrivateChannel = computed(() => channel.value.startsWith('-100'))
+const FORM_SAVE_DELAY_MS = 250
+let formSaveTimer: number | null = null
 
 // UI state
 const isCreating = ref(false)
@@ -115,6 +117,27 @@ function saveForm() {
   }))
 }
 
+function clearPendingFormSave() {
+  if (formSaveTimer !== null) {
+    window.clearTimeout(formSaveTimer)
+    formSaveTimer = null
+  }
+}
+
+function scheduleFormSave() {
+  clearPendingFormSave()
+  formSaveTimer = window.setTimeout(() => {
+    formSaveTimer = null
+    saveForm()
+  }, FORM_SAVE_DELAY_MS)
+}
+
+function flushPendingFormSave() {
+  if (formSaveTimer === null) return
+  clearPendingFormSave()
+  saveForm()
+}
+
 function loadForm() {
   try {
     const saved = localStorage.getItem(FORM_KEY)
@@ -133,7 +156,11 @@ function loadForm() {
   } catch { /* ignore */ }
 }
 
-watch([channel, postId, inviteLink, selectedReactions, emojiMode, minDelay, maxDelay, maxConcurrent, selectedAccountIds], saveForm)
+watch(
+  [channel, postId, inviteLink, selectedReactions, emojiMode, minDelay, maxDelay, maxConcurrent, selectedAccountIds, parsedFromLink],
+  scheduleFormSave,
+  { deep: true }
+)
 
 // Emoji mode options
 const emojiModeOptions = computed(() => [
@@ -181,7 +208,11 @@ async function createTask() {
 
   // Validate channel format: @username or username (alphanumeric + underscore, 5-32 chars)
   const cleanChannel = ch.startsWith('@') ? ch.slice(1) : ch
-  if (!/^[a-zA-Z0-9_]{5,32}$/.test(cleanChannel)) {
+  const isValidChannel = /^-?\d+$/.test(ch)
+    || ch.startsWith('t.me/+')
+    || ch.startsWith('t.me/joinchat/')
+    || /^[a-zA-Z0-9_]{5,32}$/.test(cleanChannel)
+  if (!isValidChannel) {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
@@ -228,6 +259,7 @@ async function createTask() {
     })
 
     if (task) {
+      clearPendingFormSave()
       localStorage.removeItem(FORM_KEY)
       // Warn if some accounts were skipped
       if ((task as any).skipped_accounts) {
@@ -274,12 +306,8 @@ const pendingTasks = computed(() => taskStore.tasks.filter(t => t.status === 'pe
 // Batch actions
 async function startAllPending() {
   const tasks = [...pendingTasks.value]
-  let started = 0
-  for (const task of tasks) {
-    if (await taskStore.startTask(task.id)) {
-      started += 1
-    }
-  }
+  const results = await Promise.allSettled(tasks.map(task => taskStore.startTask(task.id)))
+  const started = results.filter(result => result.status === 'fulfilled' && result.value).length
   if (started > 0) {
     toast.add({
       severity: 'info',
@@ -299,12 +327,8 @@ async function startAllPending() {
 
 async function stopAllRunning() {
   const tasks = [...runningTasks.value]
-  let stopped = 0
-  for (const task of tasks) {
-    if (await taskStore.cancelTask(task.id)) {
-      stopped += 1
-    }
-  }
+  const results = await Promise.allSettled(tasks.map(task => taskStore.cancelTask(task.id)))
+  const stopped = results.filter(result => result.status === 'fulfilled' && result.value).length
   if (stopped > 0) {
     toast.add({
       severity: 'info',
@@ -417,9 +441,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  if (!taskStore.hasRunningTasks) {
-    taskStore.stopPolling()
-  }
+  flushPendingFormSave()
+  taskStore.stopPolling()
 })
 </script>
 

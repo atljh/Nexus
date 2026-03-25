@@ -210,17 +210,6 @@ function resetForm() {
   activeTab.value = 0
 }
 
-function copyPassword() {
-  if (props.account?.two_fa_password) {
-    navigator.clipboard.writeText(props.account.two_fa_password)
-    toast.add({
-      severity: 'info',
-      summary: t('common.copied'),
-      life: 1500
-    })
-  }
-}
-
 function getAccountName(): string {
   if (!props.account) return ''
   if (props.account.username) return `@${props.account.username}`
@@ -271,12 +260,10 @@ function getAccountName(): string {
         <span>{{ t('accounts.twoFA.hint') }}: {{ status.password_hint }}</span>
       </div>
 
-      <!-- Saved Password -->
-      <div v-if="account?.two_fa_password" class="saved-password-box" @click="copyPassword">
+      <!-- Saved Password Marker -->
+      <div v-if="account?.has_saved_two_fa_password" class="saved-password-box">
         <i class="pi pi-key"></i>
-        <span class="saved-password-label">{{ t('accounts.twoFA.savedPassword') }}:</span>
-        <code class="saved-password-value">{{ account.two_fa_password }}</code>
-        <i class="pi pi-copy copy-icon"></i>
+        <span class="saved-password-label">{{ t('accounts.twoFA.savedPassword') }}</span>
       </div>
 
       <!-- Tabs -->

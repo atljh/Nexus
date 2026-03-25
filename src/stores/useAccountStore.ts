@@ -480,6 +480,7 @@ export const useAccountStore = defineStore('accounts', () => {
     const account = accounts.value.find(a => a.id === accountId)
     if (account) {
       account.has_2fa = result.has_2fa
+      account.has_saved_two_fa_password = !!result.has_saved_two_fa_password
       account.password_hint = result.password_hint
     }
 
@@ -493,6 +494,7 @@ export const useAccountStore = defineStore('accounts', () => {
       const account = accounts.value.find(a => a.id === accountId)
       if (account) {
         account.has_2fa = true
+        account.has_saved_two_fa_password = true
         account.password_hint = data.hint || null
         account.two_fa_set_at = new Date().toISOString()
       }
@@ -507,6 +509,7 @@ export const useAccountStore = defineStore('accounts', () => {
     if (result.success) {
       const account = accounts.value.find(a => a.id === accountId)
       if (account) {
+        account.has_saved_two_fa_password = true
         account.password_hint = data.new_hint || null
         account.two_fa_set_at = new Date().toISOString()
       }
@@ -522,6 +525,7 @@ export const useAccountStore = defineStore('accounts', () => {
       const account = accounts.value.find(a => a.id === accountId)
       if (account) {
         account.has_2fa = false
+        account.has_saved_two_fa_password = false
         account.password_hint = null
         account.two_fa_set_at = null
       }
@@ -544,8 +548,8 @@ export const useAccountStore = defineStore('accounts', () => {
         const account = accounts.value.find(a => a.id === r.id)
         if (account) {
           account.has_2fa = true
+          account.has_saved_two_fa_password = true
           account.password_hint = hint || null
-          account.two_fa_password = password
           account.two_fa_set_at = new Date().toISOString()
         }
       }

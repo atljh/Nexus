@@ -1731,15 +1731,6 @@ async function handleBulkHidePhone() {
   }
 }
 
-function copyToClipboard(text: string) {
-  navigator.clipboard.writeText(text)
-  toast.add({
-    severity: 'info',
-    summary: t('common.copied'),
-    life: 1500
-  })
-}
-
 function openWebViewer(account: Account) {
   webViewerAccount.value = account
   showWebViewer.value = true
@@ -2198,8 +2189,8 @@ const restrictedAccounts = computed(() => accountStats.value.restricted)
             <template #body="{ data }">
               <div class="twofa-cell">
                 <i :class="data.has_2fa ? 'pi pi-lock' : 'pi pi-lock-open'" :style="{ color: data.has_2fa ? '#22c55e' : '#4b5563', fontSize: '12px' }"></i>
-                <span v-if="data.two_fa_password" class="twofa-password" @click="copyToClipboard(data.two_fa_password)" v-tooltip.top="t('common.copy')">
-                  {{ data.two_fa_password }}
+                <span v-if="data.has_saved_two_fa_password" class="twofa-password">
+                  {{ t('accounts.twoFA.savedPassword') }}
                 </span>
                 <span v-else class="twofa-none">—</span>
               </div>
@@ -2848,15 +2839,21 @@ login:pass:1.2.3.4:8080"
               <button
                 :class="['gender-btn', { active: bulkProfileGender === undefined }]"
                 @click="bulkProfileGender = undefined"
-              >{{ t('accounts.profile.genderRandom') }}</button>
+              >
+                {{ t('accounts.profile.genderRandom') }}
+              </button>
               <button
                 :class="['gender-btn', { active: bulkProfileGender === 'male' }]"
                 @click="bulkProfileGender = 'male'"
-              >{{ t('accounts.profile.genderMale') }}</button>
+              >
+                {{ t('accounts.profile.genderMale') }}
+              </button>
               <button
                 :class="['gender-btn', { active: bulkProfileGender === 'female' }]"
                 @click="bulkProfileGender = 'female'"
-              >{{ t('accounts.profile.genderFemale') }}</button>
+              >
+                {{ t('accounts.profile.genderFemale') }}
+              </button>
             </div>
           </div>
           <div class="hint-box">

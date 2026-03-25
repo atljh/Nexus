@@ -369,7 +369,7 @@ export default {
       setSuccess: '2FA успішно увімкнено',
       changeSuccess: 'Пароль 2FA успішно змінено',
       removeSuccess: '2FA успішно видалено',
-      savedPassword: 'Пароль',
+      savedPassword: 'Збережено в застосунку',
       errors: {
         alreadyEnabled: '2FA вже увімкнено',
         notEnabled: '2FA не увімкнено',

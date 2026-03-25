@@ -32,6 +32,32 @@ def _sanitize_task_config(config: Optional[dict]) -> dict:
     return safe
 
 
+SENSITIVE_ACCOUNT_METADATA_KEYS = {
+    "api_hash",
+    "app_hash",
+    "session_string",
+    "two_fa_password",
+    "password",
+    "proxy_password",
+    "auth_key",
+}
+
+
+def _sanitize_account_metadata(value):
+    """Recursively mask sensitive values inside imported account metadata."""
+    if isinstance(value, dict):
+        sanitized = {}
+        for key, item in value.items():
+            if isinstance(key, str) and key.lower() in SENSITIVE_ACCOUNT_METADATA_KEYS:
+                sanitized[key] = "***"
+            else:
+                sanitized[key] = _sanitize_account_metadata(item)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_account_metadata(item) for item in value]
+    return value
+
+
 # Many-to-many relationship table for accounts and tags
 account_tags = Table(
     "account_tags",
@@ -220,14 +246,13 @@ class Account(Base):
             "geo": self.geo,
             "register_time": _utc_iso(self.register_time),
             "api_id": self.api_id,
-            "api_hash": self.api_hash,
             "device_fingerprint": self.device_fingerprint,
             "fingerprint_locked_at": _utc_iso(self.fingerprint_locked_at),
             "has_2fa": self.has_2fa,
+            "has_saved_two_fa_password": bool(self.two_fa_password),
             "password_hint": self.password_hint,
-            "two_fa_password": self._decrypt_2fa_password(),
             "two_fa_set_at": _utc_iso(self.two_fa_set_at),
-            "metadata": self.extra_data,
+            "metadata": _sanitize_account_metadata(self.extra_data),
             "proxy": proxy_dict,
             "proxy_id": self.proxy_id,
             "group": group_dict,
@@ -239,15 +264,6 @@ class Account(Base):
             "last_used_at": _utc_iso(self.last_used_at),
             "created_at": _utc_iso(self.created_at)
         }
-
-    def _decrypt_2fa_password(self) -> Optional[str]:
-        if not self.two_fa_password:
-            return None
-        try:
-            from utils.encryption import encryption_service
-            return encryption_service.decrypt_safe(self.two_fa_password)
-        except Exception:
-            return None
 
 
 # Many-to-many relationship table for tasks and accounts
