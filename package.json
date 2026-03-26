@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "./scripts/build.sh",
-    "build:win": "./scripts/build.sh win",
+    "build:win": "powershell -ExecutionPolicy Bypass -File scripts\\build.ps1",
     "build:mac": "./scripts/build.sh mac",
     "package:win": "vue-tsc --noEmit && vite build && electron-builder --win",
     "package:mac": "vue-tsc --noEmit && vite build && electron-builder --mac",

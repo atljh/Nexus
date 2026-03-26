@@ -61,9 +61,9 @@ Set-Location $ProjectDir
 Write-Host "[2/3] Building frontend..." -ForegroundColor Yellow
 
 if (Get-Command pnpm -ErrorAction SilentlyContinue) {
-    pnpm run build:win
+    pnpm run package:win
 } else {
-    npm run build:win
+    npm run package:win
 }
 
 if ($LASTEXITCODE -ne 0) { exit 1 }
