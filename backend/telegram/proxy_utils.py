@@ -3,6 +3,11 @@ from typing import Dict, Optional, Tuple
 
 import socks
 
+TELEGRAM_DC_SERVERS = [
+    ("149.154.167.50", 443),  # DC2
+    ("149.154.175.53", 443),  # DC1
+]
+
 
 def format_proxy(proxy: Optional[Dict]) -> Optional[Tuple]:
     """Format proxy dict to Telethon tuple format.

@@ -15,13 +15,7 @@ logger = logging.getLogger(__name__)
 
 import aiohttp
 from aiohttp_socks import ProxyConnector
-
-
-# Telegram MTProto DC servers for connectivity test
-TELEGRAM_DC_SERVERS = [
-    ("149.154.167.50", 443),  # DC2
-    ("149.154.175.53", 443),  # DC1
-]
+from telegram.proxy_utils import TELEGRAM_DC_SERVERS
 
 
 class ProxyStatus(str, Enum):
@@ -63,6 +57,16 @@ class ProxyChecker:
         self.max_retries = max_retries
         self._semaphore: Optional[asyncio.Semaphore] = None
 
+    @staticmethod
+    def _status_from_ping(ping_ms: Optional[int]) -> ProxyStatus:
+        if ping_ms is None:
+            return ProxyStatus.WORKING
+        if ping_ms < 2000:
+            return ProxyStatus.WORKING
+        if ping_ms < 8000:
+            return ProxyStatus.SLOW
+        return ProxyStatus.VERY_SLOW
+
     async def check_single(
         self,
         proxy_id: int,
@@ -84,6 +88,8 @@ class ProxyChecker:
             proxy_id=proxy_id,
             status=ProxyStatus.NOT_WORKING
         )
+        telegram_ping_ms: Optional[int] = None
+        last_lookup_error: Optional[str] = None
 
         # Test Telegram DC reachability first
         parsed = urlparse(proxy_url)
@@ -92,6 +98,7 @@ class ProxyChecker:
             if not telegram_test["success"]:
                 result.error = telegram_test["error"]
                 return result
+            telegram_ping_ms = telegram_test.get("ping_ms")
         elif parsed.scheme in ("http", "https"):
             telegram_test = await self._test_http_proxy_connect(
                 proxy_host=parsed.hostname,
@@ -102,6 +109,7 @@ class ProxyChecker:
             if not telegram_test["success"]:
                 result.error = telegram_test["error"]
                 return result
+            telegram_ping_ms = telegram_test.get("ping_ms")
 
         for attempt in range(self.max_retries):
             for test_url in self.TEST_URLS:
@@ -123,14 +131,7 @@ class ProxyChecker:
                                 external_ip = text.strip()
 
                                 # Determine status based on ping
-                                if ping_ms < 2000:
-                                    status = ProxyStatus.WORKING
-                                elif ping_ms < 8000:
-                                    status = ProxyStatus.SLOW
-                                else:
-                                    status = ProxyStatus.VERY_SLOW
-
-                                result.status = status
+                                result.status = self._status_from_ping(ping_ms)
                                 result.ping_ms = ping_ms
                                 result.external_ip = external_ip
 
@@ -142,9 +143,22 @@ class ProxyChecker:
 
                 except asyncio.TimeoutError:
                     result.status = ProxyStatus.TIMEOUT
-                    result.error = "Connection timeout"
+                    last_lookup_error = "Connection timeout"
                 except Exception as e:
-                    result.error = str(e)
+                    last_lookup_error = str(e)
+
+        if telegram_ping_ms is not None:
+            result.status = self._status_from_ping(telegram_ping_ms)
+            result.ping_ms = telegram_ping_ms
+            result.error = None
+            logger.debug(
+                "Proxy %s passed Telegram connectivity but IP lookup failed: %s",
+                proxy_id,
+                last_lookup_error,
+            )
+            return result
+
+        result.error = last_lookup_error
 
         return result
 
@@ -157,19 +171,24 @@ class ProxyChecker:
             from python_socks.async_.asyncio import Proxy
         except ImportError:
             # If python-socks not installed, skip the check
-            return {"success": True, "error": None}
+            return {"success": True, "error": None, "ping_ms": None}
 
         last_error: Optional[str] = None
 
         for dc_host, dc_port in TELEGRAM_DC_SERVERS:
             try:
+                start_time = time.monotonic()
                 proxy = Proxy.from_url(proxy_url)
                 sock = await asyncio.wait_for(
                     proxy.connect(dest_host=dc_host, dest_port=dc_port),
                     timeout=10,
                 )
                 sock.close()
-                return {"success": True, "error": None}
+                return {
+                    "success": True,
+                    "error": None,
+                    "ping_ms": int((time.monotonic() - start_time) * 1000),
+                }
             except asyncio.TimeoutError:
                 last_error = "Connection timeout"
                 continue
@@ -199,6 +218,7 @@ class ProxyChecker:
         """
         for dc_host, dc_port in TELEGRAM_DC_SERVERS:
             try:
+                start_time = time.monotonic()
                 reader, writer = await asyncio.wait_for(
                     asyncio.open_connection(proxy_host, proxy_port), timeout=5
                 )
@@ -231,7 +251,11 @@ class ProxyChecker:
                     logger.debug(f"Writer close error: {e}")
 
                 if "200" in response_str:
-                    return {"success": True, "error": None}
+                    return {
+                        "success": True,
+                        "error": None,
+                        "ping_ms": int((time.monotonic() - start_time) * 1000),
+                    }
                 elif "407" in response_str:
                     return {"success": False, "error": "Invalid proxy username or password"}
                 elif "403" in response_str:

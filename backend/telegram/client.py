@@ -30,6 +30,7 @@ from .device_generator import (
     detect_platform_from_api_id,
     OFFICIAL_APIS,
 )
+from .proxy_utils import TELEGRAM_DC_SERVERS
 
 
 class BaseClient:
@@ -169,7 +170,7 @@ class BaseClient:
         """
         Test proxy connectivity before connecting to Telegram.
 
-        For SOCKS proxies: test via aiohttp_socks to api.telegram.org.
+        For SOCKS proxies: test direct TCP connectivity to Telegram DC servers.
         For HTTP proxies: test CONNECT tunnel to Telegram DC.
 
         Returns:
@@ -195,36 +196,43 @@ class BaseClient:
         try:
             if proxy_type.lower().startswith("socks"):
                 try:
-                    from aiohttp_socks import ProxyConnector
-                    import aiohttp
-
+                    from python_socks.async_.asyncio import Proxy
                     proxy_url = f"{proxy_type}://"
                     if username and password:
                         proxy_url += f"{username}:{password}@"
                     proxy_url += f"{addr}:{port}"
+                    last_error = None
 
-                    timeout = aiohttp.ClientTimeout(total=5)
-                    connector = ProxyConnector.from_url(proxy_url)
-
-                    async with aiohttp.ClientSession(
-                        connector=connector, timeout=timeout
-                    ) as session:
-                        async with session.get("https://api.telegram.org") as response:
+                    for dc_host, dc_port in TELEGRAM_DC_SERVERS:
+                        try:
+                            proxy_client = Proxy.from_url(proxy_url)
+                            sock = await asyncio.wait_for(
+                                proxy_client.connect(dest_host=dc_host, dest_port=dc_port),
+                                timeout=5,
+                            )
                             elapsed = time.time() - start
+                            sock.close()
                             return {
                                 "success": True,
                                 "response_time": elapsed,
                                 "error": None,
                             }
-                except ImportError:
-                    return {"success": True, "response_time": 0, "error": None}
-                except Exception as e:
+                        except asyncio.TimeoutError:
+                            last_error = "Timeout connecting to Telegram through SOCKS proxy"
+                            continue
+                        except Exception as e:
+                            last_error = f"SOCKS proxy not working: {e}"
+                            if "authentication failure" in str(e).lower():
+                                break
+
                     elapsed = time.time() - start
                     return {
                         "success": False,
                         "response_time": elapsed,
-                        "error": f"SOCKS proxy not working: {e}",
+                        "error": last_error or "SOCKS proxy cannot connect to Telegram servers",
                     }
+                except ImportError:
+                    return {"success": True, "response_time": 0, "error": None}
             else:
                 # HTTP proxy: test CONNECT to Telegram DC
                 telegram_dc = "149.154.167.50"

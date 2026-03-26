@@ -18,6 +18,20 @@ class _AuthFailingProxy:
         raise RuntimeError("Username and password authentication failure")
 
 
+class _FailingSession:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    def get(self, *args, **kwargs):
+        raise RuntimeError("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed")
+
+
 @pytest.mark.asyncio
 async def test_socks_telegram_check_preserves_auth_failure(monkeypatch):
     checker = ProxyChecker()
@@ -34,3 +48,54 @@ async def test_socks_telegram_check_preserves_auth_failure(monkeypatch):
         "success": False,
         "error": "Username and password authentication failure",
     }
+
+
+@pytest.mark.asyncio
+async def test_check_single_uses_telegram_success_when_ip_lookup_fails_for_socks(monkeypatch):
+    checker = ProxyChecker(max_retries=1)
+
+    async def fake_telegram_test(proxy_url: str):
+        return {"success": True, "error": None, "ping_ms": 321}
+
+    monkeypatch.setattr(checker, "_test_socks_proxy_telegram", fake_telegram_test)
+    monkeypatch.setattr(
+        python_socks_asyncio.Proxy,
+        "from_url",
+        staticmethod(lambda url: object()),
+    )
+    monkeypatch.setattr("api.proxy_checker.aiohttp.ClientSession", _FailingSession)
+    monkeypatch.setattr("api.proxy_checker.ProxyConnector.from_url", staticmethod(lambda url: object()))
+
+    result = await checker.check_single(
+        proxy_id=1,
+        proxy_url="socks5://127.0.0.1:1080",
+        lookup_geo=False,
+    )
+
+    assert result.status.value == "working"
+    assert result.ping_ms == 321
+    assert result.external_ip is None
+    assert result.error is None
+
+
+@pytest.mark.asyncio
+async def test_check_single_uses_telegram_success_when_ip_lookup_fails_for_http(monkeypatch):
+    checker = ProxyChecker(max_retries=1)
+
+    async def fake_http_connect(*args, **kwargs):
+        return {"success": True, "error": None, "ping_ms": 4200}
+
+    monkeypatch.setattr(checker, "_test_http_proxy_connect", fake_http_connect)
+    monkeypatch.setattr("api.proxy_checker.aiohttp.ClientSession", _FailingSession)
+    monkeypatch.setattr("api.proxy_checker.ProxyConnector.from_url", staticmethod(lambda url: object()))
+
+    result = await checker.check_single(
+        proxy_id=2,
+        proxy_url="http://127.0.0.1:8080",
+        lookup_geo=False,
+    )
+
+    assert result.status.value == "slow"
+    assert result.ping_ms == 4200
+    assert result.external_ip is None
+    assert result.error is None
