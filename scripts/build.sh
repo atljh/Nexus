@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Nexus Build Script
-# Usage: ./scripts/build.sh [mac|win|all]
+# Usage: ./scripts/build.sh [mac|win]
 
 set -e
 
@@ -16,8 +16,24 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-TARGET=${1:-"mac"}
 HOST_OS="$(uname -s)"
+
+TARGET="${1:-}"
+if [ -z "$TARGET" ]; then
+    case "$HOST_OS" in
+        MINGW*|MSYS*|CYGWIN*|Windows_NT)
+            TARGET="win"
+            ;;
+        *)
+            TARGET="mac"
+            ;;
+    esac
+fi
+
+if [ "$TARGET" != "mac" ] && [ "$TARGET" != "win" ]; then
+    echo -e "${RED}ERROR:${NC} Unsupported build target '$TARGET'. Use 'mac' or 'win'."
+    exit 1
+fi
 
 echo -e "${BLUE}╔════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║         Nexus Build                ║${NC}"
@@ -78,9 +94,9 @@ echo -e "${YELLOW}[2/3]${NC} Building frontend..."
 
 # Build frontend
 if command -v pnpm &> /dev/null; then
-    pnpm run build:$TARGET
+    pnpm run package:$TARGET
 else
-    npm run build:$TARGET
+    npm run package:$TARGET
 fi
 
 echo -e "${YELLOW}[3/3]${NC} Build complete!"
