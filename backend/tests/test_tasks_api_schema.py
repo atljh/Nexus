@@ -227,3 +227,32 @@ class TestWarmingHelpers:
             "targets": ["@channel_one", "@channel_two"],
             "speed_preset": "safe",
         }) == 6
+
+    def test_update_warming_delays_reapply_safety_floor(self):
+        from api.tasks import normalize_updated_task_delays
+
+        class StubAccount:
+            def __init__(self, age_days: int):
+                self.register_time = None
+                self.created_at = datetime.now(timezone.utc) - timedelta(days=age_days)
+
+        class StubTask:
+            task_type = "warming"
+            min_delay = 18000.0
+            max_delay = 36000.0
+            config = {"targets": ["@channel"]}
+            accounts = [StubAccount(1)]
+
+        assert normalize_updated_task_delays(StubTask(), 60.0, 300.0) == (64800.0, 108000.0)
+
+    def test_update_non_warming_delays_swap_and_clamp(self):
+        from api.tasks import normalize_updated_task_delays
+
+        class StubTask:
+            task_type = "likes"
+            min_delay = 30.0
+            max_delay = 60.0
+            config = {}
+            accounts = []
+
+        assert normalize_updated_task_delays(StubTask(), 5000.0, 10.0) == (10.0, 3600.0)

@@ -11,6 +11,7 @@ from telegram.account_metadata import (
     ensure_complete_device_fingerprint,
     extract_api_credentials,
     extract_device_fingerprint,
+    resolve_api_credentials,
     resolve_account_connection_params,
 )
 
@@ -111,3 +112,46 @@ def test_resolve_account_connection_params_backfills_incomplete_stored_fp():
     assert fp["device_model"] == "Desktop"
     assert fp["system_version"] == "Windows 10"
     assert fp["app_version"] == "6.6.2 x64"
+
+
+def test_resolve_api_credentials_never_mixes_partial_pair_with_default_hash():
+    api_id, api_hash = resolve_api_credentials(2040, None)
+
+    assert api_id == 2040
+    assert api_hash == "b18441a1ff607e10a989891a5462e627"
+
+
+def test_resolve_api_credentials_infers_platform_from_fingerprint_when_missing_pair():
+    api_id, api_hash = resolve_api_credentials(
+        None,
+        None,
+        device_fingerprint={
+            "device_model": "Desktop",
+            "system_version": "Windows 10",
+            "app_version": "6.6.2 x64",
+        },
+    )
+
+    assert api_id == 2040
+    assert api_hash == "b18441a1ff607e10a989891a5462e627"
+
+
+def test_resolve_account_connection_params_backfills_missing_hash_from_platform_safe_pair():
+    acc = DummyAccount(
+        id=3,
+        phone="+15551234567",
+        api_id=2040,
+        api_hash=None,
+        device_fingerprint={
+            "device_model": "Desktop",
+            "system_version": "Windows 10",
+            "app_version": "6.6.2 x64",
+        },
+        extra_data=None,
+    )
+
+    api_id, api_hash, fp = resolve_account_connection_params(acc)
+
+    assert api_id == 2040
+    assert api_hash == "b18441a1ff607e10a989891a5462e627"
+    assert fp["device_model"] == "Desktop"

@@ -8,6 +8,7 @@ import json
 from typing import Any, Dict, Optional, Tuple
 
 from .device_generator import (
+    OFFICIAL_APIS,
     detect_platform_from_api_id,
     generate_device_fingerprint,
     generate_fingerprint_for_api,
@@ -76,6 +77,61 @@ def extract_api_credentials(metadata: Optional[Any]) -> Tuple[Optional[int], Opt
         api_hash = str(api_hash_raw).strip()
 
     return api_id, api_hash
+
+
+def infer_platform_from_device_fingerprint(value: Optional[Any]) -> str:
+    """Infer Telegram client platform from a stored fingerprint."""
+    fingerprint = normalize_device_fingerprint(value)
+    device_model = str(fingerprint.get("device_model") or "").strip().lower()
+    system_version = str(fingerprint.get("system_version") or "").strip().lower()
+
+    if any(token in device_model for token in ("iphone", "ipad")):
+        return "ios"
+
+    if (
+        any(token in device_model for token in ("desktop", "macbook", "imac"))
+        or "windows" in system_version
+        or "macos" in system_version
+    ):
+        return "desktop"
+
+    return "android"
+
+
+def resolve_api_credentials(
+    api_id: Optional[Any],
+    api_hash: Optional[Any],
+    *,
+    device_fingerprint: Optional[Any] = None,
+) -> Tuple[int, str]:
+    """
+    Resolve a safe api_id/api_hash pair.
+
+    Telegram sessions should never run with a partial credential pair mixed with
+    an unrelated default hash or id. If only part of the pair is available, fall
+    back to a coherent official pair for the inferred platform.
+    """
+    normalized_api_id: Optional[int] = None
+    if api_id not in (None, ""):
+        try:
+            normalized_api_id = int(api_id)
+        except (TypeError, ValueError):
+            normalized_api_id = None
+
+    normalized_api_hash: Optional[str] = None
+    if api_hash not in (None, ""):
+        normalized_api_hash = str(api_hash).strip() or None
+
+    if normalized_api_id is not None and normalized_api_hash:
+        return normalized_api_id, normalized_api_hash
+
+    platform = (
+        detect_platform_from_api_id(normalized_api_id)
+        if normalized_api_id is not None
+        else infer_platform_from_device_fingerprint(device_fingerprint)
+    )
+    official = OFFICIAL_APIS[platform]
+    return int(official["api_id"]), str(official["api_hash"])
 
 
 def extract_device_fingerprint(metadata: Optional[Any]) -> Dict[str, Any]:
@@ -198,16 +254,16 @@ def resolve_account_connection_params(account: Any) -> Tuple[Optional[int], Opti
     1. Account columns (`api_id`, `api_hash`, `device_fingerprint`)
     2. `account.extra_data` aliases (`app_id`, `app_hash`, device aliases)
     """
-    api_id = getattr(account, "api_id", None)
-    api_hash = getattr(account, "api_hash", None)
+    raw_api_id = getattr(account, "api_id", None)
+    raw_api_hash = getattr(account, "api_hash", None)
 
     extra_data = normalize_json_dict(getattr(account, "extra_data", None))
-    if api_id is None or not api_hash:
+    if raw_api_id is None or not raw_api_hash:
         extra_api_id, extra_api_hash = extract_api_credentials(extra_data)
-        if api_id is None:
-            api_id = extra_api_id
-        if not api_hash:
-            api_hash = extra_api_hash
+        if raw_api_id is None:
+            raw_api_id = extra_api_id
+        if not raw_api_hash:
+            raw_api_hash = extra_api_hash
 
     unique_id = (
         getattr(account, "phone", None)
@@ -216,6 +272,17 @@ def resolve_account_connection_params(account: Any) -> Tuple[Optional[int], Opti
         or getattr(account, "session_string", None)
     )
 
+    provisional_fingerprint = ensure_complete_device_fingerprint(
+        getattr(account, "device_fingerprint", None),
+        extra_data,
+        unique_id=unique_id,
+        api_id=raw_api_id,
+    )
+    api_id, api_hash = resolve_api_credentials(
+        raw_api_id,
+        raw_api_hash,
+        device_fingerprint=provisional_fingerprint,
+    )
     device_fingerprint = ensure_complete_device_fingerprint(
         getattr(account, "device_fingerprint", None),
         extra_data,

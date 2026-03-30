@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from api.accounts import (
     extract_api_credentials,
     extract_device_fingerprint,
+    _persist_resolved_connection_params,
     _split_error,
     ERROR_STATUS_MAP,
     COUNTRY_CODES,
@@ -19,6 +20,7 @@ from api.accounts import (
     AssignProxiesRequest,
     SessionImport,
 )
+from telegram.account_metadata import resolve_account_connection_params
 
 
 class TestExtractApiCredentials:
@@ -72,6 +74,73 @@ class TestExtractDeviceFingerprint:
             "system_version": "SDK 31",
         })
         assert isinstance(result, dict)
+
+
+class DummyConnectionAccount:
+    def __init__(self, **kwargs):
+        self.id = kwargs.get("id")
+        self.telegram_id = kwargs.get("telegram_id")
+        self.phone = kwargs.get("phone")
+        self.session_string = kwargs.get("session_string")
+        self.api_id = kwargs.get("api_id")
+        self.api_hash = kwargs.get("api_hash")
+        self.device_fingerprint = kwargs.get("device_fingerprint")
+        self.extra_data = kwargs.get("extra_data")
+
+
+class TestPersistResolvedConnectionParams:
+    def test_persist_resolved_connection_params_stops_generated_fingerprint_drift(self):
+        initial = {
+            "id": 77,
+            "api_id": 6,
+            "api_hash": "android-hash",
+            "device_fingerprint": {
+                "lang_code": "en",
+                "system_lang_code": "en-US",
+            },
+        }
+        account_without_persist = DummyConnectionAccount(**initial)
+        _, _, original_fp = resolve_account_connection_params(account_without_persist)
+
+        account_without_persist.phone = "+15551234567"
+        _, _, drifted_fp = resolve_account_connection_params(account_without_persist)
+        assert drifted_fp != original_fp
+
+        account_with_persist = DummyConnectionAccount(**initial)
+        _, _, used_fp = resolve_account_connection_params(account_with_persist)
+        account_with_persist.phone = "+15551234567"
+
+        changed = _persist_resolved_connection_params(
+            account_with_persist,
+            api_id=account_with_persist.api_id,
+            api_hash=account_with_persist.api_hash,
+            device_fingerprint=used_fp,
+        )
+
+        assert changed is True
+        _, _, stable_fp = resolve_account_connection_params(account_with_persist)
+        assert stable_fp == used_fp
+
+    def test_persist_resolved_connection_params_backfills_api_columns(self):
+        account = DummyConnectionAccount(
+            id=88,
+            api_id=None,
+            api_hash=None,
+            device_fingerprint={},
+            extra_data=None,
+        )
+
+        changed = _persist_resolved_connection_params(
+            account,
+            api_id=10840,
+            api_hash="ios-hash",
+            device_fingerprint={"device_model": "iPhone 14"},
+        )
+
+        assert changed is True
+        assert account.api_id == 10840
+        assert account.api_hash == "ios-hash"
+        assert account.device_fingerprint == {"device_model": "iPhone 14"}
 
     def test_with_fingerprint_key(self):
         result = extract_device_fingerprint({

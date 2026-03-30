@@ -190,6 +190,39 @@ def calculate_warming_total_actions(accounts: List[Account], config: Optional[di
     return len(accounts) * len(safe_config.get("targets", []))
 
 
+def normalize_updated_task_delays(
+    task: Task,
+    min_delay: Optional[float],
+    max_delay: Optional[float],
+) -> Optional[tuple[float, float]]:
+    """Normalize delay updates using the same safety rules as task creation."""
+    if min_delay is None and max_delay is None:
+        return None
+
+    next_min = task.min_delay if min_delay is None else float(min_delay)
+    next_max = task.max_delay if max_delay is None else float(max_delay)
+
+    if task.task_type == "warming":
+        normalized_config = normalize_warming_task_config(task.config)
+        next_min, next_max = normalize_warming_delay_range(
+            next_min,
+            next_max,
+            normalized_config.get("speed_preset"),
+        )
+        next_min, next_max = apply_warming_safety_delay_floor(
+            list(getattr(task, "accounts", []) or []),
+            next_min,
+            next_max,
+        )
+        return next_min, next_max
+
+    next_min = max(1.0, min(float(next_min), 3600.0))
+    next_max = max(1.0, min(float(next_max), 3600.0))
+    if next_min > next_max:
+        next_min, next_max = next_max, next_min
+    return next_min, next_max
+
+
 # ============ Pydantic Schemas ============
 
 class TaskConfig(BaseModel):
@@ -1011,7 +1044,7 @@ def get_task(task_id: int, db: Session = Depends(get_db)):
 @router.put("/{task_id}", response_model=TaskResponse)
 def update_task(task_id: int, request: UpdateTaskRequest, db: Session = Depends(get_db)):
     """Update a task."""
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = db.query(Task).options(subqueryload(Task.accounts)).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
@@ -1024,10 +1057,14 @@ def update_task(task_id: int, request: UpdateTaskRequest, db: Session = Depends(
         elif request.status in ["completed", "failed", "cancelled"]:
             task.completed_at = datetime.now(timezone.utc)
 
-    if request.min_delay is not None:
-        task.min_delay = request.min_delay
-    if request.max_delay is not None:
-        task.max_delay = request.max_delay
+    delay_update = normalize_updated_task_delays(task, request.min_delay, request.max_delay)
+    if delay_update is not None:
+        if task.status in ["running", "paused"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot update delays while task is active",
+            )
+        task.min_delay, task.max_delay = delay_update
 
     db.commit()
     db.refresh(task)

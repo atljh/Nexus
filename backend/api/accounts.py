@@ -60,6 +60,7 @@ from telegram.account_metadata import (
     extract_api_credentials as extract_api_credentials_from_metadata,
     extract_device_fingerprint as extract_device_fingerprint_from_metadata,
     normalize_device_fingerprint as normalize_device_fingerprint_value,
+    resolve_api_credentials as resolve_api_credentials_from_metadata,
     resolve_account_connection_params as resolve_account_connection_params_from_metadata,
 )
 
@@ -222,6 +223,40 @@ def _resolve_account_connection_params(account: Account) -> tuple[Optional[int],
     """Resolve API credentials + device params from account columns and extra_data."""
     api_id, api_hash, device_fp = resolve_account_connection_params_from_metadata(account)
     return api_id, api_hash, device_fp
+
+
+def _persist_resolved_connection_params(
+    account: Account,
+    *,
+    api_id: Optional[int],
+    api_hash: Optional[str],
+    device_fingerprint: Optional[object],
+) -> bool:
+    """
+    Persist normalized connection params used for a successful connect/check.
+
+    This freezes any generated/backfilled fingerprint so later flows do not
+    silently re-generate a different device when account identity fields appear.
+    """
+    changed = False
+
+    if api_id not in (None, ""):
+        normalized_api_id = int(api_id)
+        if account.api_id != normalized_api_id:
+            account.api_id = normalized_api_id
+            changed = True
+
+    normalized_api_hash = str(api_hash).strip() if api_hash not in (None, "") else ""
+    if normalized_api_hash and account.api_hash != normalized_api_hash:
+        account.api_hash = normalized_api_hash
+        changed = True
+
+    normalized_fingerprint = _normalize_device_fingerprint(device_fingerprint)
+    if normalized_fingerprint and _normalize_device_fingerprint(account.device_fingerprint) != normalized_fingerprint:
+        account.device_fingerprint = normalized_fingerprint
+        changed = True
+
+    return changed
 
 
 @router.get("")
@@ -490,6 +525,12 @@ async def check_account(
         account.status = "invalid"
         _set_check_error(account, "unknown_error", "Session is invalid")
 
+    _persist_resolved_connection_params(
+        account,
+        api_id=resolved_api_id,
+        api_hash=resolved_api_hash,
+        device_fingerprint=device_fp,
+    )
     account.last_checked_at = datetime.now(timezone.utc)
     await session.commit()
 
@@ -799,12 +840,26 @@ async def import_session_string(
 
     # Validate with Telegram
     # Use session string hash for consistent device fingerprint
+    resolved_api_id, resolved_api_hash = resolve_api_credentials_from_metadata(
+        data.api_id,
+        data.api_hash,
+    )
+    device_fp = _ensure_complete_device_fingerprint(
+        None,
+        unique_id=data.session_string[:32],
+        api_id=resolved_api_id,
+    )
     is_valid, user_info, error = await validate_session(
         data.session_string,
         proxy=proxy_config,
-        api_id=data.api_id,
-        api_hash=data.api_hash,
+        api_id=resolved_api_id,
+        api_hash=resolved_api_hash,
         unique_id=data.session_string[:32],
+        device_model=device_fp.get("device_model"),
+        system_version=device_fp.get("system_version"),
+        app_version=device_fp.get("app_version"),
+        lang_code=device_fp.get("lang_code"),
+        system_lang_code=device_fp.get("system_lang_code"),
         check_frozen=False,  # Don't do extra API calls during import
     )
 
@@ -833,8 +888,9 @@ async def import_session_string(
         session_string=data.session_string,
         proxy_id=data.proxy_id,
         status="valid",
-        api_id=data.api_id,
-        api_hash=data.api_hash,
+        api_id=resolved_api_id,
+        api_hash=resolved_api_hash,
+        device_fingerprint=device_fp,
     )
 
     session.add(account)
@@ -902,8 +958,14 @@ async def check_batch_accounts(
 
     # Prepare account data for checker
     account_data = []
+    resolved_connection_params: dict[int, tuple[Optional[int], Optional[str], dict]] = {}
     for acc in accounts_with_proxy:
         resolved_api_id, resolved_api_hash, resolved_device_fp = _resolve_account_connection_params(acc)
+        resolved_connection_params[acc.id] = (
+            resolved_api_id,
+            resolved_api_hash,
+            resolved_device_fp,
+        )
         proxy_config = {
             "type": acc.proxy.type,
             "host": acc.proxy.host,
@@ -968,6 +1030,17 @@ async def check_batch_accounts(
             # Update spamblock if checked
             if check_result.spamblock is not None:
                 acc.spamblock = check_result.spamblock
+
+            resolved_api_id, resolved_api_hash, resolved_device_fp = resolved_connection_params.get(
+                acc.id,
+                (None, None, {}),
+            )
+            _persist_resolved_connection_params(
+                acc,
+                api_id=resolved_api_id,
+                api_hash=resolved_api_hash,
+                device_fingerprint=resolved_device_fp,
+            )
 
             response_results.append({
                 "id": acc.id,
