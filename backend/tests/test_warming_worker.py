@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from workers.warming_worker import WarmingWorker, PRIVATE_CHANNEL_INVITE_REQUIRED
+from workers.warming_worker import WarmingWorker, PRIVATE_CHANNEL_INVITE_REQUIRED, INVALID_WARMING_TARGET
 
 
 class TestWarmingWorkerHelpers:
@@ -30,6 +30,7 @@ class TestWarmingWorkerHelpers:
         assert self.worker._normalize_public_target("channelname") == "@channelname"
         assert self.worker._normalize_public_target("https://t.me/example") == "@example"
         assert self.worker._normalize_public_target("https://t.me/c/123456/7") == "-100123456"
+        assert self.worker._normalize_public_target("bad target!") is None
 
     def test_account_block_reason(self):
         assert self.worker._get_account_block_reason("Account joined too many channels") == "Account joined too many channels"
@@ -72,6 +73,17 @@ async def test_warm_single_target_private_channel_needs_invite():
     assert success is False
     assert message == "Action was not executed"
     assert error == PRIVATE_CHANNEL_INVITE_REQUIRED
+
+
+@pytest.mark.asyncio
+async def test_warm_single_target_rejects_invalid_target():
+    worker = WarmingWorker(task_id=1)
+
+    success, message, error = await worker._warm_single_target(1, "bad target!")
+
+    assert success is False
+    assert message == "Action was not executed"
+    assert error == INVALID_WARMING_TARGET
 
 
 @pytest.mark.asyncio

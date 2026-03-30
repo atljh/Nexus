@@ -27,6 +27,7 @@ ACTION_SKIPPED_MESSAGE = "Action was not executed"
 ACCOUNT_UNAVAILABLE_ERROR = "Account unavailable before warming started"
 PRIVATE_CHANNEL_INVITE_REQUIRED = "Private channel requires invite link"
 ALL_WARMING_ACTIONS_FAILED = "All warming actions failed"
+INVALID_WARMING_TARGET = "Invalid warming target"
 
 
 class WarmingWorker(LikesWorker):
@@ -71,23 +72,39 @@ class WarmingWorker(LikesWorker):
         return match.group(1) if match else None
 
     @staticmethod
-    def _normalize_public_target(target: str) -> str:
+    def _normalize_public_target(target: str) -> Optional[str]:
         target = target.strip()
-        private_match = re.match(r"(?:https?://)?t\.me/c/(\d+)(?:/\d+)?$", target, re.IGNORECASE)
+        private_match = re.match(
+            r"(?:https?://)?t\.me/c/(\d+)(?:/\d+)?/?(?:\?.*)?$",
+            target,
+            re.IGNORECASE,
+        )
         if private_match:
             return f"-100{private_match.group(1)}"
 
-        public_match = re.match(r"(?:https?://)?t\.me/([a-zA-Z0-9_]+)(?:/\d+)?$", target, re.IGNORECASE)
+        public_match = re.match(
+            r"(?:https?://)?t\.me/([a-zA-Z0-9_]+)(?:/\d+)?/?(?:\?.*)?$",
+            target,
+            re.IGNORECASE,
+        )
         if public_match:
-            return f"@{public_match.group(1)}"
+            username = public_match.group(1)
+            return f"@{username}" if re.fullmatch(r"[a-zA-Z0-9_]{5,32}", username) else None
 
         if target.startswith("@") and target[1:].lstrip("-").isdigit():
             return target[1:]
 
-        if target.startswith("@") or target.lstrip("-").isdigit():
+        if target.startswith("@"):
+            username = target[1:]
+            return target if re.fullmatch(r"[a-zA-Z0-9_]{5,32}", username) else None
+
+        if target.lstrip("-").isdigit():
             return target
 
-        return f"@{target}"
+        if re.fullmatch(r"[a-zA-Z0-9_]{5,32}", target):
+            return f"@{target}"
+
+        return None
 
     async def _wait_with_control(
         self,
@@ -190,6 +207,9 @@ class WarmingWorker(LikesWorker):
             return False, ACTION_SKIPPED_MESSAGE, join_error or "Join via invite failed"
 
         normalized_target = self._normalize_public_target(target)
+        if not normalized_target:
+            return False, ACTION_SKIPPED_MESSAGE, INVALID_WARMING_TARGET
+
         try:
             entity = await self._resolve_entity(account_id, normalized_target)
         except ChannelPrivateError:

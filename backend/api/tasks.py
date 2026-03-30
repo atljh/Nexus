@@ -29,6 +29,8 @@ WARMING_SPEED_PRESETS = {
     "safe": (4 * 3600.0, 6 * 3600.0),
     "normal": (2 * 3600.0, 4 * 3600.0),
 }
+PUBLIC_USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9_]{5,32}$")
+NUMERIC_CHANNEL_PATTERN = re.compile(r"^-?\d+$")
 
 
 def _normalize_category_value(value: Optional[str], fallback: str = DEFAULT_TEMPLATE_CATEGORY) -> str:
@@ -48,12 +50,16 @@ def normalize_warming_target(value: str) -> str:
     if not target:
         return ""
 
-    private_match = re.match(r"(?:https?://)?t\.me/c/(\d+)(?:/(\d+))?$", target, re.IGNORECASE)
+    private_match = re.match(
+        r"(?:https?://)?t\.me/c/(\d+)(?:/\d+)?/?(?:\?.*)?$",
+        target,
+        re.IGNORECASE,
+    )
     if private_match:
         return f"-100{private_match.group(1)}"
 
     invite_match = re.match(
-        r"(?:https?://)?t\.me/(?:\+|joinchat/)([a-zA-Z0-9_-]+)$",
+        r"(?:https?://)?t\.me/(?:\+|joinchat/)([a-zA-Z0-9_-]+)/?(?:\?.*)?$",
         target,
         re.IGNORECASE,
     )
@@ -61,20 +67,28 @@ def normalize_warming_target(value: str) -> str:
         return f"https://t.me/+{invite_match.group(1)}"
 
     public_match = re.match(
-        r"(?:https?://)?t\.me/([a-zA-Z0-9_]+)(?:/\d+)?$",
+        r"(?:https?://)?t\.me/([a-zA-Z0-9_]+)(?:/\d+)?/?(?:\?.*)?$",
         target,
         re.IGNORECASE,
     )
     if public_match:
-        return f"@{public_match.group(1)}"
+        username = public_match.group(1)
+        return f"@{username}" if PUBLIC_USERNAME_PATTERN.fullmatch(username) else ""
 
-    if target.startswith("@") and target[1:].lstrip("-").isdigit():
+    if target.startswith("@") and NUMERIC_CHANNEL_PATTERN.fullmatch(target[1:]):
         return target[1:]
 
-    if target.startswith("@") or target.lstrip("-").isdigit():
+    if target.startswith("@"):
+        username = target[1:]
+        return target if PUBLIC_USERNAME_PATTERN.fullmatch(username) else ""
+
+    if NUMERIC_CHANNEL_PATTERN.fullmatch(target):
         return target
 
-    return f"@{target}"
+    if PUBLIC_USERNAME_PATTERN.fullmatch(target):
+        return f"@{target}"
+
+    return ""
 
 
 def normalize_warming_targets(values: List[str]) -> List[str]:

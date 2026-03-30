@@ -932,6 +932,8 @@ export default {
     targetsPlaceholder: '@channel\nhttps://t.me/channel\nhttps://t.me/+inviteHash',
     targetsCount: '{count} цілей',
     supportedFormats: 'Підтримуються @username, t.me-посилання та інвайт-посилання',
+    invalidTargets: '{count} рядків проігноровано як невалідні',
+    duplicateTargets: '{count} дублікатів об’єднано',
     speedTitle: 'Пресет швидкості',
     estimatePerAccount: 'Приблизно {hours} годин на акаунт, щоб пройти поточний список каналів.',
     startTask: 'Запустити прогрів',
@@ -1061,6 +1063,7 @@ export default {
         alreadySubscribed: 'Вже підписаний',
         joinedChannel: 'Приєднано до каналу',
         privateChannelInviteRequired: 'Для приватного каналу потрібне інвайт-посилання',
+        invalidWarmingTarget: 'Некоректна ціль прогріву',
         accountUnavailableBeforeWarming: 'Акаунт недоступний до початку прогріву',
         allWarmingActionsFailed: 'Усі дії прогріву завершилися невдачею',
         noWarmingTargetsSpecified: 'Не вказано цілі для прогріву'

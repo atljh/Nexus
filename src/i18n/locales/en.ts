@@ -932,6 +932,8 @@ export default {
     targetsPlaceholder: '@channel\nhttps://t.me/channel\nhttps://t.me/+inviteHash',
     targetsCount: '{count} targets',
     supportedFormats: 'Supports @username, t.me links and invite links',
+    invalidTargets: '{count} lines were ignored as invalid',
+    duplicateTargets: '{count} duplicate targets were merged',
     speedTitle: 'Speed preset',
     estimatePerAccount: 'Approx. {hours} hours per account to finish the current target list.',
     startTask: 'Start warming',
@@ -1061,6 +1063,7 @@ export default {
         alreadySubscribed: 'Already subscribed',
         joinedChannel: 'Joined channel',
         privateChannelInviteRequired: 'Private channel requires invite link',
+        invalidWarmingTarget: 'Invalid warming target',
         accountUnavailableBeforeWarming: 'Account unavailable before warming started',
         allWarmingActionsFailed: 'All warming actions failed',
         noWarmingTargetsSpecified: 'No warming targets specified'

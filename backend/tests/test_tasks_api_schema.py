@@ -148,6 +148,9 @@ class TestWarmingHelpers:
         assert normalize_warming_target("https://t.me/example") == "@example"
         assert normalize_warming_target("https://t.me/+InviteHash123") == "https://t.me/+InviteHash123"
         assert normalize_warming_target("https://t.me/c/123456/7") == "-100123456"
+        assert normalize_warming_target("https://t.me/example/123?single") == "@example"
+        assert normalize_warming_target("https://t.me/+InviteHash123/") == "https://t.me/+InviteHash123"
+        assert normalize_warming_target("bad target!") == ""
 
     def test_warming_targets_deduplicate(self):
         from api.tasks import normalize_warming_targets

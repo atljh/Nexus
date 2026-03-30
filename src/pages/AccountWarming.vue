@@ -29,6 +29,38 @@ const FORM_KEY = 'nexus_warming_form'
 const FORM_SAVE_DELAY_MS = 250
 let formSaveTimer: number | null = null
 
+function normalizeTargetForPreview(value: string): string | null {
+  const target = value.trim()
+  if (!target) return null
+
+  const privateMatch = target.match(/(?:https?:\/\/)?t\.me\/c\/(\d+)(?:\/\d+)?\/?(?:\?.*)?$/i)
+  if (privateMatch) {
+    return `-100${privateMatch[1]}`
+  }
+
+  const inviteMatch = target.match(/(?:https?:\/\/)?t\.me\/(?:\+|joinchat\/)([a-zA-Z0-9_-]+)\/?(?:\?.*)?$/i)
+  if (inviteMatch) {
+    return `https://t.me/+${inviteMatch[1]}`
+  }
+
+  const publicLinkMatch = target.match(/(?:https?:\/\/)?t\.me\/([a-zA-Z0-9_]+)(?:\/\d+)?\/?(?:\?.*)?$/i)
+  if (publicLinkMatch) {
+    const username = publicLinkMatch[1]
+    return /^[a-zA-Z0-9_]{5,32}$/.test(username) ? `@${username}` : null
+  }
+
+  if (target.startsWith('@')) {
+    const raw = target.slice(1)
+    if (/^-?\d+$/.test(raw)) return raw
+    return /^[a-zA-Z0-9_]{5,32}$/.test(raw) ? `@${raw}` : null
+  }
+
+  if (/^-?\d+$/.test(target)) return target
+  if (/^[a-zA-Z0-9_]{5,32}$/.test(target)) return `@${target}`
+
+  return null
+}
+
 const parsedTargets = computed(() => {
   const lines = targetsInput.value
     .split('\n')
@@ -36,12 +68,53 @@ const parsedTargets = computed(() => {
     .filter(Boolean)
 
   const seen = new Set<string>()
-  return lines.filter(line => {
-    const key = line.toLowerCase()
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
+  return lines
+    .map(normalizeTargetForPreview)
+    .filter((line): line is string => Boolean(line))
+    .filter(line => {
+      const key = line.toLowerCase()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+})
+
+const totalEnteredTargets = computed(() =>
+  targetsInput.value
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .length
+)
+
+const invalidTargetsCount = computed(() =>
+  targetsInput.value
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .filter(line => normalizeTargetForPreview(line) === null)
+    .length
+)
+
+const duplicateTargetsCount = computed(() => {
+  const duplicates = totalEnteredTargets.value - invalidTargetsCount.value - parsedTargets.value.length
+  return duplicates > 0 ? duplicates : 0
+})
+
+const targetsHelperText = computed(() => {
+  if (invalidTargetsCount.value > 0) {
+    return t('warming.invalidTargets', { count: invalidTargetsCount.value })
+  }
+  if (duplicateTargetsCount.value > 0) {
+    return t('warming.duplicateTargets', { count: duplicateTargetsCount.value })
+  }
+  return t('warming.supportedFormats')
+})
+
+const targetsHelperSeverity = computed(() => {
+  if (invalidTargetsCount.value > 0) return 'warn'
+  if (duplicateTargetsCount.value > 0) return 'info'
+  return 'neutral'
 })
 
 const speedOptions = computed(() => [
@@ -274,7 +347,7 @@ function viewTaskDetails(task: Task) {
 }
 
 async function refreshTasks() {
-  await taskStore.fetchTasks('warming')
+  await taskStore.fetchTasks('warming', undefined, true)
 }
 
 onMounted(async () => {
@@ -355,7 +428,7 @@ onUnmounted(() => {
 
               <div class="helper-row">
                 <span>{{ t('warming.targetsCount', { count: parsedTargets.length }) }}</span>
-                <span>{{ t('warming.supportedFormats') }}</span>
+                <span :class="['helper-detail', targetsHelperSeverity]">{{ targetsHelperText }}</span>
               </div>
             </div>
 
@@ -729,6 +802,18 @@ onUnmounted(() => {
   gap: 12px;
   font-size: 12px;
   color: #8b8b95;
+}
+
+.helper-detail {
+  text-align: right;
+}
+
+.helper-detail.warn {
+  color: #f59e0b;
+}
+
+.helper-detail.info {
+  color: #93c5fd;
 }
 
 .speed-hint {

@@ -207,6 +207,7 @@ function translateLogText(text?: string | null): string {
     'Already subscribed': 'taskResults.logs.translate.alreadySubscribed',
     'Joined channel': 'taskResults.logs.translate.joinedChannel',
     'Private channel requires invite link': 'taskResults.logs.translate.privateChannelInviteRequired',
+    'Invalid warming target': 'taskResults.logs.translate.invalidWarmingTarget',
     'Account unavailable before warming started': 'taskResults.logs.translate.accountUnavailableBeforeWarming',
     'All warming actions failed': 'taskResults.logs.translate.allWarmingActionsFailed',
     'No warming targets specified': 'taskResults.logs.translate.noWarmingTargetsSpecified',
