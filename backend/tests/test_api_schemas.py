@@ -119,6 +119,7 @@ class TestCommentTemplateRequest:
     def test_valid(self):
         req = CommentTemplateRequest(name="Test", content="{Hi|Hello}!")
         assert req.name == "Test"
+        assert req.category == "General"
         assert req.is_default is False
 
     def test_name_too_long(self):

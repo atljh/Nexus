@@ -1,7 +1,8 @@
 """Tasks API - Create and manage automation tasks."""
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, case
 from sqlalchemy.orm import Session, subqueryload
@@ -12,8 +13,28 @@ from database.models import (
     AccountBlacklist, CommentHistory, AIPromptTemplate,
 )
 from utils.encryption import encryption_service
+from utils.comment_template_import import (
+    default_import_category,
+    generate_template_name,
+    normalize_template_category,
+    normalize_template_content,
+    normalize_template_dedupe_key,
+    parse_xlsx_comment_rows,
+)
 
 router = APIRouter()
+DEFAULT_TEMPLATE_CATEGORY = "General"
+
+
+def _normalize_category_value(value: Optional[str], fallback: str = DEFAULT_TEMPLATE_CATEGORY) -> str:
+    return normalize_template_category(value, fallback)
+
+
+def _normalize_template_name_value(name: Optional[str], content: str) -> str:
+    normalized = " ".join((name or "").split())
+    if normalized:
+        return normalized[:100]
+    return generate_template_name(content, "Comment")[:100]
 
 
 # ============ Pydantic Schemas ============
@@ -85,6 +106,7 @@ class CommentTemplateRequest(BaseModel):
     """Request to create/update a comment template."""
     name: str = Field(..., min_length=1, max_length=100)
     content: str = Field(..., min_length=1)
+    category: str = Field(DEFAULT_TEMPLATE_CATEGORY, min_length=1, max_length=100)
     is_default: bool = Field(False)
 
 
@@ -93,8 +115,19 @@ class CommentTemplateResponse(BaseModel):
     id: int
     name: str
     content: str
+    category: str
     is_default: bool
     created_at: str
+
+
+class CommentTemplateImportResponse(BaseModel):
+    """Import response for comment templates."""
+    success: bool
+    imported: int
+    skipped_duplicates: int
+    skipped_invalid: int
+    detected_categories: List[str]
+    errors: List[dict]
 
 
 class TargetChannelResponse(BaseModel):
@@ -225,7 +258,10 @@ def get_task_stats(db: Session = Depends(get_db)):
 @router.get("/templates", response_model=List[CommentTemplateResponse])
 def get_templates(db: Session = Depends(get_db)):
     """Get all comment templates."""
-    templates = db.query(CommentTemplate).order_by(CommentTemplate.created_at.desc()).all()
+    templates = db.query(CommentTemplate).order_by(
+        CommentTemplate.category.asc(),
+        CommentTemplate.created_at.desc(),
+    ).all()
     return [t.to_dict() for t in templates]
 
 
@@ -234,14 +270,19 @@ def create_template(request: CommentTemplateRequest, db: Session = Depends(get_d
     """Create a new comment template."""
     from workers.spintax import validate_spintax
 
+    content = normalize_template_content(request.content)
+    if not content:
+        raise HTTPException(status_code=400, detail="Template content is empty")
+
     # Validate spintax
-    is_valid, error = validate_spintax(request.content)
+    is_valid, error = validate_spintax(content)
     if not is_valid:
         raise HTTPException(status_code=400, detail=f"Invalid spintax: {error}")
 
     template = CommentTemplate(
-        name=request.name,
-        content=request.content,
+        name=_normalize_template_name_value(request.name, content),
+        content=content,
+        category=_normalize_category_value(request.category),
         is_default=request.is_default
     )
 
@@ -252,45 +293,88 @@ def create_template(request: CommentTemplateRequest, db: Session = Depends(get_d
     return template.to_dict()
 
 
-@router.put("/templates/{template_id}", response_model=CommentTemplateResponse)
-def update_template(
-    template_id: int,
-    request: CommentTemplateRequest,
+@router.post("/templates/import", response_model=CommentTemplateImportResponse)
+async def import_templates(
+    file: UploadFile = File(...),
+    category: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Update a comment template."""
+    """Import comment templates from an Excel workbook."""
     from workers.spintax import validate_spintax
 
-    template = db.query(CommentTemplate).filter(CommentTemplate.id == template_id).first()
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
+    filename = file.filename or "templates.xlsx"
+    if Path(filename).suffix.lower() != ".xlsx":
+        raise HTTPException(status_code=400, detail="Only .xlsx files are supported")
 
-    # Validate spintax
-    is_valid, error = validate_spintax(request.content)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=f"Invalid spintax: {error}")
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="The uploaded file is empty")
 
-    template.name = request.name
-    template.content = request.content
-    template.is_default = request.is_default
+    fallback_category = _normalize_category_value(category, default_import_category(filename))
+    parsed_rows = parse_xlsx_comment_rows(
+        payload,
+        default_category=fallback_category,
+        force_category=bool(category and category.strip()),
+    )
+    if not parsed_rows:
+        raise HTTPException(status_code=400, detail="No comments found in the uploaded file")
+
+    existing_keys = {
+        (
+            normalize_template_category(template.category, DEFAULT_TEMPLATE_CATEGORY).lower(),
+            normalize_template_dedupe_key(template.content),
+        )
+        for template in db.query(CommentTemplate).all()
+    }
+    seen_keys = set(existing_keys)
+
+    imported = 0
+    skipped_duplicates = 0
+    skipped_invalid = 0
+    detected_categories: set[str] = set()
+    errors: list[dict] = []
+
+    for row in parsed_rows:
+        content = normalize_template_content(row.get("content"))
+        template_category = _normalize_category_value(row.get("category"), fallback_category)
+        dedupe_key = (
+            template_category.lower(),
+            normalize_template_dedupe_key(content),
+        )
+
+        if dedupe_key in seen_keys:
+            skipped_duplicates += 1
+            continue
+
+        is_valid, error = validate_spintax(content)
+        if not is_valid:
+            skipped_invalid += 1
+            errors.append({
+                "row": row["row"],
+                "error": f"Invalid spintax: {error}",
+            })
+            continue
+
+        db.add(CommentTemplate(
+            name=_normalize_template_name_value(row.get("name"), content),
+            content=content,
+            category=template_category,
+            is_default=False,
+        ))
+        seen_keys.add(dedupe_key)
+        detected_categories.add(template_category)
+        imported += 1
 
     db.commit()
-    db.refresh(template)
 
-    return template.to_dict()
-
-
-@router.delete("/templates/{template_id}")
-def delete_template(template_id: int, db: Session = Depends(get_db)):
-    """Delete a comment template."""
-    template = db.query(CommentTemplate).filter(CommentTemplate.id == template_id).first()
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
-
-    db.delete(template)
-    db.commit()
-
-    return {"message": "Template deleted"}
+    return {
+        "success": True,
+        "imported": imported,
+        "skipped_duplicates": skipped_duplicates,
+        "skipped_invalid": skipped_invalid,
+        "detected_categories": sorted(detected_categories),
+        "errors": errors[:20],
+    }
 
 
 class PreviewTemplateRequest(BaseModel):
@@ -314,6 +398,52 @@ def preview_template(request: PreviewTemplateRequest):
         "samples": samples,
         "total_variants": total_variants
     }
+
+
+@router.put("/templates/{template_id}", response_model=CommentTemplateResponse)
+def update_template(
+    template_id: int,
+    request: CommentTemplateRequest,
+    db: Session = Depends(get_db)
+):
+    """Update a comment template."""
+    from workers.spintax import validate_spintax
+
+    template = db.query(CommentTemplate).filter(CommentTemplate.id == template_id).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    content = normalize_template_content(request.content)
+    if not content:
+        raise HTTPException(status_code=400, detail="Template content is empty")
+
+    # Validate spintax
+    is_valid, error = validate_spintax(content)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Invalid spintax: {error}")
+
+    template.name = _normalize_template_name_value(request.name, content)
+    template.content = content
+    template.category = _normalize_category_value(request.category)
+    template.is_default = request.is_default
+
+    db.commit()
+    db.refresh(template)
+
+    return template.to_dict()
+
+
+@router.delete("/templates/{template_id}")
+def delete_template(template_id: int, db: Session = Depends(get_db)):
+    """Delete a comment template."""
+    template = db.query(CommentTemplate).filter(CommentTemplate.id == template_id).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    db.delete(template)
+    db.commit()
+
+    return {"message": "Template deleted"}
 
 
 # ── AI Prompt Templates ──

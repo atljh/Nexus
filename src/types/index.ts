@@ -301,6 +301,7 @@ export interface CommentTemplate {
   id: number
   name: string
   content: string
+  category: string
   is_default: boolean
   created_at: string
 }
@@ -308,7 +309,20 @@ export interface CommentTemplate {
 export interface CreateCommentTemplateParams {
   name: string
   content: string
+  category?: string
   is_default?: boolean
+}
+
+export interface ImportCommentTemplatesResult {
+  success: boolean
+  imported: number
+  skipped_duplicates: number
+  skipped_invalid: number
+  detected_categories: string[]
+  errors: {
+    row: string | number
+    error: string
+  }[]
 }
 
 // Comments Task Types

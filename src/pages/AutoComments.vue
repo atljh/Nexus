@@ -13,7 +13,7 @@ import AutoComplete from 'primevue/autocomplete'
 import Tag from 'primevue/tag'
 import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
-import { AccountPicker } from '@/components/shared'
+import { AccountPicker, DropZone } from '@/components/shared'
 
 import { useTaskStore } from '@/stores/useTaskStore'
 import { useAccountStore } from '@/stores/useAccountStore'
@@ -51,6 +51,10 @@ const minDelay = ref(60)
 const maxDelay = ref(300)
 const maxConcurrent = ref(1)
 const selectedAccountIds = ref<number[]>([])
+const templateCategoryFilter = ref<'all' | string>('all')
+const templateSearchQuery = ref('')
+const importTemplateCategory = ref('')
+const isImportingTemplates = ref(false)
 const isPrivateChannel = computed(() => channelInput.value.startsWith('-100'))
 
 // Parse t.me links:
@@ -190,8 +194,10 @@ watch(
 
 // Template management
 const showTemplateDialog = ref(false)
+const editingTemplateId = ref<number | null>(null)
 const newTemplateName = ref('')
 const newTemplateContent = ref('')
+const newTemplateCategory = ref('General')
 const templatePreview = ref<string[]>([])
 
 // UI state
@@ -210,20 +216,89 @@ const rotationOptions = computed(() => [
   { value: 'round_robin', label: t('autoComments.rotation.roundRobin') }
 ])
 
+const templateCategories = computed(() => {
+  const counts = new Map<string, number>()
+  for (const template of taskStore.templates) {
+    const category = template.category?.trim() || 'General'
+    counts.set(category, (counts.get(category) || 0) + 1)
+  }
+
+  return Array.from(counts.entries())
+    .sort((a, b) => a[0].localeCompare(b[0], locale.value))
+    .map(([value, count]) => ({
+      value,
+      count
+    }))
+})
+
 // Template options for multiselect
 const templateOptions = computed(() =>
   taskStore.templates.map(tmpl => ({
     value: tmpl.id,
-    label: tmpl.name
+    label: `${tmpl.name} · ${tmpl.category || 'General'}`
   }))
 )
 
+const filteredTemplateLibrary = computed(() => {
+  const query = templateSearchQuery.value.trim().toLowerCase()
+  return taskStore.templates.filter((template) => {
+    const matchesCategory = templateCategoryFilter.value === 'all'
+      || (template.category || 'General') === templateCategoryFilter.value
+    if (!matchesCategory) return false
+
+    if (!query) return true
+    return [
+      template.name,
+      template.content,
+      template.category
+    ].some(value => value?.toLowerCase().includes(query))
+  })
+})
+
+const groupedTemplates = computed(() => {
+  const groups = new Map<string, CommentTemplate[]>()
+  for (const template of filteredTemplateLibrary.value) {
+    const category = template.category || 'General'
+    const existing = groups.get(category) || []
+    existing.push(template)
+    groups.set(category, existing)
+  }
+
+  return Array.from(groups.entries())
+    .sort((a, b) => a[0].localeCompare(b[0], locale.value))
+    .map(([category, templates]) => ({
+      category,
+      templates: [...templates].sort((a, b) => a.name.localeCompare(b.name, locale.value))
+    }))
+})
+
 // Combined templates for task
 const selectedTemplates = computed(() => {
-  const fromDb = taskStore.templates
-    .filter(tmpl => selectedTemplateIds.value.includes(tmpl.id))
-    .map(tmpl => tmpl.content)
-  return [...fromDb, ...customTemplates.value]
+  const values = [
+    ...taskStore.templates
+      .filter(tmpl => selectedTemplateIds.value.includes(tmpl.id))
+      .map(tmpl => tmpl.content),
+    ...customTemplates.value
+  ]
+
+  const seen = new Set<string>()
+  return values
+    .map(value => value.trim())
+    .filter((value) => {
+      if (!value) return false
+      const key = value.toLowerCase()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+})
+
+watch(templateCategories, (categories) => {
+  if (templateCategoryFilter.value === 'all') return
+  const exists = categories.some(category => category.value === templateCategoryFilter.value)
+  if (!exists) {
+    templateCategoryFilter.value = 'all'
+  }
 })
 
 // Task status badge severity
@@ -410,7 +485,31 @@ async function stopAllRunning() {
 }
 
 // Template management
-async function createTemplate() {
+function resetTemplateDialog() {
+  editingTemplateId.value = null
+  newTemplateName.value = ''
+  newTemplateContent.value = ''
+  newTemplateCategory.value = templateCategoryFilter.value === 'all'
+    ? 'General'
+    : templateCategoryFilter.value
+  templatePreview.value = []
+}
+
+function openCreateTemplateDialog() {
+  resetTemplateDialog()
+  showTemplateDialog.value = true
+}
+
+function openEditTemplateDialog(template: CommentTemplate) {
+  editingTemplateId.value = template.id
+  newTemplateName.value = template.name
+  newTemplateContent.value = template.content
+  newTemplateCategory.value = template.category || 'General'
+  showTemplateDialog.value = true
+  generatePreview()
+}
+
+async function saveTemplate() {
   if (!newTemplateName.value.trim() || !newTemplateContent.value.trim()) {
     toast.add({
       severity: 'error',
@@ -421,20 +520,27 @@ async function createTemplate() {
     return
   }
 
-  const template = await taskStore.createTemplate(
-    newTemplateName.value.trim(),
-    newTemplateContent.value.trim()
-  )
+  const payload = {
+    name: newTemplateName.value.trim(),
+    content: newTemplateContent.value.trim(),
+    category: newTemplateCategory.value.trim() || 'General'
+  }
+
+  const template = editingTemplateId.value == null
+    ? await taskStore.createTemplate(payload.name, payload.content, payload.category)
+    : await taskStore.updateTemplate(editingTemplateId.value, payload)
 
   if (template) {
+    await taskStore.fetchTemplates(true)
     toast.add({
       severity: 'success',
       summary: t('common.success'),
-      detail: t('autoComments.messages.templateCreated'),
+      detail: editingTemplateId.value == null
+        ? t('autoComments.messages.templateCreated')
+        : t('autoComments.messages.templateUpdated'),
       life: 3000
     })
-    newTemplateName.value = ''
-    newTemplateContent.value = ''
+    resetTemplateDialog()
     showTemplateDialog.value = false
   }
 }
@@ -453,13 +559,78 @@ async function deleteTemplate(template: CommentTemplate) {
 
 async function loadDefaultTemplates() {
   await Promise.all(DEFAULT_COMMENT_TEMPLATES.map(template =>
-    taskStore.createTemplate(template.name, template.content)
+    taskStore.createTemplate(template.name, template.content, 'General')
   ))
+  await taskStore.fetchTemplates(true)
   toast.add({
     severity: 'success',
     summary: t('autoComments.messages.defaultsLoaded'),
     life: 2000
   })
+}
+
+function selectTemplateCategory(category: string) {
+  const next = new Set(selectedTemplateIds.value)
+  taskStore.templates
+    .filter(template => (template.category || 'General') === category)
+    .forEach(template => next.add(template.id))
+  selectedTemplateIds.value = Array.from(next)
+}
+
+function clearTemplateCategory(category: string) {
+  const categoryIds = new Set(
+    taskStore.templates
+      .filter(template => (template.category || 'General') === category)
+      .map(template => template.id)
+  )
+  selectedTemplateIds.value = selectedTemplateIds.value.filter(id => !categoryIds.has(id))
+}
+
+function isTemplateCategorySelected(category: string) {
+  const categoryIds = taskStore.templates
+    .filter(template => (template.category || 'General') === category)
+    .map(template => template.id)
+  return categoryIds.length > 0 && categoryIds.every(id => selectedTemplateIds.value.includes(id))
+}
+
+async function handleTemplateImport(files: File[]) {
+  const [file] = files
+  if (!file) return
+
+  isImportingTemplates.value = true
+  try {
+    const result = await taskStore.importTemplates(file, importTemplateCategory.value)
+    if (!result) {
+      toast.add({
+        severity: 'error',
+        summary: t('common.error'),
+        detail: t('autoComments.messages.importFailed'),
+        life: 3000
+      })
+      return
+    }
+
+    if (result.detected_categories.length > 0) {
+      templateCategoryFilter.value = result.detected_categories[0]
+      if (!importTemplateCategory.value.trim()) {
+        importTemplateCategory.value = result.detected_categories[0]
+      }
+    }
+
+    const severity = result.imported > 0 ? 'success' : 'warn'
+    toast.add({
+      severity,
+      summary: result.imported > 0 ? t('common.success') : t('common.warning'),
+      detail: t('autoComments.messages.importSummary', {
+        imported: result.imported,
+        duplicates: result.skipped_duplicates,
+        invalid: result.skipped_invalid
+      }),
+      life: 4000
+    })
+  } finally {
+    isImportingTemplates.value = false
+  }
 }
 
 // Toggle template selection
@@ -827,10 +998,88 @@ onUnmounted(() => {
             <div v-if="activeTab === 1" class="tab-panel">
               <div class="form-section">
                 <div class="form-section-header">
-                  <i class="pi pi-file-edit"></i>
+                  <i class="pi pi-folder-open"></i>
+                  <span>{{ t('autoComments.libraryTitle') }}</span>
+                </div>
+                <div class="template-toolbar">
+                  <InputText
+                    v-model="templateSearchQuery"
+                    :placeholder="t('autoComments.searchTemplatesPlaceholder')"
+                    class="template-search-input"
+                  />
+                  <Button
+                    :label="t('autoComments.createTemplate')"
+                    icon="pi pi-plus"
+                    class="create-template-btn"
+                    @click="openCreateTemplateDialog"
+                  />
+                </div>
+                <div class="template-filter-row">
+                  <button
+                    :class="['template-filter-chip', { active: templateCategoryFilter === 'all' }]"
+                    @click="templateCategoryFilter = 'all'"
+                  >
+                    <span>{{ t('autoComments.allGroups') }}</span>
+                    <strong>{{ taskStore.templates.length }}</strong>
+                  </button>
+                  <button
+                    v-for="category in templateCategories"
+                    :key="category.value"
+                    :class="['template-filter-chip', { active: templateCategoryFilter === category.value }]"
+                    @click="templateCategoryFilter = category.value"
+                  >
+                    <span>{{ category.value }}</span>
+                    <strong>{{ category.count }}</strong>
+                  </button>
+                </div>
+                <div class="template-import-panel">
+                  <div class="template-import-copy">
+                    <strong>{{ t('autoComments.importTitle') }}</strong>
+                    <span>{{ t('autoComments.importHint') }}</span>
+                  </div>
+                  <div class="template-import-controls">
+                    <InputText
+                      v-model="importTemplateCategory"
+                      :placeholder="t('autoComments.importCategoryPlaceholder')"
+                      class="w-full"
+                    />
+                    <small class="input-hint">
+                      <i class="pi pi-info-circle"></i>
+                      {{ t('autoComments.importCategoryHint') }}
+                    </small>
+                  </div>
+                  <DropZone
+                    accept=".xlsx"
+                    :multiple="false"
+                    :disabled="isImportingTemplates"
+                    :title="t('autoComments.importDropTitle')"
+                    :hint="t('autoComments.importDropHint')"
+                    :formats="['.xlsx']"
+                    class="template-import-dropzone"
+                    @files-selected="handleTemplateImport"
+                  >
+                    <template #icon>
+                      <i :class="['pi', isImportingTemplates ? 'pi-spin pi-spinner' : 'pi-file-excel', 'drop-zone-icon']"></i>
+                    </template>
+                  </DropZone>
+                </div>
+                <div v-if="taskStore.templates.length === 0" class="template-actions-bar">
+                  <Button
+                    :label="t('autoComments.loadDefaults')"
+                    icon="pi pi-download"
+                    severity="secondary"
+                    outlined
+                    @click="loadDefaultTemplates"
+                  />
+                </div>
+              </div>
+
+              <div class="form-section">
+                <div class="form-section-header">
+                  <i class="pi pi-check-square"></i>
                   <span>{{ t('autoComments.selectTemplates') }}</span>
                 </div>
-                <div class="form-group">
+                <div class="template-selection-row">
                   <MultiSelect
                     v-model="selectedTemplateIds"
                     :options="templateOptions"
@@ -840,6 +1089,9 @@ onUnmounted(() => {
                     class="w-full"
                     display="chip"
                   />
+                  <span class="template-selection-counter">
+                    {{ t('autoComments.selectedTemplatesCount', { count: selectedTemplateIds.length }) }}
+                  </span>
                 </div>
               </div>
 
@@ -863,53 +1115,73 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <div class="template-actions-bar">
-                <Button
-                  :label="t('autoComments.createTemplate')"
-                  icon="pi pi-plus"
-                  class="create-template-btn"
-                  @click="showTemplateDialog = true"
-                />
-                <Button
-                  v-if="taskStore.templates.length === 0"
-                  :label="t('autoComments.loadDefaults')"
-                  icon="pi pi-download"
-                  severity="secondary"
-                  outlined
-                  @click="loadDefaultTemplates"
-                />
-              </div>
-
-              <div v-if="taskStore.templates.length > 0" class="templates-grid">
+              <div v-if="groupedTemplates.length > 0" class="template-groups">
                 <div
-                  v-for="tmpl in taskStore.templates"
-                  :key="tmpl.id"
-                  :class="['template-card', { selected: selectedTemplateIds.includes(tmpl.id) }]"
-                  @click="toggleTemplate(tmpl.id)"
+                  v-for="group in groupedTemplates"
+                  :key="group.category"
+                  class="template-group-section"
                 >
-                  <div class="template-card-header">
-                    <div class="template-checkbox">
-                      <i :class="selectedTemplateIds.includes(tmpl.id) ? 'pi pi-check-circle' : 'pi pi-circle'"></i>
+                  <div class="template-group-header">
+                    <div class="template-group-meta">
+                      <h3>{{ group.category }}</h3>
+                      <span>{{ t('autoComments.groupTemplatesCount', { count: group.templates.length }) }}</span>
                     </div>
-                    <span class="template-name">{{ tmpl.name }}</span>
-                    <Button
-                      icon="pi pi-trash"
-                      text
-                      rounded
-                      severity="danger"
-                      size="small"
-                      class="template-delete-btn"
-                      @click.stop="deleteTemplate(tmpl)"
-                    />
+                    <div class="template-group-actions">
+                      <Button
+                        :label="isTemplateCategorySelected(group.category) ? t('autoComments.clearGroup') : t('autoComments.selectGroup')"
+                        :severity="isTemplateCategorySelected(group.category) ? 'secondary' : 'info'"
+                        size="small"
+                        outlined
+                        @click="isTemplateCategorySelected(group.category) ? clearTemplateCategory(group.category) : selectTemplateCategory(group.category)"
+                      />
+                    </div>
                   </div>
-                  <p class="template-content">{{ tmpl.content }}</p>
+
+                  <div class="templates-grid">
+                    <div
+                      v-for="tmpl in group.templates"
+                      :key="tmpl.id"
+                      :class="['template-card', { selected: selectedTemplateIds.includes(tmpl.id) }]"
+                      @click="toggleTemplate(tmpl.id)"
+                    >
+                      <div class="template-card-header">
+                        <div class="template-checkbox">
+                          <i :class="selectedTemplateIds.includes(tmpl.id) ? 'pi pi-check-circle' : 'pi pi-circle'"></i>
+                        </div>
+                        <div class="template-card-title">
+                          <span class="template-name">{{ tmpl.name }}</span>
+                          <Tag :value="tmpl.category" severity="secondary" />
+                        </div>
+                        <div class="template-card-actions">
+                          <Button
+                            icon="pi pi-pencil"
+                            text
+                            rounded
+                            size="small"
+                            class="template-edit-btn"
+                            @click.stop="openEditTemplateDialog(tmpl)"
+                          />
+                          <Button
+                            icon="pi pi-trash"
+                            text
+                            rounded
+                            severity="danger"
+                            size="small"
+                            class="template-delete-btn"
+                            @click.stop="deleteTemplate(tmpl)"
+                          />
+                        </div>
+                      </div>
+                      <p class="template-content">{{ tmpl.content }}</p>
+                    </div>
+                  </div>
                 </div>
               </div>
 
               <div v-else class="empty-templates">
                 <i class="pi pi-file-edit"></i>
-                <p>{{ t('autoComments.noTemplates') }}</p>
-                <span>{{ t('autoComments.noTemplatesHint') }}</span>
+                <p>{{ taskStore.templates.length === 0 ? t('autoComments.noTemplates') : t('autoComments.noTemplatesMatch') }}</p>
+                <span>{{ taskStore.templates.length === 0 ? t('autoComments.noTemplatesHint') : t('autoComments.noTemplatesMatchHint') }}</span>
               </div>
             </div>
           </div>
@@ -1082,10 +1354,11 @@ onUnmounted(() => {
       <!-- Create Template Dialog -->
       <Dialog
         v-model:visible="showTemplateDialog"
-        :header="t('autoComments.createTemplate')"
+        :header="editingTemplateId == null ? t('autoComments.createTemplate') : t('autoComments.editTemplate')"
         :style="{ width: '550px' }"
         modal
         class="template-dialog"
+        @hide="resetTemplateDialog"
       >
         <div class="template-form">
           <div class="form-group">
@@ -1096,6 +1369,18 @@ onUnmounted(() => {
             <InputText
               v-model="newTemplateName"
               :placeholder="t('autoComments.templateNamePlaceholder')"
+              class="w-full"
+            />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">
+              <i class="pi pi-folder"></i>
+              {{ t('autoComments.templateGroup') }}
+            </label>
+            <InputText
+              v-model="newTemplateCategory"
+              :placeholder="t('autoComments.templateGroupPlaceholder')"
               class="w-full"
             />
           </div>
@@ -1150,7 +1435,7 @@ onUnmounted(() => {
             <Button
               :label="t('common.save')"
               icon="pi pi-check"
-              @click="createTemplate"
+              @click="saveTemplate"
             />
           </div>
         </template>
@@ -1587,6 +1872,87 @@ onUnmounted(() => {
 }
 
 /* Templates */
+.template-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.template-search-input {
+  flex: 1;
+}
+
+.template-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.template-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #d1d1d7;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.template-filter-chip strong {
+  font-size: 11px;
+  color: #8b8b95;
+}
+
+.template-filter-chip:hover {
+  border-color: rgba(168, 85, 247, 0.35);
+  background: rgba(168, 85, 247, 0.07);
+}
+
+.template-filter-chip.active {
+  border-color: rgba(168, 85, 247, 0.45);
+  background: rgba(168, 85, 247, 0.16);
+  color: #f4ecff;
+}
+
+.template-import-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.template-import-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.template-import-copy strong {
+  font-size: 13px;
+  color: #f4f4f5;
+}
+
+.template-import-copy span {
+  font-size: 12px;
+  color: #8b8b95;
+}
+
+.template-import-controls {
+  display: grid;
+  gap: 6px;
+}
+
+.template-import-dropzone {
+  padding: 1.2rem;
+}
+
 .template-actions-bar {
   display: flex;
   gap: 10px;
@@ -1594,12 +1960,69 @@ onUnmounted(() => {
 }
 
 .create-template-btn {
-  flex: 1;
+  flex-shrink: 0;
+}
+
+.template-selection-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.template-selection-counter {
+  font-size: 12px;
+  color: #8b8b95;
+}
+
+.template-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.template-group-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.template-group-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.template-group-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.template-group-meta h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #f4f4f5;
+}
+
+.template-group-meta span {
+  font-size: 12px;
+  color: #8b8b95;
+}
+
+.template-group-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .templates-grid {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: 8px;
 }
 
@@ -1624,7 +2047,7 @@ onUnmounted(() => {
 
 .template-card-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   margin-bottom: 6px;
 }
@@ -1638,19 +2061,34 @@ onUnmounted(() => {
   color: #a855f7;
 }
 
-.template-name {
+.template-card-title {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.template-name {
   font-size: 13px;
   font-weight: 600;
   color: #e4e4e7;
 }
 
-.template-delete-btn {
-  opacity: 0;
-  transition: opacity 0.15s ease;
+.template-card-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 1;
 }
 
-.template-card:hover .template-delete-btn {
+.template-delete-btn,
+.template-edit-btn {
+  opacity: 1;
+}
+
+.template-card:hover .template-card-actions,
+.template-card:hover .template-delete-btn,
+.template-card:hover .template-edit-btn {
   opacity: 1;
 }
 

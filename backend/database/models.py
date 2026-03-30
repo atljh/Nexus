@@ -391,6 +391,7 @@ class CommentTemplate(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100))
     content: Mapped[str] = mapped_column(Text)  # Supports spintax: {Hello|Hi|Hey}
+    category: Mapped[str] = mapped_column(String(100), default="General", index=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -399,6 +400,7 @@ class CommentTemplate(Base):
             "id": self.id,
             "name": self.name,
             "content": self.content,
+            "category": self.category,
             "is_default": self.is_default,
             "created_at": _utc_iso(self.created_at)
         }

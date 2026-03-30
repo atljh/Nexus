@@ -303,6 +303,7 @@ class TestCommentTemplateToDict:
         tmpl = CommentTemplate(
             name="Greeting",
             content="{Hi|Hello} there!",
+            category="Support",
             is_default=True,
             created_at=datetime(2024, 1, 1),
         )
@@ -310,6 +311,7 @@ class TestCommentTemplateToDict:
         d = tmpl.to_dict()
         assert d["name"] == "Greeting"
         assert d["content"] == "{Hi|Hello} there!"
+        assert d["category"] == "Support"
         assert d["is_default"] is True
 
 

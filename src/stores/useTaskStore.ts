@@ -8,6 +8,7 @@ import type {
   TaskStats,
   TaskStatus,
   CommentTemplate,
+  ImportCommentTemplatesResult,
   TargetChannel
 } from '@/types'
 
@@ -23,6 +24,15 @@ interface TaskLogsResponse {
   data?: TaskLog[]
   length?: number
   [index: number]: TaskLog
+}
+
+async function fileToUpload(name: string, file: File): Promise<UploadFile> {
+  const buffer = await file.arrayBuffer()
+  return {
+    name,
+    data: new Uint8Array(buffer),
+    filename: file.name
+  }
 }
 
 export const useTaskStore = defineStore('task', () => {
@@ -238,17 +248,45 @@ export const useTaskStore = defineStore('task', () => {
     }
   }
 
-  async function createTemplate(name: string, content: string, isDefault = false): Promise<CommentTemplate | null> {
+  async function createTemplate(
+    name: string,
+    content: string,
+    category = 'General',
+    isDefault = false
+  ): Promise<CommentTemplate | null> {
     try {
       const response = await window.api.post('/api/tasks/templates', {
         name,
         content,
+        category,
         is_default: isDefault
       }) as CommentTemplate
       templates.value.push(response)
       return response
     } catch (e) {
       console.error('Failed to create template:', e)
+      return null
+    }
+  }
+
+  async function updateTemplate(
+    templateId: number,
+    payload: { name: string; content: string; category?: string; is_default?: boolean }
+  ): Promise<CommentTemplate | null> {
+    try {
+      const response = await window.api.put(`/api/tasks/templates/${templateId}`, {
+        name: payload.name,
+        content: payload.content,
+        category: payload.category || 'General',
+        is_default: payload.is_default ?? false
+      }) as CommentTemplate
+      const index = templates.value.findIndex(t => t.id === templateId)
+      if (index >= 0) {
+        templates.value[index] = response
+      }
+      return response
+    } catch (e) {
+      console.error('Failed to update template:', e)
       return null
     }
   }
@@ -261,6 +299,21 @@ export const useTaskStore = defineStore('task', () => {
     } catch (e) {
       console.error('Failed to delete template:', e)
       return false
+    }
+  }
+
+  async function importTemplates(file: File, category?: string): Promise<ImportCommentTemplatesResult | null> {
+    try {
+      const upload = await fileToUpload('file', file)
+      const fields: Record<string, string> = category?.trim()
+        ? { category: category.trim() }
+        : {}
+      const response = await window.api.upload('/api/tasks/templates/import', [upload], fields) as ImportCommentTemplatesResult
+      await fetchTemplates(true)
+      return response
+    } catch (e) {
+      console.error('Failed to import templates:', e)
+      return null
     }
   }
 
@@ -503,7 +556,9 @@ export const useTaskStore = defineStore('task', () => {
     // Templates
     fetchTemplates,
     createTemplate,
+    updateTemplate,
     deleteTemplate,
+    importTemplates,
     // Account stats
     fetchAccountStats,
     duplicateTask,
