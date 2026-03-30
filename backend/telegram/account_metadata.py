@@ -7,6 +7,13 @@ Used to keep account connection params consistent across import/check/worker flo
 import json
 from typing import Any, Dict, Optional, Tuple
 
+from .device_generator import (
+    detect_platform_from_api_id,
+    generate_device_fingerprint,
+    generate_fingerprint_for_api,
+    get_tdesktop_fingerprint,
+)
+
 
 FINGERPRINT_FIELDS = (
     "device_model",
@@ -14,6 +21,11 @@ FINGERPRINT_FIELDS = (
     "app_version",
     "lang_code",
     "system_lang_code",
+)
+CORE_FINGERPRINT_FIELDS = (
+    "device_model",
+    "system_version",
+    "app_version",
 )
 
 
@@ -120,6 +132,64 @@ def merge_device_fingerprint(
     return merged
 
 
+def has_complete_device_fingerprint(value: Optional[Any]) -> bool:
+    """Return True when device_model/system_version/app_version are all present."""
+    fingerprint = normalize_device_fingerprint(value)
+    return all(str(fingerprint.get(field) or "").strip() for field in CORE_FINGERPRINT_FIELDS)
+
+
+def ensure_complete_device_fingerprint(
+    primary: Optional[Any],
+    fallback: Optional[Any] = None,
+    *,
+    unique_id: Optional[Any] = None,
+    api_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Return a fingerprint with core device fields filled in when possible.
+
+    Some legacy imports only store lang_code/system_lang_code. In that case we
+    synthesize a stable fallback fingerprint based on unique_id and api_id.
+    """
+    merged = merge_device_fingerprint(primary, fallback)
+    if has_complete_device_fingerprint(merged):
+        return merged
+
+    seed = str(unique_id).strip() if unique_id is not None and str(unique_id).strip() else ""
+    if not seed:
+        return merged
+
+    lang_code = str(merged.get("lang_code") or "en")
+    system_lang_code = str(merged.get("system_lang_code") or "en-US")
+
+    if api_id is not None:
+        platform = detect_platform_from_api_id(api_id)
+        if platform == "desktop":
+            generated = get_tdesktop_fingerprint(
+                lang_code=lang_code,
+                system_lang_code=system_lang_code,
+            )
+        else:
+            generated = generate_fingerprint_for_api(
+                unique_id=seed,
+                api_id=api_id,
+                lang_code=lang_code,
+                system_lang_code=system_lang_code,
+            )
+    else:
+        generated = generate_device_fingerprint(
+            unique_id=seed,
+            lang_code=lang_code,
+            system_lang_code=system_lang_code,
+        )
+
+    completed = dict(merged)
+    for field in FINGERPRINT_FIELDS:
+        if completed.get(field) in (None, ""):
+            completed[field] = generated.get(field)
+    return {k: v for k, v in completed.items() if v is not None}
+
+
 def resolve_account_connection_params(account: Any) -> Tuple[Optional[int], Optional[str], Dict[str, Any]]:
     """
     Resolve (api_id, api_hash, device_fingerprint) for account connection.
@@ -139,9 +209,18 @@ def resolve_account_connection_params(account: Any) -> Tuple[Optional[int], Opti
         if not api_hash:
             api_hash = extra_api_hash
 
-    device_fingerprint = merge_device_fingerprint(
+    unique_id = (
+        getattr(account, "phone", None)
+        or getattr(account, "telegram_id", None)
+        or getattr(account, "id", None)
+        or getattr(account, "session_string", None)
+    )
+
+    device_fingerprint = ensure_complete_device_fingerprint(
         getattr(account, "device_fingerprint", None),
         extra_data,
+        unique_id=unique_id,
+        api_id=api_id,
     )
 
     return api_id, api_hash, device_fingerprint

@@ -56,6 +56,7 @@ from telegram.profile_data import generate_random_profile
 from telegram.session_service import session_service
 from telegram.device_generator import generate_device_fingerprint, get_tdesktop_fingerprint
 from telegram.account_metadata import (
+    ensure_complete_device_fingerprint as ensure_complete_device_fingerprint_from_metadata,
     extract_api_credentials as extract_api_credentials_from_metadata,
     extract_device_fingerprint as extract_device_fingerprint_from_metadata,
     normalize_device_fingerprint as normalize_device_fingerprint_value,
@@ -200,6 +201,21 @@ def _set_check_error(account: Account, error_code: Optional[str], error_message:
 
 def _normalize_device_fingerprint(value: Optional[object]) -> dict:
     return normalize_device_fingerprint_value(value)
+
+
+def _ensure_complete_device_fingerprint(
+    value: Optional[object],
+    *,
+    fallback: Optional[object] = None,
+    unique_id: Optional[object] = None,
+    api_id: Optional[int] = None,
+) -> dict:
+    return ensure_complete_device_fingerprint_from_metadata(
+        value,
+        fallback,
+        unique_id=unique_id,
+        api_id=api_id,
+    )
 
 
 def _resolve_account_connection_params(account: Account) -> tuple[Optional[int], Optional[str], dict]:
@@ -669,7 +685,13 @@ async def import_json_session(
     for i, item in enumerate(data):
         session_string = item.get("session_string") or item.get("session")
         item_api_id, item_api_hash = extract_api_credentials(item)
-        device_fp = extract_device_fingerprint(item)
+        unique_id = item.get("phone") or item.get("telegram_id") or str(i)
+        device_fp = _ensure_complete_device_fingerprint(
+            None,
+            fallback=item,
+            unique_id=unique_id,
+            api_id=item_api_id,
+        )
 
         if not session_string:
             errors.append({"index": i, "error": "Missing session_string"})
@@ -682,7 +704,6 @@ async def import_json_session(
 
         # Validate with Telegram
         # Use phone from item for consistent device fingerprint
-        unique_id = item.get("phone") or str(i)
         is_valid, user_info, error = await validate_session(
             session_string,
             proxy=proxy_config,
@@ -1148,7 +1169,12 @@ async def import_session_json_pairs(
             last_name = json_data.get("last_name")
             geo = json_data.get("geo")
             file_api_id, file_api_hash = extract_api_credentials(json_data)
-            device_fp = extract_device_fingerprint(json_data)
+            device_fp = _ensure_complete_device_fingerprint(
+                None,
+                fallback=json_data,
+                unique_id=phone or telegram_id or session_file.filename,
+                api_id=file_api_id,
+            )
 
             # Parse spamblock - can be bool, string ("free", "banned"), or None
             spamblock_raw = json_data.get("spamblock")
@@ -2444,7 +2470,12 @@ async def _parse_import_files_inner(
                 api_id_parsed, api_hash_parsed = extract_api_credentials(json_data)
 
                 # Extract device fingerprint from JSON
-                device_fp = extract_device_fingerprint(json_data)
+                device_fp = _ensure_complete_device_fingerprint(
+                    None,
+                    fallback=json_data,
+                    unique_id=phone or telegram_id or base_name,
+                    api_id=api_id_parsed,
+                )
 
                 # Parse spamblock
                 spamblock_raw = json_data.get("spamblock")
@@ -2737,7 +2768,11 @@ async def verify_parsed_accounts(
         # Get API credentials and device fingerprint from JSON
         api_id = acc_data.get("api_id")
         api_hash = acc_data.get("api_hash")
-        device_fp = _normalize_device_fingerprint(acc_data.get("device_fingerprint"))
+        device_fp = _ensure_complete_device_fingerprint(
+            acc_data.get("device_fingerprint"),
+            unique_id=acc_data.get("phone") or temp_id,
+            api_id=api_id,
+        )
 
         # Validate session with Telegram
         # Use phone for consistent device fingerprinting
@@ -2849,7 +2884,11 @@ async def save_verified_accounts(
                 api_id=acc_data.get("api_id"),
                 api_hash=acc_data.get("api_hash"),
                 # Device fingerprint from JSON
-                device_fingerprint=acc_data.get("device_fingerprint"),
+                device_fingerprint=_ensure_complete_device_fingerprint(
+                    acc_data.get("device_fingerprint"),
+                    unique_id=acc_data.get("phone") or telegram_id or acc_data.get("temp_id"),
+                    api_id=acc_data.get("api_id"),
+                ),
             )
 
             session.add(account)
