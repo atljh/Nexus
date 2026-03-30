@@ -111,7 +111,7 @@ def extract_device_fingerprint(metadata: Optional[Any]) -> Dict[str, Any]:
         ) or "en",
         "system_lang_code": nested_fp.get("system_lang_code") or pick(
             "system_lang_code", "system_lang_pack"
-        ) or "en-us",
+        ) or "en-US",
     }
 
     return {k: v for k, v in result.items() if v is not None}

@@ -33,8 +33,8 @@ INVALID_WARMING_TARGET = "Invalid warming target"
 class WarmingWorker(LikesWorker):
     """Worker for account warming tasks."""
 
-    INTER_ACCOUNT_STAGGER_MIN = 10.0
-    INTER_ACCOUNT_STAGGER_MAX = 30.0
+    INTER_ACCOUNT_STAGGER_MIN = 45.0
+    INTER_ACCOUNT_STAGGER_MAX = 120.0
     WAIT_CHUNK_SECONDS = 5.0
 
     def __init__(
@@ -268,11 +268,12 @@ class WarmingWorker(LikesWorker):
             self._accounts_map = {account.id: account for account in accounts}
 
             logger.info(
-                "Starting warming task %s: accounts=%s targets=%s preset=%s",
+                "Starting warming task %s: accounts=%s targets=%s delay=%ss-%ss",
                 self.task_id,
                 len(accounts),
                 len(targets),
-                (task.config or {}).get("speed_preset", "safe"),
+                task.min_delay,
+                task.max_delay,
             )
 
             await self._connect_accounts(accounts, db, task.max_concurrent or 1)
@@ -298,7 +299,10 @@ class WarmingWorker(LikesWorker):
                     target,
                 )
 
-                for account_index, account in enumerate(accounts):
+                wave_accounts = list(accounts)
+                random.shuffle(wave_accounts)
+
+                for account_index, account in enumerate(wave_accounts):
                     if cancel_event.is_set():
                         task.status = "cancelled"
                         task.completed_at = datetime.now(timezone.utc)

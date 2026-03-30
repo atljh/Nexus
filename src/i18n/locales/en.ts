@@ -923,18 +923,22 @@ export default {
   },
 
   warming: {
-    subtitle: 'Slowly join selected accounts to a list of channels or invite links.',
+    subtitle: 'Slowly join selected accounts to public channels and private invite links.',
     statsActive: 'Active',
     statsCompleted: 'Completed',
     createTask: 'Create warming task',
-    createTaskHint: 'Minimal setup for slow account warm-up via channel subscriptions.',
-    targetsTitle: 'Target channels',
-    targetsPlaceholder: '@channel\nhttps://t.me/channel\nhttps://t.me/+inviteHash',
+    createTaskHint: 'Set channels to join and a very slow delay range for safer warm-up. Young accounts are slowed down automatically.',
+    targetsTitle: 'Channels to join',
+    targetsPlaceholder: '@publicchannel\nhttps://t.me/publicchannel\nhttps://t.me/+privateInviteHash',
     targetsCount: '{count} targets',
-    supportedFormats: 'Supports @username, t.me links and invite links',
+    supportedFormats: 'Supports public @username/t.me links and private invite links',
     invalidTargets: '{count} lines were ignored as invalid',
     duplicateTargets: '{count} duplicate targets were merged',
-    speedTitle: 'Speed preset',
+    delayTitle: 'Delay between joins',
+    minDelay: 'Min delay',
+    maxDelay: 'Max delay',
+    hoursShort: 'h',
+    delayHint: 'Random delay between channels for one account: {min}-{max} hours. Defaults are intentionally very large, and young accounts get an even stricter floor.',
     estimatePerAccount: 'Approx. {hours} hours per account to finish the current target list.',
     startTask: 'Start warming',
     badgeTargets: 'Targets: {count}',
@@ -943,13 +947,7 @@ export default {
     tasksCount: '{count} tasks',
     progress: 'Progress',
     noTasks: 'No warming tasks yet',
-    noTasksHint: 'Add a few invite links or channels and launch the first warm-up run.',
-    speed: {
-      safe: 'Safe',
-      safeHint: 'About one join every 4-6 hours per account.',
-      normal: 'Normal',
-      normalHint: 'About one join every 2-4 hours per account.'
-    },
+    noTasksHint: 'Add public channels or private invite links and launch the first warm-up run.',
     errors: {
       targetsRequired: 'Add at least one channel or invite link',
       accountsRequired: 'Select at least one account'

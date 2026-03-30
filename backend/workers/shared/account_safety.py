@@ -92,25 +92,37 @@ class AccountSafetyValidator:
     """Validates account fingerprint, geo, and warming stage before task execution."""
 
     @staticmethod
+    def extract_fingerprint(device_params: Optional[dict]) -> Dict[str, str]:
+        """Extract only normalized fingerprint fields."""
+        fingerprint: Dict[str, str] = {}
+        for field in FINGERPRINT_FIELDS:
+            value = (device_params or {}).get(field)
+            if value is None:
+                continue
+            normalized = str(value).strip()
+            if normalized:
+                fingerprint[field] = normalized
+        return fingerprint
+
+    @staticmethod
     def lock_fingerprint(account, device_params: dict, db: Session) -> bool:
         """
         Lock fingerprint on first connect.
         If account already has fingerprint_locked_at, does nothing.
         Returns True if fingerprint was locked (first time).
         """
-        if account.fingerprint_locked_at is not None:
+        fingerprint = AccountSafetyValidator.extract_fingerprint(device_params)
+        if not fingerprint:
             return False
 
-        if not device_params:
+        locked_fingerprint = AccountSafetyValidator.extract_fingerprint(account.device_fingerprint)
+        if locked_fingerprint and account.fingerprint_locked_at is not None:
             return False
 
-        # Save device fingerprint if not yet saved
-        if not account.device_fingerprint:
-            account.device_fingerprint = {
-                field: device_params.get(field) for field in FINGERPRINT_FIELDS
-            }
+        account.device_fingerprint = fingerprint
 
-        account.fingerprint_locked_at = datetime.now(timezone.utc)
+        if account.fingerprint_locked_at is None:
+            account.fingerprint_locked_at = datetime.now(timezone.utc)
         db.commit()
 
         logger.info(f"Account {account.id}: fingerprint locked")
@@ -125,16 +137,18 @@ class AccountSafetyValidator:
         Returns (is_valid, list_of_errors).
         If no locked fingerprint exists, always valid (first connect).
         """
-        if not locked_fingerprint:
+        normalized_locked = AccountSafetyValidator.extract_fingerprint(locked_fingerprint)
+        if not normalized_locked:
             return True, []
 
         if not current_params:
             return False, ["No device params provided but fingerprint is locked"]
 
+        current_fingerprint = AccountSafetyValidator.extract_fingerprint(current_params)
         errors = []
         for field in FINGERPRINT_FIELDS:
-            locked_val = locked_fingerprint.get(field)
-            current_val = current_params.get(field)
+            locked_val = normalized_locked.get(field)
+            current_val = current_fingerprint.get(field)
             # Skip comparison if locked value was not set
             if locked_val is None:
                 continue

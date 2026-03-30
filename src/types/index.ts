@@ -351,12 +351,14 @@ export interface CreateCommentsTaskParams {
 
 export interface WarmingTaskConfig {
   targets: string[]
-  speed_preset: WarmingSpeedPreset
+  speed_preset?: WarmingSpeedPreset
 }
 
 export interface CreateWarmingTaskParams {
   config: WarmingTaskConfig
   account_ids: number[]
+  min_delay: number
+  max_delay: number
   max_concurrent?: number
 }
 

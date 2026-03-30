@@ -22,13 +22,23 @@ from utils.comment_template_import import (
     normalize_template_dedupe_key,
     parse_xlsx_comment_rows,
 )
+from workers.shared.account_safety import AccountSafetyValidator
 
 router = APIRouter()
 DEFAULT_TEMPLATE_CATEGORY = "General"
+WARMING_DEFAULT_MIN_DELAY = 5 * 3600.0
+WARMING_DEFAULT_MAX_DELAY = 10 * 3600.0
+WARMING_MIN_DELAY_LIMIT = 60.0
+WARMING_MAX_DELAY_LIMIT = 72 * 3600.0
 WARMING_SPEED_PRESETS = {
     "safe": (4 * 3600.0, 6 * 3600.0),
     "normal": (2 * 3600.0, 4 * 3600.0),
 }
+WARMING_ACCOUNT_AGE_DELAY_FLOORS = [
+    (0, 3, (18 * 3600.0, 30 * 3600.0)),
+    (3, 7, (12 * 3600.0, 20 * 3600.0)),
+    (7, 14, (8 * 3600.0, 14 * 3600.0)),
+]
 PUBLIC_USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9_]{5,32}$")
 NUMERIC_CHANNEL_PATTERN = re.compile(r"^-?\d+$")
 
@@ -109,21 +119,68 @@ def normalize_warming_targets(values: List[str]) -> List[str]:
     return normalized
 
 
-def get_warming_delay_range(speed_preset: str) -> tuple[float, float]:
-    return WARMING_SPEED_PRESETS.get(speed_preset, WARMING_SPEED_PRESETS["safe"])
+def get_warming_delay_range(speed_preset: Optional[str]) -> tuple[float, float]:
+    return WARMING_SPEED_PRESETS.get(
+        speed_preset or "",
+        (WARMING_DEFAULT_MIN_DELAY, WARMING_DEFAULT_MAX_DELAY),
+    )
+
+
+def normalize_warming_delay_range(
+    min_delay: Optional[float],
+    max_delay: Optional[float],
+    speed_preset: Optional[str] = None,
+) -> tuple[float, float]:
+    if min_delay is None and max_delay is None:
+        min_delay, max_delay = get_warming_delay_range(speed_preset)
+    elif min_delay is None:
+        min_delay = max_delay
+    elif max_delay is None:
+        max_delay = min_delay
+
+    safe_min = min(float(min_delay), WARMING_MAX_DELAY_LIMIT) if min_delay is not None else WARMING_DEFAULT_MIN_DELAY
+    safe_max = min(float(max_delay), WARMING_MAX_DELAY_LIMIT) if max_delay is not None else WARMING_DEFAULT_MAX_DELAY
+
+    safe_min = max(WARMING_MIN_DELAY_LIMIT, safe_min)
+    safe_max = max(WARMING_MIN_DELAY_LIMIT, safe_max)
+
+    if safe_min > safe_max:
+        safe_min, safe_max = safe_max, safe_min
+    return safe_min, safe_max
+
+
+def get_warming_safety_delay_floor(accounts: List[Account]) -> tuple[float, float]:
+    if not accounts:
+        return WARMING_DEFAULT_MIN_DELAY, WARMING_DEFAULT_MAX_DELAY
+
+    youngest_age_days = min(AccountSafetyValidator.get_account_age_days(account) for account in accounts)
+    for min_days, max_days, delay_floor in WARMING_ACCOUNT_AGE_DELAY_FLOORS:
+        if min_days <= youngest_age_days < max_days:
+            return delay_floor
+    return WARMING_DEFAULT_MIN_DELAY, WARMING_DEFAULT_MAX_DELAY
+
+
+def apply_warming_safety_delay_floor(
+    accounts: List[Account],
+    min_delay: float,
+    max_delay: float,
+) -> tuple[float, float]:
+    floor_min, floor_max = get_warming_safety_delay_floor(accounts)
+    return max(min_delay, floor_min), max(max_delay, floor_max)
 
 
 def normalize_warming_task_config(config: Optional[dict]) -> dict:
     safe_config = dict(config or {})
-    speed_preset = safe_config.get("speed_preset", "safe")
-    if speed_preset not in WARMING_SPEED_PRESETS:
-        speed_preset = "safe"
-
-    return {
+    normalized = {
         **safe_config,
         "targets": normalize_warming_targets(safe_config.get("targets", [])),
-        "speed_preset": speed_preset,
     }
+    speed_preset = safe_config.get("speed_preset")
+    if speed_preset in WARMING_SPEED_PRESETS:
+        normalized["speed_preset"] = speed_preset
+    else:
+        normalized.pop("speed_preset", None)
+    return normalized
 
 
 def calculate_warming_total_actions(accounts: List[Account], config: Optional[dict]) -> int:
@@ -201,14 +258,32 @@ class CreateCommentsTaskRequest(BaseModel):
 class WarmingTaskConfig(BaseModel):
     """Configuration for account warming tasks."""
     targets: List[str] = Field(..., description="Channels or invite links to join")
-    speed_preset: Literal["safe", "normal"] = Field("safe", description="Delay preset")
+    speed_preset: Optional[Literal["safe", "normal"]] = Field(None, description="Legacy delay preset")
 
 
 class CreateWarmingTaskRequest(BaseModel):
     """Request to create an account warming task."""
     config: WarmingTaskConfig
     account_ids: List[int] = Field(..., description="Account IDs to warm")
+    min_delay: float = Field(
+        WARMING_DEFAULT_MIN_DELAY,
+        ge=WARMING_MIN_DELAY_LIMIT,
+        le=WARMING_MAX_DELAY_LIMIT,
+        description="Min delay between target joins in seconds",
+    )
+    max_delay: float = Field(
+        WARMING_DEFAULT_MAX_DELAY,
+        ge=WARMING_MIN_DELAY_LIMIT,
+        le=WARMING_MAX_DELAY_LIMIT,
+        description="Max delay between target joins in seconds",
+    )
     max_concurrent: int = Field(1, ge=1, le=3, description="Parallel account setup limit")
+
+    @model_validator(mode='after')
+    def validate_delays(self):
+        if self.min_delay > self.max_delay:
+            self.min_delay, self.max_delay = self.max_delay, self.min_delay
+        return self
 
 
 class CommentTemplateRequest(BaseModel):
@@ -823,14 +898,19 @@ def create_warming_task(request: CreateWarmingTaskRequest, db: Session = Depends
 
     task_config = normalize_warming_task_config({
         "targets": request.config.targets,
-        "speed_preset": request.config.speed_preset,
+        **({"speed_preset": request.config.speed_preset} if request.config.speed_preset else {}),
     })
     targets = task_config["targets"]
     if not targets:
         raise HTTPException(status_code=400, detail="No valid warming targets found")
 
     skipped_count = len(request.account_ids) - len(accounts)
-    min_delay, max_delay = get_warming_delay_range(task_config["speed_preset"])
+    min_delay, max_delay = normalize_warming_delay_range(
+        request.min_delay,
+        request.max_delay,
+        task_config.get("speed_preset"),
+    )
+    min_delay, max_delay = apply_warming_safety_delay_floor(accounts, min_delay, max_delay)
 
     task = Task(
         task_type="warming",
@@ -880,7 +960,12 @@ def duplicate_task(task_id: int, db: Session = Depends(get_db)):
     min_delay = original.min_delay
     max_delay = original.max_delay
     if original.task_type == "warming":
-        min_delay, max_delay = get_warming_delay_range(normalized_config["speed_preset"])
+        min_delay, max_delay = normalize_warming_delay_range(
+            original.min_delay,
+            original.max_delay,
+            normalized_config.get("speed_preset"),
+        )
+        min_delay, max_delay = apply_warming_safety_delay_floor(accounts, min_delay, max_delay)
 
     new_task = Task(
         task_type=original.task_type,
@@ -987,7 +1072,16 @@ async def start_task(task_id: int, db: Session = Depends(get_db)):
             raise HTTPException(status_code=400, detail="No valid warming targets found")
 
         task.total_actions = calculate_warming_total_actions(list(task.accounts), task.config)
-        task.min_delay, task.max_delay = get_warming_delay_range(task.config["speed_preset"])
+        task.min_delay, task.max_delay = normalize_warming_delay_range(
+            task.min_delay,
+            task.max_delay,
+            task.config.get("speed_preset"),
+        )
+        task.min_delay, task.max_delay = apply_warming_safety_delay_floor(
+            list(task.accounts),
+            task.min_delay,
+            task.max_delay,
+        )
         db.commit()
 
     # Set status to running before launching the worker
@@ -1083,7 +1177,16 @@ def restart_task(task_id: int, db: Session = Depends(get_db)):
     elif task.task_type == "warming":
         task.config = normalize_warming_task_config(task.config)
         task.total_actions = calculate_warming_total_actions(list(task.accounts), task.config)
-        task.min_delay, task.max_delay = get_warming_delay_range(task.config["speed_preset"])
+        task.min_delay, task.max_delay = normalize_warming_delay_range(
+            task.min_delay,
+            task.max_delay,
+            task.config.get("speed_preset"),
+        )
+        task.min_delay, task.max_delay = apply_warming_safety_delay_floor(
+            list(task.accounts),
+            task.min_delay,
+            task.max_delay,
+        )
 
     # Delete old logs
     db.query(TaskLog).filter(TaskLog.task_id == task_id).delete()

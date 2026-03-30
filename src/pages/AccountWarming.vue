@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import Button from 'primevue/button'
-import Select from 'primevue/select'
+import InputNumber from 'primevue/inputnumber'
 import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
 import { useToast } from 'primevue/usetoast'
@@ -20,8 +20,16 @@ const toast = useToast()
 const taskStore = useTaskStore()
 const accountStore = useAccountStore()
 
+const DEFAULT_WARMING_MIN_DELAY_HOURS = 5
+const DEFAULT_WARMING_MAX_DELAY_HOURS = 10
+const LEGACY_PRESET_DELAY_HOURS: Record<WarmingSpeedPreset, { min: number; max: number }> = {
+  safe: { min: 4, max: 6 },
+  normal: { min: 2, max: 4 }
+}
+
 const targetsInput = ref('')
-const speedPreset = ref<WarmingSpeedPreset>('safe')
+const minDelayHours = ref<number | null>(DEFAULT_WARMING_MIN_DELAY_HOURS)
+const maxDelayHours = ref<number | null>(DEFAULT_WARMING_MAX_DELAY_HOURS)
 const selectedAccountIds = ref<number[]>([])
 const isCreating = ref(false)
 
@@ -60,6 +68,32 @@ function normalizeTargetForPreview(value: string): string | null {
 
   return null
 }
+
+function normalizeDelayHoursValue(value: number | null | undefined, fallback: number): number {
+  if (typeof value !== 'number' || Number.isNaN(value) || value <= 0) {
+    return fallback
+  }
+  return Math.min(Math.max(value, 0.1), 72)
+}
+
+function formatCompactNumber(value: number): string {
+  return Number.isInteger(value) ? `${value}` : value.toFixed(1)
+}
+
+function formatCompactDelay(seconds: number): string {
+  if (seconds >= 3600) return `${formatCompactNumber(seconds / 3600)}h`
+  if (seconds >= 60) return `${formatCompactNumber(seconds / 60)}m`
+  return `${Math.round(seconds)}s`
+}
+
+const normalizedMinDelayHours = computed(() =>
+  normalizeDelayHoursValue(minDelayHours.value, DEFAULT_WARMING_MIN_DELAY_HOURS)
+)
+
+const normalizedMaxDelayHours = computed(() => {
+  const normalized = normalizeDelayHoursValue(maxDelayHours.value, DEFAULT_WARMING_MAX_DELAY_HOURS)
+  return normalized >= normalizedMinDelayHours.value ? normalized : normalizedMinDelayHours.value
+})
 
 const parsedTargets = computed(() => {
   const lines = targetsInput.value
@@ -117,31 +151,23 @@ const targetsHelperSeverity = computed(() => {
   return 'neutral'
 })
 
-const speedOptions = computed(() => [
-  {
-    value: 'safe',
-    label: t('warming.speed.safe'),
-    description: t('warming.speed.safeHint')
-  },
-  {
-    value: 'normal',
-    label: t('warming.speed.normal'),
-    description: t('warming.speed.normalHint')
-  }
-])
-
 const estimatedPerAccountHours = computed(() => {
   if (parsedTargets.value.length <= 1) return 0
-  const avgDelayHours = speedPreset.value === 'safe' ? 5 : 3
-  return avgDelayHours * (parsedTargets.value.length - 1)
+  const avgDelayHours = (normalizedMinDelayHours.value + normalizedMaxDelayHours.value) / 2
+  return Number((avgDelayHours * (parsedTargets.value.length - 1)).toFixed(1))
 })
 
 const runningTasks = computed(() => taskStore.tasks.filter(task => task.status === 'running'))
 
+function formatTaskDelay(task: Task): string {
+  return `${formatCompactDelay(task.min_delay)} - ${formatCompactDelay(task.max_delay)}`
+}
+
 function saveForm() {
   localStorage.setItem(FORM_KEY, JSON.stringify({
     targetsInput: targetsInput.value,
-    speedPreset: speedPreset.value,
+    minDelayHours: normalizedMinDelayHours.value,
+    maxDelayHours: normalizedMaxDelayHours.value,
     selectedAccountIds: selectedAccountIds.value
   }))
 }
@@ -174,8 +200,16 @@ function loadForm() {
 
     const data = JSON.parse(saved)
     if (typeof data.targetsInput === 'string') targetsInput.value = data.targetsInput
-    if (data.speedPreset === 'safe' || data.speedPreset === 'normal') {
-      speedPreset.value = data.speedPreset
+    if (typeof data.minDelayHours === 'number') minDelayHours.value = data.minDelayHours
+    if (typeof data.maxDelayHours === 'number') maxDelayHours.value = data.maxDelayHours
+    if (
+      typeof data.minDelayHours !== 'number' &&
+      typeof data.maxDelayHours !== 'number' &&
+      (data.speedPreset === 'safe' || data.speedPreset === 'normal')
+    ) {
+      const preset = data.speedPreset as WarmingSpeedPreset
+      minDelayHours.value = LEGACY_PRESET_DELAY_HOURS[preset].min
+      maxDelayHours.value = LEGACY_PRESET_DELAY_HOURS[preset].max
     }
     if (Array.isArray(data.selectedAccountIds)) {
       selectedAccountIds.value = data.selectedAccountIds
@@ -185,7 +219,7 @@ function loadForm() {
   }
 }
 
-watch([targetsInput, speedPreset, selectedAccountIds], scheduleFormSave, { deep: true })
+watch([targetsInput, minDelayHours, maxDelayHours, selectedAccountIds], scheduleFormSave, { deep: true })
 
 function getStatusSeverity(status: string): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
   switch (status) {
@@ -235,10 +269,11 @@ async function createTask() {
   try {
     const task = await taskStore.createWarmingTask({
       config: {
-        targets: parsedTargets.value,
-        speed_preset: speedPreset.value
+        targets: parsedTargets.value
       },
       account_ids: selectedAccountIds.value,
+      min_delay: Math.round(normalizedMinDelayHours.value * 3600),
+      max_delay: Math.round(normalizedMaxDelayHours.value * 3600),
       max_concurrent: 1
     })
 
@@ -435,25 +470,53 @@ onUnmounted(() => {
             <div class="form-section">
               <div class="form-section-header">
                 <i class="pi pi-clock"></i>
-                <span>{{ t('warming.speedTitle') }}</span>
+                <span>{{ t('warming.delayTitle') }}</span>
               </div>
 
-              <Select
-                v-model="speedPreset"
-                :options="speedOptions"
-                option-label="label"
-                option-value="value"
-                class="speed-select"
-              />
+              <div class="delay-grid">
+                <div class="delay-field">
+                  <label class="delay-label">{{ t('warming.minDelay') }}</label>
+                  <div class="input-with-suffix">
+                    <InputNumber
+                      v-model="minDelayHours"
+                      :min="0.1"
+                      :max="72"
+                      :step="0.5"
+                      :min-fraction-digits="0"
+                      :max-fraction-digits="1"
+                      class="delay-input"
+                    />
+                    <span class="input-suffix">{{ t('warming.hoursShort') }}</span>
+                  </div>
+                </div>
+
+                <div class="delay-separator">
+                  <i class="pi pi-arrows-h"></i>
+                </div>
+
+                <div class="delay-field">
+                  <label class="delay-label">{{ t('warming.maxDelay') }}</label>
+                  <div class="input-with-suffix">
+                    <InputNumber
+                      v-model="maxDelayHours"
+                      :min="0.1"
+                      :max="72"
+                      :step="0.5"
+                      :min-fraction-digits="0"
+                      :max-fraction-digits="1"
+                      class="delay-input"
+                    />
+                    <span class="input-suffix">{{ t('warming.hoursShort') }}</span>
+                  </div>
+                </div>
+              </div>
 
               <div class="speed-hint">
-                {{
-                  speedOptions.find(option => option.value === speedPreset)?.description
-                }}
+                {{ t('warming.delayHint', { min: formatCompactNumber(normalizedMinDelayHours), max: formatCompactNumber(normalizedMaxDelayHours) }) }}
               </div>
 
               <div v-if="estimatedPerAccountHours > 0" class="estimate-box">
-                {{ t('warming.estimatePerAccount', { hours: estimatedPerAccountHours }) }}
+                {{ t('warming.estimatePerAccount', { hours: formatCompactNumber(estimatedPerAccountHours) }) }}
               </div>
             </div>
           </div>
@@ -534,7 +597,7 @@ onUnmounted(() => {
                 <span class="task-accounts-count">
                   <i class="pi pi-users"></i> {{ task.accounts_count }}
                 </span>
-                <span class="task-preset">{{ t(`warming.speed.${task.config?.speed_preset || 'safe'}`) }}</span>
+                <span class="task-preset">{{ formatTaskDelay(task) }}</span>
                 <span class="task-time">{{ timeAgo(task.created_at) }}</span>
               </div>
 
@@ -791,8 +854,7 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
-.targets-input,
-.speed-select {
+.targets-input {
   width: 100%;
 }
 
@@ -819,6 +881,54 @@ onUnmounted(() => {
 .speed-hint {
   font-size: 12px;
   color: #a1a1aa;
+}
+
+.delay-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.delay-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.delay-label {
+  font-size: 12px;
+  color: #c7c7cf;
+}
+
+.delay-input {
+  width: 100%;
+}
+
+.input-with-suffix {
+  position: relative;
+}
+
+.input-with-suffix :deep(.p-inputnumber-input) {
+  padding-right: 34px;
+}
+
+.input-suffix {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  color: #8b8b95;
+  pointer-events: none;
+}
+
+.delay-separator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #71717a;
+  padding-bottom: 10px;
 }
 
 .estimate-box {
@@ -980,6 +1090,16 @@ onUnmounted(() => {
 
 .task-preset {
   color: #f6c453;
+}
+
+@media (max-width: 720px) {
+  .delay-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .delay-separator {
+    display: none;
+  }
 }
 
 .task-progress-section {

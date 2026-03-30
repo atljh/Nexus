@@ -2,6 +2,7 @@
 Tests for TaskConfig and CreateLikesTaskRequest pydantic schemas.
 """
 
+from datetime import datetime, timedelta, timezone
 import sys
 from pathlib import Path
 
@@ -167,6 +168,27 @@ class TestWarmingHelpers:
 
         assert get_warming_delay_range("safe") == (14400.0, 21600.0)
         assert get_warming_delay_range("normal") == (7200.0, 14400.0)
+        assert get_warming_delay_range(None) == (18000.0, 36000.0)
+
+    def test_warming_delay_range_normalization(self):
+        from api.tasks import normalize_warming_delay_range
+
+        assert normalize_warming_delay_range(36000.0, 18000.0) == (18000.0, 36000.0)
+        assert normalize_warming_delay_range(None, None, "normal") == (7200.0, 14400.0)
+        assert normalize_warming_delay_range(None, None, None) == (18000.0, 36000.0)
+
+    def test_warming_safety_delay_floor_uses_youngest_account(self):
+        from api.tasks import get_warming_safety_delay_floor, apply_warming_safety_delay_floor
+
+        class StubAccount:
+            def __init__(self, age_days: int):
+                self.register_time = None
+                self.created_at = datetime.now(timezone.utc) - timedelta(days=age_days)
+
+        accounts = [StubAccount(20), StubAccount(1)]
+
+        assert get_warming_safety_delay_floor(accounts) == (64800.0, 108000.0)
+        assert apply_warming_safety_delay_floor(accounts, 18000.0, 36000.0) == (64800.0, 108000.0)
 
     def test_warming_task_config_normalization(self):
         from api.tasks import normalize_warming_task_config
@@ -177,8 +199,15 @@ class TestWarmingHelpers:
             "unexpected": "value",
         }) == {
             "targets": ["@testchannel"],
-            "speed_preset": "safe",
             "unexpected": "value",
+        }
+
+        assert normalize_warming_task_config({
+            "targets": ["testchannel"],
+            "speed_preset": "normal",
+        }) == {
+            "targets": ["@testchannel"],
+            "speed_preset": "normal",
         }
 
     def test_warming_total_actions_counts_all_assigned_accounts(self):

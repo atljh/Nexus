@@ -153,13 +153,16 @@ function formatLogTime(date: string | null): string {
 }
 
 function formatDelayRange(currentTask: Task): string {
-  if (currentTask.task_type === 'warming' && currentTask.min_delay >= 3600 && currentTask.max_delay >= 3600) {
-    const minHours = (currentTask.min_delay / 3600).toFixed(currentTask.min_delay % 3600 === 0 ? 0 : 1)
-    const maxHours = (currentTask.max_delay / 3600).toFixed(currentTask.max_delay % 3600 === 0 ? 0 : 1)
-    return `${minHours} — ${maxHours} ${t('taskResults.time.hours')}`
+  const formatDelayValue = (value: number): string => {
+    if (value >= 3600) {
+      return `${(value / 3600).toFixed(value % 3600 === 0 ? 0 : 1)} ${t('taskResults.time.hours')}`
+    }
+    if (value >= 60) {
+      return `${(value / 60).toFixed(value % 60 === 0 ? 0 : 1)} ${t('taskResults.time.minutes')}`
+    }
+    return `${value} ${t('taskResults.time.seconds')}`
   }
-
-  return `${currentTask.min_delay} — ${currentTask.max_delay} ${t('taskResults.time.seconds')}`
+  return `${formatDelayValue(currentTask.min_delay)} — ${formatDelayValue(currentTask.max_delay)}`
 }
 
 function translateLogText(text?: string | null): string {
@@ -752,10 +755,10 @@ watch(() => task.value?.status, async (newStatus, oldStatus) => {
                       </span>
                     </div>
                   </div>
-                  <div class="config-row">
+                  <div v-if="task.config?.speed_preset" class="config-row">
                     <span class="config-label">{{ t('taskResults.config.speedPreset') }}</span>
                     <span class="config-value">
-                      {{ t(`taskResults.speedPreset.${task.config?.speed_preset || 'safe'}`) }}
+                      {{ t(`taskResults.speedPreset.${task.config.speed_preset}`) }}
                     </span>
                   </div>
                 </template>

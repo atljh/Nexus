@@ -124,17 +124,29 @@ class TestCreateWarmingTaskRequest:
             account_ids=[1, 2],
         )
         assert req.config.targets == ["@test"]
-        assert req.config.speed_preset == "safe"
+        assert req.config.speed_preset is None
+        assert req.min_delay == 18000.0
+        assert req.max_delay == 36000.0
         assert req.max_concurrent == 1
 
-    def test_custom_preset(self):
+    def test_custom_delays(self):
+        req = CreateWarmingTaskRequest(
+            config=WarmingTaskConfig(targets=["https://t.me/+abc123"]),
+            account_ids=[1],
+            min_delay=7200,
+            max_delay=14400,
+            max_concurrent=2,
+        )
+        assert req.min_delay == 7200
+        assert req.max_delay == 14400
+        assert req.max_concurrent == 2
+
+    def test_legacy_preset_is_still_allowed(self):
         req = CreateWarmingTaskRequest(
             config=WarmingTaskConfig(targets=["https://t.me/+abc123"], speed_preset="normal"),
             account_ids=[1],
-            max_concurrent=2,
         )
         assert req.config.speed_preset == "normal"
-        assert req.max_concurrent == 2
 
     def test_max_concurrent_bounds(self):
         with pytest.raises(ValidationError):

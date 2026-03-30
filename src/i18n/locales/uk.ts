@@ -923,18 +923,22 @@ export default {
   },
 
   warming: {
-    subtitle: 'Повільно підписує вибрані акаунти на список каналів або інвайт-посилань.',
+    subtitle: 'Повільно підписує вибрані акаунти на публічні канали та приватні інвайт-посилання.',
     statsActive: 'Активні',
     statsCompleted: 'Завершені',
     createTask: 'Створити завдання прогріву',
-    createTaskHint: 'Мінімальне налаштування для безпечного прогріву через підписки на канали.',
-    targetsTitle: 'Цільові канали',
-    targetsPlaceholder: '@channel\nhttps://t.me/channel\nhttps://t.me/+inviteHash',
+    createTaskHint: 'Вкажіть канали для вступу та дуже повільний діапазон затримок для безпечнішого прогріву. Молоді акаунти додатково сповільнюються автоматично.',
+    targetsTitle: 'Канали для вступу',
+    targetsPlaceholder: '@publicchannel\nhttps://t.me/publicchannel\nhttps://t.me/+privateInviteHash',
     targetsCount: '{count} цілей',
-    supportedFormats: 'Підтримуються @username, t.me-посилання та інвайт-посилання',
+    supportedFormats: 'Підтримуються публічні @username/t.me-посилання та приватні інвайт-посилання',
     invalidTargets: '{count} рядків проігноровано як невалідні',
     duplicateTargets: '{count} дублікатів об’єднано',
-    speedTitle: 'Пресет швидкості',
+    delayTitle: 'Затримка між вступами',
+    minDelay: 'Мін. затримка',
+    maxDelay: 'Макс. затримка',
+    hoursShort: 'год',
+    delayHint: 'Випадкова затримка між каналами для одного акаунта: {min}-{max} годин. Значення за замовчуванням навмисно дуже великі, а для молодих акаунтів поріг ще жорсткіший.',
     estimatePerAccount: 'Приблизно {hours} годин на акаунт, щоб пройти поточний список каналів.',
     startTask: 'Запустити прогрів',
     badgeTargets: 'Канали: {count}',
@@ -943,13 +947,7 @@ export default {
     tasksCount: '{count} завдань',
     progress: 'Прогрес',
     noTasks: 'Поки немає завдань прогріву',
-    noTasksHint: 'Додайте кілька інвайтів або каналів і запустіть перший прогрів.',
-    speed: {
-      safe: 'Безпечно',
-      safeHint: 'Приблизно одне приєднання кожні 4-6 годин на акаунт.',
-      normal: 'Нормально',
-      normalHint: 'Приблизно одне приєднання кожні 2-4 години на акаунт.'
-    },
+    noTasksHint: 'Додайте публічні канали або приватні інвайт-посилання й запустіть перший прогрів.',
     errors: {
       targetsRequired: 'Додайте хоча б один канал або інвайт-посилання',
       accountsRequired: 'Оберіть хоча б один акаунт'
