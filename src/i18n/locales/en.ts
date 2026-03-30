@@ -46,6 +46,7 @@ export default {
     proxy: 'Proxy',
     autoLikes: 'Auto Likes',
     autoComments: 'Auto Comments',
+    warming: 'Warming',
     settings: 'Settings'
   },
 
@@ -67,6 +68,7 @@ export default {
     addAccount: 'Add Account',
     addProxy: 'Add Proxy',
     newLikeTask: 'New Like Task',
+    newWarmingTask: 'New Warming Task',
     active: 'active',
     working: 'working',
     tasksCompleted: 'Tasks completed'
@@ -920,11 +922,51 @@ export default {
     openInWebK: 'Open in WebK'
   },
 
+  warming: {
+    subtitle: 'Slowly join selected accounts to a list of channels or invite links.',
+    statsActive: 'Active',
+    statsCompleted: 'Completed',
+    createTask: 'Create warming task',
+    createTaskHint: 'Minimal setup for slow account warm-up via channel subscriptions.',
+    targetsTitle: 'Target channels',
+    targetsPlaceholder: '@channel\nhttps://t.me/channel\nhttps://t.me/+inviteHash',
+    targetsCount: '{count} targets',
+    supportedFormats: 'Supports @username, t.me links and invite links',
+    speedTitle: 'Speed preset',
+    estimatePerAccount: 'Approx. {hours} hours per account to finish the current target list.',
+    startTask: 'Start warming',
+    badgeTargets: 'Targets: {count}',
+    badgeAccounts: 'Accounts: {count}',
+    tasks: 'Warming tasks',
+    tasksCount: '{count} tasks',
+    progress: 'Progress',
+    noTasks: 'No warming tasks yet',
+    noTasksHint: 'Add a few invite links or channels and launch the first warm-up run.',
+    speed: {
+      safe: 'Safe',
+      safeHint: 'About one join every 4-6 hours per account.',
+      normal: 'Normal',
+      normalHint: 'About one join every 2-4 hours per account.'
+    },
+    errors: {
+      targetsRequired: 'Add at least one channel or invite link',
+      accountsRequired: 'Select at least one account'
+    },
+    messages: {
+      accountsSkipped: '{count} accounts were skipped because they are not valid',
+      taskStarted: 'Warming task started',
+      taskCreated: 'Task created',
+      createFailed: 'Failed to create warming task',
+      taskDeleted: 'Task deleted'
+    }
+  },
+
   taskResults: {
     title: 'Task Results',
     taskType: {
       likes: 'Auto-Likes',
-      comments: 'Auto-Comments'
+      comments: 'Auto-Comments',
+      warming: 'Warming'
     },
     status: {
       pending: 'Pending',
@@ -945,6 +987,7 @@ export default {
     config: {
       channel: 'Channel',
       channels: 'Channels',
+      targets: 'Targets',
       reactions: 'Reactions',
       emojiMode: 'Emoji Mode',
       postId: 'Post ID',
@@ -952,6 +995,7 @@ export default {
       templatesCount: '{count} pcs.',
       rotation: 'Rotation',
       commentsPerAccount: 'Comments/account',
+      speedPreset: 'Speed preset',
       inviteLink: 'Invite link',
       delay: 'Delay',
       concurrent: 'Concurrent',
@@ -1012,7 +1056,14 @@ export default {
         allAccountsExhaustedOrBlacklisted: 'All accounts exhausted or blacklisted',
         failedToResolveChannels: 'Failed to resolve any channels for monitoring',
         reactionsNotAvailable: 'Requested reactions not available. Available: {available}',
-        spamblock: 'Spamblock: {detail}'
+        spamblock: 'Spamblock: {detail}',
+        joinedViaInviteLink: 'Joined via invite link',
+        alreadySubscribed: 'Already subscribed',
+        joinedChannel: 'Joined channel',
+        privateChannelInviteRequired: 'Private channel requires invite link',
+        accountUnavailableBeforeWarming: 'Account unavailable before warming started',
+        allWarmingActionsFailed: 'All warming actions failed',
+        noWarmingTargetsSpecified: 'No warming targets specified'
       }
     },
     time: {
@@ -1048,6 +1099,10 @@ export default {
     rotation: {
       random: 'Random',
       roundRobin: 'Round-robin'
+    },
+    speedPreset: {
+      safe: 'Safe',
+      normal: 'Normal'
     },
     emojiModes: {
       single: 'Single',

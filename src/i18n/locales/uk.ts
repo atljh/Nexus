@@ -46,6 +46,7 @@ export default {
     proxy: 'Проксі',
     autoLikes: 'Авто-лайки',
     autoComments: 'Авто-коментарі',
+    warming: 'Прогрів',
     settings: 'Налаштування'
   },
 
@@ -67,6 +68,7 @@ export default {
     addAccount: 'Додати акаунт',
     addProxy: 'Додати проксі',
     newLikeTask: 'Нове завдання лайків',
+    newWarmingTask: 'Нове завдання прогріву',
     active: 'активних',
     working: 'робочих',
     tasksCompleted: 'Завдань завершено'
@@ -920,11 +922,51 @@ export default {
     openInWebK: 'Відкрити у WebK'
   },
 
+  warming: {
+    subtitle: 'Повільно підписує вибрані акаунти на список каналів або інвайт-посилань.',
+    statsActive: 'Активні',
+    statsCompleted: 'Завершені',
+    createTask: 'Створити завдання прогріву',
+    createTaskHint: 'Мінімальне налаштування для безпечного прогріву через підписки на канали.',
+    targetsTitle: 'Цільові канали',
+    targetsPlaceholder: '@channel\nhttps://t.me/channel\nhttps://t.me/+inviteHash',
+    targetsCount: '{count} цілей',
+    supportedFormats: 'Підтримуються @username, t.me-посилання та інвайт-посилання',
+    speedTitle: 'Пресет швидкості',
+    estimatePerAccount: 'Приблизно {hours} годин на акаунт, щоб пройти поточний список каналів.',
+    startTask: 'Запустити прогрів',
+    badgeTargets: 'Канали: {count}',
+    badgeAccounts: 'Акаунти: {count}',
+    tasks: 'Завдання прогріву',
+    tasksCount: '{count} завдань',
+    progress: 'Прогрес',
+    noTasks: 'Поки немає завдань прогріву',
+    noTasksHint: 'Додайте кілька інвайтів або каналів і запустіть перший прогрів.',
+    speed: {
+      safe: 'Безпечно',
+      safeHint: 'Приблизно одне приєднання кожні 4-6 годин на акаунт.',
+      normal: 'Нормально',
+      normalHint: 'Приблизно одне приєднання кожні 2-4 години на акаунт.'
+    },
+    errors: {
+      targetsRequired: 'Додайте хоча б один канал або інвайт-посилання',
+      accountsRequired: 'Оберіть хоча б один акаунт'
+    },
+    messages: {
+      accountsSkipped: '{count} акаунтів пропущено, бо вони не валідні',
+      taskStarted: 'Завдання прогріву запущено',
+      taskCreated: 'Завдання створено',
+      createFailed: 'Не вдалося створити завдання прогріву',
+      taskDeleted: 'Завдання видалено'
+    }
+  },
+
   taskResults: {
     title: 'Результати завдання',
     taskType: {
       likes: 'Авто-лайки',
-      comments: 'Авто-коментарі'
+      comments: 'Авто-коментарі',
+      warming: 'Прогрів'
     },
     status: {
       pending: 'Очікує',
@@ -945,6 +987,7 @@ export default {
     config: {
       channel: 'Канал',
       channels: 'Канали',
+      targets: 'Цілі',
       reactions: 'Реакції',
       emojiMode: 'Режим емоджі',
       postId: 'ID поста',
@@ -952,6 +995,7 @@ export default {
       templatesCount: '{count} шт.',
       rotation: 'Ротація',
       commentsPerAccount: 'Коментарів/акаунт',
+      speedPreset: 'Пресет швидкості',
       inviteLink: 'Інвайт-посилання',
       delay: 'Затримка',
       concurrent: 'Паралельно',
@@ -1012,7 +1056,14 @@ export default {
         allAccountsExhaustedOrBlacklisted: 'Усі акаунти вичерпані або в чорному списку',
         failedToResolveChannels: 'Не вдалося знайти канали для моніторингу',
         reactionsNotAvailable: 'Запитані реакції недоступні в каналі. Доступні: {available}',
-        spamblock: 'Спам-блок: {detail}'
+        spamblock: 'Спам-блок: {detail}',
+        joinedViaInviteLink: 'Приєднано через інвайт-посилання',
+        alreadySubscribed: 'Вже підписаний',
+        joinedChannel: 'Приєднано до каналу',
+        privateChannelInviteRequired: 'Для приватного каналу потрібне інвайт-посилання',
+        accountUnavailableBeforeWarming: 'Акаунт недоступний до початку прогріву',
+        allWarmingActionsFailed: 'Усі дії прогріву завершилися невдачею',
+        noWarmingTargetsSpecified: 'Не вказано цілі для прогріву'
       }
     },
     time: {
@@ -1048,6 +1099,10 @@ export default {
     rotation: {
       random: 'Випадкова',
       roundRobin: 'По колу'
+    },
+    speedPreset: {
+      safe: 'Безпечно',
+      normal: 'Нормально'
     },
     emojiModes: {
       single: 'Один',

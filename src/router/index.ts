@@ -29,6 +29,11 @@ const router = createRouter({
       component: () => import('@/pages/AutoComments.vue')
     },
     {
+      path: '/warming',
+      name: 'warming',
+      component: () => import('@/pages/AccountWarming.vue')
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('@/pages/Settings.vue')

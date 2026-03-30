@@ -5,6 +5,7 @@ import type {
   TaskLog,
   CreateLikesTaskParams,
   CreateCommentsTaskParams,
+  CreateWarmingTaskParams,
   TaskStats,
   TaskStatus,
   CommentTemplate,
@@ -224,6 +225,22 @@ export const useTaskStore = defineStore('task', () => {
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to create comments task'
       console.error('Failed to create comments task:', e)
+      return null
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function createWarmingTask(params: CreateWarmingTaskParams): Promise<Task | null> {
+    loading.value = true
+    error.value = null
+    try {
+      const response = await window.api.post('/api/tasks/warming', params) as TaskResponse
+      tasks.value.unshift(response)
+      return response
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'Failed to create warming task'
+      console.error('Failed to create warming task:', e)
       return null
     } finally {
       loading.value = false
@@ -544,6 +561,7 @@ export const useTaskStore = defineStore('task', () => {
     fetchStats,
     createLikesTask,
     createCommentsTask,
+    createWarmingTask,
     startTask,
     pauseTask,
     cancelTask,

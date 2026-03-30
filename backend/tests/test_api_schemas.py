@@ -11,7 +11,9 @@ from api.tasks import (
     TaskConfig,
     CreateLikesTaskRequest,
     CreateCommentsTaskRequest,
+    CreateWarmingTaskRequest,
     CommentsTaskConfig,
+    WarmingTaskConfig,
     CommentTemplateRequest,
     PreviewTemplateRequest,
     AddTaskLogRequest,
@@ -111,6 +113,36 @@ class TestCommentsTaskConfig:
             mode="monitoring",
         )
         assert cfg.mode == "monitoring"
+
+
+class TestCreateWarmingTaskRequest:
+    """Tests for CreateWarmingTaskRequest Pydantic model."""
+
+    def test_minimal(self):
+        req = CreateWarmingTaskRequest(
+            config=WarmingTaskConfig(targets=["@test"]),
+            account_ids=[1, 2],
+        )
+        assert req.config.targets == ["@test"]
+        assert req.config.speed_preset == "safe"
+        assert req.max_concurrent == 1
+
+    def test_custom_preset(self):
+        req = CreateWarmingTaskRequest(
+            config=WarmingTaskConfig(targets=["https://t.me/+abc123"], speed_preset="normal"),
+            account_ids=[1],
+            max_concurrent=2,
+        )
+        assert req.config.speed_preset == "normal"
+        assert req.max_concurrent == 2
+
+    def test_max_concurrent_bounds(self):
+        with pytest.raises(ValidationError):
+            CreateWarmingTaskRequest(
+                config=WarmingTaskConfig(targets=["@test"]),
+                account_ids=[1],
+                max_concurrent=5,
+            )
 
 
 class TestCommentTemplateRequest:

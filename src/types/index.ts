@@ -226,8 +226,9 @@ export interface Task {
   progress: number
 }
 
-export type TaskType = 'likes' | 'comments'
+export type TaskType = 'likes' | 'comments' | 'warming'
 export type TaskStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
+export type WarmingSpeedPreset = 'safe' | 'normal'
 
 // Base config shared by all task types
 export interface TaskConfig {
@@ -244,6 +245,9 @@ export interface TaskConfig {
   rotation_mode?: 'random' | 'round_robin'
   comments_per_account?: number
   mode?: 'single' | 'monitoring'
+  // For warming tasks
+  targets?: string[]
+  speed_preset?: WarmingSpeedPreset
 }
 
 export interface TaskLog {
@@ -342,6 +346,17 @@ export interface CreateCommentsTaskParams {
   total_actions: number
   min_delay: number
   max_delay: number
+  max_concurrent?: number
+}
+
+export interface WarmingTaskConfig {
+  targets: string[]
+  speed_preset: WarmingSpeedPreset
+}
+
+export interface CreateWarmingTaskParams {
+  config: WarmingTaskConfig
+  account_ids: number[]
   max_concurrent?: number
 }
 

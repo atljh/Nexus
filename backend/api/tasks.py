@@ -1,7 +1,8 @@
 """Tasks API - Create and manage automation tasks."""
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+import re
+from typing import List, Optional, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, case
@@ -24,6 +25,10 @@ from utils.comment_template_import import (
 
 router = APIRouter()
 DEFAULT_TEMPLATE_CATEGORY = "General"
+WARMING_SPEED_PRESETS = {
+    "safe": (4 * 3600.0, 6 * 3600.0),
+    "normal": (2 * 3600.0, 4 * 3600.0),
+}
 
 
 def _normalize_category_value(value: Optional[str], fallback: str = DEFAULT_TEMPLATE_CATEGORY) -> str:
@@ -35,6 +40,63 @@ def _normalize_template_name_value(name: Optional[str], content: str) -> str:
     if normalized:
         return normalized[:100]
     return generate_template_name(content, "Comment")[:100]
+
+
+def normalize_warming_target(value: str) -> str:
+    """Normalize a warming target to a format the worker can process."""
+    target = " ".join((value or "").split())
+    if not target:
+        return ""
+
+    private_match = re.match(r"(?:https?://)?t\.me/c/(\d+)(?:/(\d+))?$", target, re.IGNORECASE)
+    if private_match:
+        return f"-100{private_match.group(1)}"
+
+    invite_match = re.match(
+        r"(?:https?://)?t\.me/(?:\+|joinchat/)([a-zA-Z0-9_-]+)$",
+        target,
+        re.IGNORECASE,
+    )
+    if invite_match:
+        return f"https://t.me/+{invite_match.group(1)}"
+
+    public_match = re.match(
+        r"(?:https?://)?t\.me/([a-zA-Z0-9_]+)(?:/\d+)?$",
+        target,
+        re.IGNORECASE,
+    )
+    if public_match:
+        return f"@{public_match.group(1)}"
+
+    if target.startswith("@") and target[1:].lstrip("-").isdigit():
+        return target[1:]
+
+    if target.startswith("@") or target.lstrip("-").isdigit():
+        return target
+
+    return f"@{target}"
+
+
+def normalize_warming_targets(values: List[str]) -> List[str]:
+    """Normalize, deduplicate, and preserve target order."""
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    for raw in values:
+        target = normalize_warming_target(raw)
+        if not target:
+            continue
+        key = target.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(target)
+
+    return normalized
+
+
+def get_warming_delay_range(speed_preset: str) -> tuple[float, float]:
+    return WARMING_SPEED_PRESETS.get(speed_preset, WARMING_SPEED_PRESETS["safe"])
 
 
 # ============ Pydantic Schemas ============
@@ -100,6 +162,19 @@ class CreateCommentsTaskRequest(BaseModel):
         if self.min_delay > self.max_delay:
             self.min_delay, self.max_delay = self.max_delay, self.min_delay
         return self
+
+
+class WarmingTaskConfig(BaseModel):
+    """Configuration for account warming tasks."""
+    targets: List[str] = Field(..., description="Channels or invite links to join")
+    speed_preset: Literal["safe", "normal"] = Field("safe", description="Delay preset")
+
+
+class CreateWarmingTaskRequest(BaseModel):
+    """Request to create an account warming task."""
+    config: WarmingTaskConfig
+    account_ids: List[int] = Field(..., description="Account IDs to warm")
+    max_concurrent: int = Field(1, ge=1, le=3, description="Parallel account setup limit")
 
 
 class CommentTemplateRequest(BaseModel):
@@ -701,6 +776,48 @@ def create_comments_task(request: CreateCommentsTaskRequest, db: Session = Depen
     return result
 
 
+@router.post("/warming", response_model=TaskResponse)
+def create_warming_task(request: CreateWarmingTaskRequest, db: Session = Depends(get_db)):
+    """Create a new account warming task."""
+    accounts = db.query(Account).filter(
+        Account.id.in_(request.account_ids),
+        Account.status == "valid",
+    ).all()
+
+    if not accounts:
+        raise HTTPException(status_code=400, detail="No valid accounts found")
+
+    targets = normalize_warming_targets(request.config.targets)
+    if not targets:
+        raise HTTPException(status_code=400, detail="No valid warming targets found")
+
+    skipped_count = len(request.account_ids) - len(accounts)
+    min_delay, max_delay = get_warming_delay_range(request.config.speed_preset)
+
+    task = Task(
+        task_type="warming",
+        status="pending",
+        config={
+            "targets": targets,
+            "speed_preset": request.config.speed_preset,
+        },
+        total_actions=len(accounts) * len(targets),
+        min_delay=min_delay,
+        max_delay=max_delay,
+        max_concurrent=request.max_concurrent,
+    )
+    task.accounts = accounts
+
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    result = task.to_dict()
+    if skipped_count > 0:
+        result["skipped_accounts"] = skipped_count
+    return result
+
+
 # ── Duplicate Task (static prefix) ──
 
 @router.post("/duplicate/{task_id}", response_model=TaskResponse)
@@ -717,6 +834,11 @@ def duplicate_task(task_id: int, db: Session = Depends(get_db)):
     if original.task_type == "likes":
         valid = [a for a in accounts if a.status == "valid"]
         total = len(valid) if valid else len(accounts)
+    elif original.task_type == "warming":
+        valid = [a for a in accounts if a.status == "valid"]
+        targets = normalize_warming_targets((original.config or {}).get("targets", []))
+        base_count = len(valid) if valid else len(accounts)
+        total = base_count * len(targets)
 
     new_task = Task(
         task_type=original.task_type,
@@ -790,6 +912,7 @@ async def start_task(task_id: int, db: Session = Depends(get_db)):
     """Start a pending task."""
     from workers.likes_worker import start_likes_task
     from workers.comments_worker import start_comments_task
+    from workers.warming_worker import start_warming_task
     from workers.task_queue import task_queue
 
     task = db.query(Task).options(subqueryload(Task.accounts)).filter(Task.id == task_id).first()
@@ -828,6 +951,8 @@ async def start_task(task_id: int, db: Session = Depends(get_db)):
             submitted = await start_likes_task(task_id)
         elif task.task_type == "comments":
             submitted = await start_comments_task(task_id)
+        elif task.task_type == "warming":
+            submitted = await start_warming_task(task_id)
         else:
             task.status = "pending"
             task.last_error = f"Unknown task type: {task.task_type}"
@@ -902,6 +1027,11 @@ def restart_task(task_id: int, db: Session = Depends(get_db)):
     if task.task_type == "likes":
         valid_accounts = [a for a in task.accounts if a.status == "valid"]
         task.total_actions = len(valid_accounts) if valid_accounts else len(task.accounts)
+    elif task.task_type == "warming":
+        valid_accounts = [a for a in task.accounts if a.status == "valid"]
+        targets = normalize_warming_targets((task.config or {}).get("targets", []))
+        base_count = len(valid_accounts) if valid_accounts else len(task.accounts)
+        task.total_actions = base_count * len(targets)
 
     # Delete old logs
     db.query(TaskLog).filter(TaskLog.task_id == task_id).delete()

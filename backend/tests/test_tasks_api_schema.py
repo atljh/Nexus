@@ -136,3 +136,31 @@ class TestCreateLikesTaskRequest:
             CreateLikesTaskRequest(
                 config=TaskConfig(channel="@test")
             )
+
+
+class TestWarmingHelpers:
+    """Test warming-specific schema helpers."""
+
+    def test_warming_target_normalization(self):
+        from api.tasks import normalize_warming_target
+
+        assert normalize_warming_target("channelname") == "@channelname"
+        assert normalize_warming_target("https://t.me/example") == "@example"
+        assert normalize_warming_target("https://t.me/+InviteHash123") == "https://t.me/+InviteHash123"
+        assert normalize_warming_target("https://t.me/c/123456/7") == "-100123456"
+
+    def test_warming_targets_deduplicate(self):
+        from api.tasks import normalize_warming_targets
+
+        assert normalize_warming_targets([
+            "testchannel",
+            "@testchannel",
+            "https://t.me/+abc",
+            "https://t.me/+abc",
+        ]) == ["@testchannel", "https://t.me/+abc"]
+
+    def test_warming_delay_preset(self):
+        from api.tasks import get_warming_delay_range
+
+        assert get_warming_delay_range("safe") == (14400.0, 21600.0)
+        assert get_warming_delay_range("normal") == (7200.0, 14400.0)

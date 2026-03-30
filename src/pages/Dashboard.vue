@@ -174,6 +174,17 @@ onUnmounted(() => {
             </div>
             <i class="pi pi-arrow-right action-arrow"></i>
           </router-link>
+
+          <router-link to="/warming" class="action-card">
+            <div class="action-icon action-icon-amber">
+              <i class="pi pi-sun"></i>
+            </div>
+            <div class="action-body">
+              <span class="action-title">{{ t('dashboard.newWarmingTask') }}</span>
+              <span class="action-desc">{{ t('nav.warming') }}</span>
+            </div>
+            <i class="pi pi-arrow-right action-arrow"></i>
+          </router-link>
         </div>
       </div>
     </div>
@@ -374,6 +385,11 @@ onUnmounted(() => {
 .action-icon-orange {
   background: rgba(245, 158, 11, 0.12);
   color: #f59e0b;
+}
+
+.action-icon-amber {
+  background: rgba(251, 191, 36, 0.14);
+  color: #fbbf24;
 }
 
 .action-body {

@@ -152,6 +152,16 @@ function formatLogTime(date: string | null): string {
   })
 }
 
+function formatDelayRange(currentTask: Task): string {
+  if (currentTask.task_type === 'warming' && currentTask.min_delay >= 3600 && currentTask.max_delay >= 3600) {
+    const minHours = (currentTask.min_delay / 3600).toFixed(currentTask.min_delay % 3600 === 0 ? 0 : 1)
+    const maxHours = (currentTask.max_delay / 3600).toFixed(currentTask.max_delay % 3600 === 0 ? 0 : 1)
+    return `${minHours} — ${maxHours} ${t('taskResults.time.hours')}`
+  }
+
+  return `${currentTask.min_delay} — ${currentTask.max_delay} ${t('taskResults.time.seconds')}`
+}
+
 function translateLogText(text?: string | null): string {
   if (!text) return ''
 
@@ -193,6 +203,13 @@ function translateLogText(text?: string | null): string {
     'No valid target channels remaining': 'taskResults.logs.translate.noValidTargetChannelsRemaining',
     'All accounts exhausted or blacklisted': 'taskResults.logs.translate.allAccountsExhaustedOrBlacklisted',
     'Failed to resolve any channels for monitoring': 'taskResults.logs.translate.failedToResolveChannels',
+    'Joined via invite link': 'taskResults.logs.translate.joinedViaInviteLink',
+    'Already subscribed': 'taskResults.logs.translate.alreadySubscribed',
+    'Joined channel': 'taskResults.logs.translate.joinedChannel',
+    'Private channel requires invite link': 'taskResults.logs.translate.privateChannelInviteRequired',
+    'Account unavailable before warming started': 'taskResults.logs.translate.accountUnavailableBeforeWarming',
+    'All warming actions failed': 'taskResults.logs.translate.allWarmingActionsFailed',
+    'No warming targets specified': 'taskResults.logs.translate.noWarmingTargetsSpecified',
   }
 
   const mappedKey = exactMap[value]
@@ -259,6 +276,13 @@ const confirmButtonLabel = computed(() => {
   return t('taskResults.actions.stop')
 })
 
+function taskTypeRoute(taskType: string): string {
+  if (taskType === 'likes') return '/autolikes'
+  if (taskType === 'comments') return '/autocomments'
+  if (taskType === 'warming') return '/warming'
+  return '/'
+}
+
 
 // Channel status severity
 function getChannelStatusSeverity(status: string): 'success' | 'info' | 'warn' | 'danger' | 'secondary' {
@@ -321,7 +345,7 @@ async function deleteTask() {
   toast.add({ severity: 'info', summary: t('taskResults.messages.deleted'), life: 2000 })
   showConfirmDialog.value = false
   confirmAction.value = null
-  router.push(taskType === 'likes' ? '/autolikes' : '/autocomments')
+  router.push(taskTypeRoute(taskType))
 }
 
 async function duplicateTask() {
@@ -441,7 +465,7 @@ onMounted(async () => {
   // Redirect if task not found
   if (!task.value) {
     toast.add({ severity: 'warn', summary: t('taskResults.notFound'), life: 3000 })
-    router.replace('/autolikes')
+    router.replace('/')
     return
   }
 
@@ -713,11 +737,32 @@ watch(() => task.value?.status, async (newStatus, oldStatus) => {
                   </div>
                 </template>
 
+                <template v-if="task.task_type === 'warming'">
+                  <div class="config-row">
+                    <span class="config-label">{{ t('taskResults.config.targets') }}</span>
+                    <div class="config-tags">
+                      <span
+                        v-for="(target, idx) in task.config?.targets"
+                        :key="idx"
+                        class="config-tag channel"
+                      >
+                        {{ target }}
+                      </span>
+                    </div>
+                  </div>
+                  <div class="config-row">
+                    <span class="config-label">{{ t('taskResults.config.speedPreset') }}</span>
+                    <span class="config-value">
+                      {{ t(`taskResults.speedPreset.${task.config?.speed_preset || 'safe'}`) }}
+                    </span>
+                  </div>
+                </template>
+
                 <div class="config-divider"></div>
 
                 <div class="config-row">
                   <span class="config-label">{{ t('taskResults.config.delay') }}</span>
-                  <span class="config-value">{{ task.min_delay }} — {{ task.max_delay }} {{ t('taskResults.time.seconds') }}</span>
+                  <span class="config-value">{{ formatDelayRange(task) }}</span>
                 </div>
                 <div v-if="task.max_concurrent > 1" class="config-row">
                   <span class="config-label">{{ t('taskResults.config.concurrent') }}</span>
