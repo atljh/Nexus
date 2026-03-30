@@ -1066,7 +1066,8 @@ export default {
         invalidWarmingTarget: 'Invalid warming target',
         accountUnavailableBeforeWarming: 'Account unavailable before warming started',
         allWarmingActionsFailed: 'All warming actions failed',
-        noWarmingTargetsSpecified: 'No warming targets specified'
+        noWarmingTargetsSpecified: 'No warming targets specified',
+        noValidWarmingTargetsFound: 'No valid warming targets found'
       }
     },
     time: {

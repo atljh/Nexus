@@ -1066,7 +1066,8 @@ export default {
         invalidWarmingTarget: 'Некоректна ціль прогріву',
         accountUnavailableBeforeWarming: 'Акаунт недоступний до початку прогріву',
         allWarmingActionsFailed: 'Усі дії прогріву завершилися невдачею',
-        noWarmingTargetsSpecified: 'Не вказано цілі для прогріву'
+        noWarmingTargetsSpecified: 'Не вказано цілі для прогріву',
+        noValidWarmingTargetsFound: 'Не знайдено жодної валідної цілі для прогріву'
       }
     },
     time: {

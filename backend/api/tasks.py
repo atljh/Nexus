@@ -113,6 +113,26 @@ def get_warming_delay_range(speed_preset: str) -> tuple[float, float]:
     return WARMING_SPEED_PRESETS.get(speed_preset, WARMING_SPEED_PRESETS["safe"])
 
 
+def normalize_warming_task_config(config: Optional[dict]) -> dict:
+    safe_config = dict(config or {})
+    speed_preset = safe_config.get("speed_preset", "safe")
+    if speed_preset not in WARMING_SPEED_PRESETS:
+        speed_preset = "safe"
+
+    return {
+        **safe_config,
+        "targets": normalize_warming_targets(safe_config.get("targets", [])),
+        "speed_preset": speed_preset,
+    }
+
+
+def calculate_warming_total_actions(accounts: List[Account], config: Optional[dict]) -> int:
+    safe_config = normalize_warming_task_config(config)
+    # Warming records one result per assigned account/target pair, including
+    # accounts that become unusable after task creation and are skipped later.
+    return len(accounts) * len(safe_config.get("targets", []))
+
+
 # ============ Pydantic Schemas ============
 
 class TaskConfig(BaseModel):
@@ -801,21 +821,22 @@ def create_warming_task(request: CreateWarmingTaskRequest, db: Session = Depends
     if not accounts:
         raise HTTPException(status_code=400, detail="No valid accounts found")
 
-    targets = normalize_warming_targets(request.config.targets)
+    task_config = normalize_warming_task_config({
+        "targets": request.config.targets,
+        "speed_preset": request.config.speed_preset,
+    })
+    targets = task_config["targets"]
     if not targets:
         raise HTTPException(status_code=400, detail="No valid warming targets found")
 
     skipped_count = len(request.account_ids) - len(accounts)
-    min_delay, max_delay = get_warming_delay_range(request.config.speed_preset)
+    min_delay, max_delay = get_warming_delay_range(task_config["speed_preset"])
 
     task = Task(
         task_type="warming",
         status="pending",
-        config={
-            "targets": targets,
-            "speed_preset": request.config.speed_preset,
-        },
-        total_actions=len(accounts) * len(targets),
+        config=task_config,
+        total_actions=calculate_warming_total_actions(accounts, task_config),
         min_delay=min_delay,
         max_delay=max_delay,
         max_concurrent=request.max_concurrent,
@@ -849,18 +870,25 @@ def duplicate_task(task_id: int, db: Session = Depends(get_db)):
         valid = [a for a in accounts if a.status == "valid"]
         total = len(valid) if valid else len(accounts)
     elif original.task_type == "warming":
-        valid = [a for a in accounts if a.status == "valid"]
-        targets = normalize_warming_targets((original.config or {}).get("targets", []))
-        base_count = len(valid) if valid else len(accounts)
-        total = base_count * len(targets)
+        total = calculate_warming_total_actions(accounts, original.config)
+
+    normalized_config = (
+        normalize_warming_task_config(original.config)
+        if original.task_type == "warming"
+        else dict(original.config) if original.config else {}
+    )
+    min_delay = original.min_delay
+    max_delay = original.max_delay
+    if original.task_type == "warming":
+        min_delay, max_delay = get_warming_delay_range(normalized_config["speed_preset"])
 
     new_task = Task(
         task_type=original.task_type,
         status="pending",
-        config=dict(original.config) if original.config else {},
+        config=normalized_config,
         total_actions=total,
-        min_delay=original.min_delay,
-        max_delay=original.max_delay,
+        min_delay=min_delay,
+        max_delay=max_delay,
         max_concurrent=original.max_concurrent,
     )
     new_task.accounts = accounts
@@ -950,6 +978,17 @@ async def start_task(task_id: int, db: Session = Depends(get_db)):
 
     if task.status not in ["pending", "paused"]:
         raise HTTPException(status_code=400, detail=f"Cannot start task with status: {task.status}")
+
+    if task.task_type == "warming":
+        task.config = normalize_warming_task_config(task.config)
+        if not task.config.get("targets"):
+            task.last_error = "No valid warming targets found"
+            db.commit()
+            raise HTTPException(status_code=400, detail="No valid warming targets found")
+
+        task.total_actions = calculate_warming_total_actions(list(task.accounts), task.config)
+        task.min_delay, task.max_delay = get_warming_delay_range(task.config["speed_preset"])
+        db.commit()
 
     # Set status to running before launching the worker
     # (worker runs in background via asyncio.create_task and won't commit in time for response)
@@ -1042,10 +1081,9 @@ def restart_task(task_id: int, db: Session = Depends(get_db)):
         valid_accounts = [a for a in task.accounts if a.status == "valid"]
         task.total_actions = len(valid_accounts) if valid_accounts else len(task.accounts)
     elif task.task_type == "warming":
-        valid_accounts = [a for a in task.accounts if a.status == "valid"]
-        targets = normalize_warming_targets((task.config or {}).get("targets", []))
-        base_count = len(valid_accounts) if valid_accounts else len(task.accounts)
-        task.total_actions = base_count * len(targets)
+        task.config = normalize_warming_task_config(task.config)
+        task.total_actions = calculate_warming_total_actions(list(task.accounts), task.config)
+        task.min_delay, task.max_delay = get_warming_delay_range(task.config["speed_preset"])
 
     # Delete old logs
     db.query(TaskLog).filter(TaskLog.task_id == task_id).delete()

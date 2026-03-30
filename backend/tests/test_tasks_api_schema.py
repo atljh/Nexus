@@ -167,3 +167,34 @@ class TestWarmingHelpers:
 
         assert get_warming_delay_range("safe") == (14400.0, 21600.0)
         assert get_warming_delay_range("normal") == (7200.0, 14400.0)
+
+    def test_warming_task_config_normalization(self):
+        from api.tasks import normalize_warming_task_config
+
+        assert normalize_warming_task_config({
+            "targets": ["testchannel", "@testchannel", "bad target!"],
+            "speed_preset": "fast",
+            "unexpected": "value",
+        }) == {
+            "targets": ["@testchannel"],
+            "speed_preset": "safe",
+            "unexpected": "value",
+        }
+
+    def test_warming_total_actions_counts_all_assigned_accounts(self):
+        from api.tasks import calculate_warming_total_actions
+
+        class StubAccount:
+            def __init__(self, status: str):
+                self.status = status
+
+        accounts = [
+            StubAccount("valid"),
+            StubAccount("invalid"),
+            StubAccount("banned"),
+        ]
+
+        assert calculate_warming_total_actions(accounts, {
+            "targets": ["@channel_one", "@channel_two"],
+            "speed_preset": "safe",
+        }) == 6

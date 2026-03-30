@@ -211,6 +211,7 @@ function translateLogText(text?: string | null): string {
     'Account unavailable before warming started': 'taskResults.logs.translate.accountUnavailableBeforeWarming',
     'All warming actions failed': 'taskResults.logs.translate.allWarmingActionsFailed',
     'No warming targets specified': 'taskResults.logs.translate.noWarmingTargetsSpecified',
+    'No valid warming targets found': 'taskResults.logs.translate.noValidWarmingTargetsFound',
   }
 
   const mappedKey = exactMap[value]
