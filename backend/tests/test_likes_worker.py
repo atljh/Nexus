@@ -414,6 +414,29 @@ async def test_resolve_entity_cached(worker):
 
 
 @pytest.mark.asyncio
+async def test_resolve_entity_after_invite_join_falls_back_to_channel(worker):
+    """Missing entity after invite join should be resolved from the configured channel target."""
+    entity = make_entity(-100123)
+    worker._resolve_entity = AsyncMock(return_value=entity)
+
+    result = await worker._resolve_entity_after_invite_join(1, "-100123", None)
+
+    assert result is entity
+    worker._resolve_entity.assert_awaited_once_with(1, "-100123")
+
+
+@pytest.mark.asyncio
+async def test_resolve_entity_after_invite_join_skips_plain_invite_target(worker):
+    """Pure invite links have nothing stable to resolve against if Telegram returned no entity."""
+    worker._resolve_entity = AsyncMock()
+
+    result = await worker._resolve_entity_after_invite_join(1, "https://t.me/+abc123", None)
+
+    assert result is None
+    worker._resolve_entity.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_disconnect_all(worker):
     """All clients should be disconnected and pools cleared."""
     c1 = MagicMock()

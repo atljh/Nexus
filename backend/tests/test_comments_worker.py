@@ -290,6 +290,29 @@ async def test_resolve_entity_different_accounts(worker):
     assert r2 is entity2
 
 
+@pytest.mark.asyncio
+async def test_resolve_entity_after_invite_join_falls_back_to_target(worker):
+    """Comments worker should re-resolve the joined channel when invite import returned no entity."""
+    entity = make_entity(-100123)
+    worker._resolve_entity = AsyncMock(return_value=entity)
+
+    result = await worker._resolve_entity_after_invite_join(1, "-100123", None)
+
+    assert result is entity
+    worker._resolve_entity.assert_awaited_once_with(1, "-100123")
+
+
+@pytest.mark.asyncio
+async def test_resolve_entity_after_invite_join_skips_plain_invite(worker):
+    """Pure invite links cannot be re-resolved if Telegram returned no entity."""
+    worker._resolve_entity = AsyncMock()
+
+    result = await worker._resolve_entity_after_invite_join(1, "https://t.me/+abc123", None)
+
+    assert result is None
+    worker._resolve_entity.assert_not_called()
+
+
 # ── Subscription & Join ──
 
 @pytest.mark.asyncio

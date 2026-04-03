@@ -413,8 +413,11 @@ async function loadTask() {
       const result = await taskStore.fetchTask(taskId.value)
       if (result) {
         task.value = result
+        const logsRequest = task.value.status === 'running'
+          ? taskStore.fetchTaskLogs(taskId.value)
+          : taskStore.fetchAllTaskLogs(taskId.value)
         await Promise.all([
-          taskStore.fetchTaskLogs(taskId.value),
+          logsRequest,
           taskStore.fetchAccountStats(taskId.value),
           task.value.task_type === 'comments' ? taskStore.fetchTargetChannels(taskId.value) : Promise.resolve()
         ])
@@ -501,23 +504,23 @@ watch(() => task.value?.status, async (newStatus, oldStatus) => {
     startPolling()
   } else {
     stopPolling()
-  }
+    }
 
-  // Notify on task completion/failure
-  if (oldStatus === 'running' && newStatus && newStatus !== 'running') {
+    // Notify on task completion/failure
+    if (oldStatus === 'running' && newStatus && newStatus !== 'running') {
     if (newStatus === 'completed') {
       toast.add({ severity: 'success', summary: t('taskResults.messages.completed'), detail: `${task.value?.completed_actions}/${task.value?.total_actions}`, life: 4000 })
     } else if (newStatus === 'failed') {
       toast.add({ severity: 'error', summary: t('taskResults.messages.failed'), detail: translateLogText(task.value?.last_error) || '', life: 5000 })
     } else if (newStatus === 'cancelled') {
       toast.add({ severity: 'warn', summary: t('taskResults.messages.cancelled'), life: 3000 })
-    }
-    // Final fetch to get complete stats and logs
-    await Promise.all([
-      taskStore.fetchTaskLogs(taskId.value),
-      taskStore.fetchAccountStats(taskId.value)
-    ])
-    nextTick(() => scrollLogsToBottom())
+      }
+      // Final fetch to get complete stats and logs
+      await Promise.all([
+        taskStore.fetchAllTaskLogs(taskId.value),
+        taskStore.fetchAccountStats(taskId.value)
+      ])
+      nextTick(() => scrollLogsToBottom())
   }
 })
 </script>

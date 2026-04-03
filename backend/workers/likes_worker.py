@@ -170,6 +170,26 @@ class LikesWorker:
             extra_data={"error_code": error_code},
         ))
 
+    def _record_setup_failure_log(
+        self,
+        db: Session,
+        account_id: int,
+        target: Optional[str],
+        error_message: str,
+        *,
+        extra_data: Optional[dict] = None,
+    ) -> None:
+        db.add(TaskLog(
+            task_id=self.task_id,
+            account_id=account_id,
+            action_type="setup",
+            target=target,
+            success=False,
+            message="Action was not executed",
+            error=error_message,
+            extra_data=extra_data,
+        ))
+
     # ── Client pool management ──
 
     async def _connect_accounts(
@@ -416,6 +436,37 @@ class LikesWorker:
                 return False, "Join request sent, awaiting admin approval", None
             return False, f"Join via invite failed: {str(e)[:50]}", None
 
+    @staticmethod
+    def _is_invite_target(value: Optional[str]) -> bool:
+        if not value:
+            return False
+        return bool(re.match(r'(?:https?://)?t\.me/(?:\+|joinchat/)', value))
+
+    async def _resolve_entity_after_invite_join(
+        self,
+        account_id: int,
+        channel: Optional[str],
+        entity: Any,
+    ) -> Any:
+        """Resolve the channel after a successful invite join when Telegram returned no entity."""
+        if entity is not None:
+            return entity
+
+        if not channel or self._is_invite_target(channel):
+            return None
+
+        self._entities.pop(account_id, None)
+        try:
+            return await self._resolve_entity(account_id, channel)
+        except Exception as exc:
+            logger.debug(
+                "Account %s: failed to resolve joined entity for %s: %s",
+                account_id,
+                channel,
+                exc,
+            )
+            return None
+
     # ── Available reactions check ──
 
     async def _get_available_reactions(self, account_id: int, entity: Any) -> Optional[List[str]]:
@@ -659,6 +710,7 @@ class LikesWorker:
             try:
                 # Phase 2: Resolve entity + check subscription + auto-join for each account
                 setup_index = 0
+                resolution_errors: list[str] = []
                 for account in accounts:
                     if account.id in self._failed_accounts:
                         continue
@@ -676,10 +728,25 @@ class LikesWorker:
                             joined, join_error, entity = await self._join_via_invite(
                                 account.id, invite_hash
                             )
+                            entity = await self._resolve_entity_after_invite_join(
+                                account.id,
+                                channel,
+                                entity,
+                            )
                             if not joined or not entity:
+                                failure_reason = join_error or "Channel entity could not be resolved after join"
                                 logger.warning(
-                                    f"Account {account.id}: cannot join via invite — {join_error}"
+                                    f"Account {account.id}: cannot join via invite — {failure_reason}"
                                 )
+                                self._record_setup_failure_log(
+                                    db,
+                                    account.id,
+                                    channel,
+                                    failure_reason,
+                                    extra_data={"phase": "resolve"},
+                                )
+                                db.commit()
+                                resolution_errors.append(failure_reason)
                                 self._failed_accounts.add(account.id)
                                 continue
                             self._entities[account.id] = entity
@@ -691,9 +758,19 @@ class LikesWorker:
                                 entity = await self._resolve_entity(account.id, channel)
                             except ChannelPrivateError:
                                 # Channel is private — no invite hash available
+                                failure_reason = "Private channel requires invite link"
                                 logger.warning(
                                     f"Account {account.id}: channel private, no invite link"
                                 )
+                                self._record_setup_failure_log(
+                                    db,
+                                    account.id,
+                                    channel,
+                                    failure_reason,
+                                    extra_data={"phase": "resolve"},
+                                )
+                                db.commit()
+                                resolution_errors.append(failure_reason)
                                 self._failed_accounts.add(account.id)
                                 continue
 
@@ -705,9 +782,19 @@ class LikesWorker:
                             if not is_subscribed:
                                 joined, join_error = await self._join_channel(account.id, entity, channel)
                                 if not joined:
+                                    failure_reason = join_error or "Join failed"
                                     logger.warning(
-                                        f"Account {account.id}: cannot join channel — {join_error}"
+                                        f"Account {account.id}: cannot join channel — {failure_reason}"
                                     )
+                                    self._record_setup_failure_log(
+                                        db,
+                                        account.id,
+                                        channel,
+                                        failure_reason,
+                                        extra_data={"phase": "resolve"},
+                                    )
+                                    db.commit()
+                                    resolution_errors.append(failure_reason)
                                     self._failed_accounts.add(account.id)
                                     continue
 
@@ -718,13 +805,43 @@ class LikesWorker:
                                 await asyncio.sleep(random.uniform(2, 5))
 
                     except ChannelPrivateError:
+                        failure_reason = "Private channel requires invite link"
                         logger.warning(f"Account {account.id}: channel private")
+                        self._record_setup_failure_log(
+                            db,
+                            account.id,
+                            channel,
+                            failure_reason,
+                            extra_data={"phase": "resolve"},
+                        )
+                        db.commit()
+                        resolution_errors.append(failure_reason)
                         self._failed_accounts.add(account.id)
                     except FloodWaitError as e:
+                        failure_reason = f"FloodWait: {e.seconds}s"
                         logger.warning(f"Account {account.id}: FloodWait {e.seconds}s during resolve")
+                        self._record_setup_failure_log(
+                            db,
+                            account.id,
+                            channel,
+                            failure_reason,
+                            extra_data={"phase": "resolve"},
+                        )
+                        db.commit()
+                        resolution_errors.append(failure_reason)
                         self._flood_wait_until[account.id] = time.monotonic() + e.seconds
                     except Exception as e:
+                        failure_reason = str(e)[:200]
                         logger.warning(f"Account {account.id}: resolve/join failed — {e}")
+                        self._record_setup_failure_log(
+                            db,
+                            account.id,
+                            channel,
+                            failure_reason,
+                            extra_data={"phase": "resolve"},
+                        )
+                        db.commit()
+                        resolution_errors.append(failure_reason)
                         self._failed_accounts.add(account.id)
 
                 # Check we still have active accounts (include flood-wait — they'll recover)
@@ -738,7 +855,11 @@ class LikesWorker:
                         active_ids.append(a.id)
                 if not active_ids:
                     task.status = "failed"
-                    task.last_error = "All accounts failed during channel resolution"
+                    unique_resolution_errors = {error for error in resolution_errors if error}
+                    if len(unique_resolution_errors) == 1:
+                        task.last_error = next(iter(unique_resolution_errors))
+                    else:
+                        task.last_error = "All accounts failed during channel resolution"
                     db.commit()
                     return
 

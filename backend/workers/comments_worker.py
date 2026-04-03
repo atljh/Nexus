@@ -9,6 +9,7 @@ Based on tg_comments logic: resolve → check subscription → auto-join
 import asyncio
 import random
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Callable, Any, Set, Tuple
@@ -344,9 +345,14 @@ class CommentsWorker:
     @staticmethod
     def _extract_invite_hash(channel: str) -> Optional[str]:
         """Extract invite hash from t.me/+HASH or t.me/joinchat/HASH links."""
-        import re
         m = re.match(r'(?:https?://)?t\.me/(?:\+|joinchat/)([a-zA-Z0-9_-]+)', channel)
         return m.group(1) if m else None
+
+    @staticmethod
+    def _is_invite_target(value: Optional[str]) -> bool:
+        if not value:
+            return False
+        return bool(re.match(r'(?:https?://)?t\.me/(?:\+|joinchat/)', value))
 
     async def _join_via_invite(self, account_id: int, invite_hash: str) -> Tuple[bool, Optional[str], Any]:
         """Join channel via invite hash. Returns (success, error, entity)."""
@@ -387,6 +393,31 @@ class CommentsWorker:
             if "inviterequestsent" in err_str or ("request" in err_str and "sent" in err_str):
                 return False, "Join request sent, awaiting admin approval", None
             return False, f"Join via invite failed: {str(e)[:50]}", None
+
+    async def _resolve_entity_after_invite_join(
+        self,
+        account_id: int,
+        target_channel: Optional[str],
+        entity: Any,
+    ) -> Any:
+        """Resolve the joined channel if invite import succeeded without returning entity."""
+        if entity is not None:
+            return entity
+
+        if not target_channel or self._is_invite_target(target_channel):
+            return None
+
+        self._entities.pop((account_id, target_channel), None)
+        try:
+            return await self._resolve_entity(account_id, target_channel)
+        except Exception as exc:
+            logger.debug(
+                "Account %s: failed to resolve joined entity for %s: %s",
+                account_id,
+                target_channel,
+                exc,
+            )
+            return None
 
     async def _get_linked_chat(self, account_id: int, entity: Any) -> Optional[int]:
         """Get linked discussion group ID for a channel.
@@ -531,6 +562,11 @@ class CommentsWorker:
                     # Invite link flow: join via hash, then use entity from result
                     joined, join_error, entity = await self._join_via_invite(
                         account_id, use_invite_hash
+                    )
+                    entity = await self._resolve_entity_after_invite_join(
+                        account_id,
+                        target.channel_username,
+                        entity,
                     )
                     if not joined or not entity:
                         logger.warning(
