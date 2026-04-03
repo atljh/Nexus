@@ -34,6 +34,11 @@ const router = createRouter({
       component: () => import('@/pages/AccountWarming.vue')
     },
     {
+      path: '/channels',
+      name: 'channels',
+      component: () => import('@/pages/ChannelRegistry.vue')
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('@/pages/Settings.vue')

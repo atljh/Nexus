@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import Button from 'primevue/button'
 import InputNumber from 'primevue/inputnumber'
+import MultiSelect from 'primevue/multiselect'
 import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
 import { useToast } from 'primevue/usetoast'
@@ -12,13 +13,15 @@ import { AccountPicker } from '@/components/shared'
 
 import { useTaskStore } from '@/stores/useTaskStore'
 import { useAccountStore } from '@/stores/useAccountStore'
-import type { Task, WarmingSpeedPreset } from '@/types'
+import { useChannelStore } from '@/stores/useChannelStore'
+import type { Task, WarmingSpeedPreset, SavedChannel } from '@/types'
 
 const router = useRouter()
 const { t } = useI18n()
 const toast = useToast()
 const taskStore = useTaskStore()
 const accountStore = useAccountStore()
+const channelStore = useChannelStore()
 
 const DEFAULT_WARMING_MIN_DELAY_HOURS = 5
 const DEFAULT_WARMING_MAX_DELAY_HOURS = 10
@@ -28,10 +31,45 @@ const LEGACY_PRESET_DELAY_HOURS: Record<WarmingSpeedPreset, { min: number; max: 
 }
 
 const targetsInput = ref('')
+const selectedSavedChannelIds = ref<number[]>([])
 const minDelayHours = ref<number | null>(DEFAULT_WARMING_MIN_DELAY_HOURS)
 const maxDelayHours = ref<number | null>(DEFAULT_WARMING_MAX_DELAY_HOURS)
 const selectedAccountIds = ref<number[]>([])
 const isCreating = ref(false)
+
+const savedChannelOptions = computed(() =>
+  channelStore.channels.map((savedChannel) => ({
+    value: savedChannel.id,
+    label: savedChannel.title
+      ? `${savedChannel.title} · ${savedChannel.normalized_target || savedChannel.invite_link || ''}`
+      : savedChannel.display_name
+  }))
+)
+
+function getSavedChannelWarmingTarget(savedChannel: SavedChannel): string | null {
+  if (savedChannel.is_private && savedChannel.invite_link) return savedChannel.invite_link
+  if (savedChannel.normalized_target) return savedChannel.normalized_target
+  return savedChannel.invite_link
+}
+
+function appendSavedChannels(): void {
+  if (selectedSavedChannelIds.value.length === 0) return
+
+  const lines = targetsInput.value
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+
+  for (const channelId of selectedSavedChannelIds.value) {
+    const savedChannel = channelStore.channels.find((item) => item.id === channelId)
+    const target = savedChannel ? getSavedChannelWarmingTarget(savedChannel) : null
+    if (!target) continue
+    lines.push(target)
+  }
+
+  targetsInput.value = lines.join('\n')
+  selectedSavedChannelIds.value = []
+}
 
 const FORM_KEY = 'nexus_warming_form'
 const FORM_SAVE_DELAY_MS = 250
@@ -389,7 +427,8 @@ onMounted(async () => {
   loadForm()
   await Promise.all([
     taskStore.fetchTasks('warming'),
-    accountStore.fetchAccounts()
+    accountStore.fetchAccounts(),
+    channelStore.fetchChannels()
   ])
 
   if (taskStore.hasRunningTasks) {
@@ -451,6 +490,30 @@ onUnmounted(() => {
               <div class="form-section-header">
                 <i class="pi pi-list"></i>
                 <span>{{ t('warming.targetsTitle') }}</span>
+              </div>
+
+              <div class="saved-targets-row">
+                <MultiSelect
+                  v-model="selectedSavedChannelIds"
+                  :options="savedChannelOptions"
+                  option-label="label"
+                  option-value="value"
+                  :placeholder="t('warming.savedChannelsPlaceholder')"
+                  class="saved-targets-select"
+                  display="chip"
+                  :maxSelectedLabels="2"
+                />
+                <Button
+                  :label="t('warming.addSavedChannels')"
+                  icon="pi pi-plus"
+                  severity="secondary"
+                  outlined
+                  @click="appendSavedChannels"
+                />
+              </div>
+
+              <div class="helper-row compact">
+                <span>{{ t('warming.savedChannelsHint') }}</span>
               </div>
 
               <Textarea
@@ -858,12 +921,26 @@ onUnmounted(() => {
   width: 100%;
 }
 
+.saved-targets-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.saved-targets-select {
+  flex: 1;
+}
+
 .helper-row {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   font-size: 12px;
   color: #8b8b95;
+}
+
+.helper-row.compact {
+  justify-content: flex-start;
 }
 
 .helper-detail {

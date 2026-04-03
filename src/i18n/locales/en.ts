@@ -47,6 +47,7 @@ export default {
     autoLikes: 'Auto Likes',
     autoComments: 'Auto Comments',
     warming: 'Warming',
+    channels: 'Channels',
     settings: 'Settings'
   },
 
@@ -671,6 +672,9 @@ export default {
     delay: 'Delay between actions',
     sec: 'sec',
     targetChannel: 'Target channel / post',
+    savedChannel: 'Saved channel',
+    savedChannelPlaceholder: 'Choose a saved channel',
+    savedChannelHint: 'Reuse a saved public/private channel without pasting the invite again',
     inviteLink: 'Invite link',
     inviteLinkPlaceholder: 'https://t.me/+XXXXX',
     inviteLinkHint: 'Required for private channels — accounts will join via this link',
@@ -753,6 +757,9 @@ export default {
     channelsHint: 'Add channels via Enter or comma. Supports invite links for private channels',
     targetChannels: 'Target Channels',
     targetPost: 'Target Post',
+    savedChannel: 'Saved channel',
+    savedChannelPlaceholder: 'Choose a saved channel',
+    savedChannelHint: 'Fill the target and invite from the channel registry',
     channelPlaceholder: "{'@'}channel, t.me/channel/post or t.me/c/id/post",
     linkParsed: 'Link parsed: {channel}',
     linkParsedWithPost: 'Link parsed: {channel} / post #{postId}',
@@ -929,6 +936,9 @@ export default {
     createTask: 'Create warming task',
     createTaskHint: 'Set channels to join and a very slow delay range for safer warm-up. Young accounts are slowed down automatically.',
     targetsTitle: 'Channels to join',
+    savedChannelsPlaceholder: 'Select saved channels',
+    addSavedChannels: 'Add saved',
+    savedChannelsHint: 'Private channels use the saved invite link by default, so you do not need to paste it every time.',
     targetsPlaceholder: '@publicchannel\nhttps://t.me/publicchannel\nhttps://t.me/+privateInviteHash',
     targetsCount: '{count} targets',
     supportedFormats: 'Supports public @username/t.me links and private invite links',
@@ -958,6 +968,68 @@ export default {
       taskCreated: 'Task created',
       createFailed: 'Failed to create warming task',
       taskDeleted: 'Task deleted'
+    }
+  },
+
+  channels: {
+    subtitle: 'Track private/public channels once and see which accounts are already subscribed.',
+    private: 'Private',
+    public: 'Public',
+    stats: {
+      saved: 'Saved',
+      members: 'Members',
+      pending: 'Pending'
+    },
+    counts: {
+      members: '{count} members',
+      pending: '{count} pending',
+      failed: '{count} failed'
+    },
+    form: {
+      createTitle: 'Save channel',
+      editTitle: 'Edit channel',
+      hint: 'Paste a public @username/t.me link, a private -100 ID, or an invite link once.',
+      target: 'Channel target',
+      targetPlaceholder: '@channel, -1001234567890 or https://t.me/c/1234567890',
+      inviteLink: 'Invite link',
+      invitePlaceholder: 'https://t.me/+XXXXX',
+      title: 'Title',
+      titlePlaceholder: 'Optional display name',
+      save: 'Save channel',
+      update: 'Update channel',
+      reset: 'Clear form'
+    },
+    list: {
+      title: 'Saved channels',
+      hint: 'Channels are updated automatically after likes/comments/warming join flows.',
+      searchPlaceholder: 'Search channel...',
+      empty: 'No saved channels yet'
+    },
+    details: {
+      title: 'Channel memberships',
+      placeholder: 'Pick a saved channel to inspect account membership states.',
+      selectPrompt: 'Select a channel from the left to see which accounts are subscribed.',
+      empty: 'No memberships recorded for this channel yet.',
+      members: 'Members',
+      pending: 'Pending',
+      failed: 'Failed',
+      lastResolved: 'Last resolved',
+      checkedAt: 'Checked'
+    },
+    filters: {
+      all: 'All statuses',
+      member: 'Member',
+      pending: 'Pending approval',
+      failed: 'Failed',
+      unknown: 'Unknown'
+    },
+    messages: {
+      targetRequired: 'Add a valid channel target or invite link',
+      created: 'Channel saved',
+      updated: 'Channel updated',
+      deleted: 'Channel deleted',
+      saveFailed: 'Failed to save channel',
+      deleteFailed: 'Failed to delete channel'
     }
   },
 

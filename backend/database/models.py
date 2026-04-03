@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Table, Column, Text, JSON, Float, Index, inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -19,6 +19,11 @@ def _utc_iso(dt: Optional[datetime]) -> Optional[str]:
     # Strip tzinfo to avoid double suffix (e.g. +00:00Z)
     naive = dt.replace(tzinfo=None) if dt.tzinfo else dt
     return naive.isoformat() + "Z"
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware current UTC timestamp for model defaults."""
+    return datetime.now(timezone.utc)
 
 
 def _sanitize_task_config(config: Optional[dict]) -> dict:
@@ -73,7 +78,7 @@ class AccountGroup(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100))
     color: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     accounts: Mapped[List["Account"]] = relationship(back_populates="group")
 
@@ -97,7 +102,7 @@ class AccountTag(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(50), unique=True)
     color: Mapped[str] = mapped_column(String(20), default="#a855f7")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     accounts: Mapped[List["Account"]] = relationship(
         secondary=account_tags,
@@ -130,7 +135,7 @@ class Proxy(Base):
     external_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)  # IPv4/IPv6
 
     last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     accounts: Mapped[List["Account"]] = relationship(back_populates="proxy")
 
@@ -217,7 +222,7 @@ class Account(Base):
     last_check_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     def to_dict(self):
         # Handle relationships - only access if loaded
@@ -309,7 +314,7 @@ class Task(Base):
     # Timestamps
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     # Relationships
     accounts: Mapped[List["Account"]] = relationship(
@@ -367,7 +372,7 @@ class TaskLog(Base):
     # Extra data (JSON)
     extra_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     def to_dict(self):
         return {
@@ -393,7 +398,7 @@ class CommentTemplate(Base):
     content: Mapped[str] = mapped_column(Text)  # Supports spintax: {Hello|Hi|Hey}
     category: Mapped[str] = mapped_column(String(100), default="General", index=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     def to_dict(self):
         return {
@@ -425,7 +430,7 @@ class TargetChannel(Base):
     last_post_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     comments_sent: Mapped[int] = mapped_column(Integer, default=0)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     # Relationships
     task: Mapped["Task"] = relationship(back_populates="target_channels")
@@ -446,6 +451,109 @@ class TargetChannel(Base):
         }
 
 
+class SavedChannel(Base):
+    """Persistent registry entry for a public or private Telegram channel."""
+    __tablename__ = "saved_channels"
+    __table_args__ = (
+        Index("ix_saved_channels_username", "username"),
+        Index("ix_saved_channels_invite_hash", "invite_hash"),
+        Index("ix_saved_channels_is_private", "is_private"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    telegram_channel_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    normalized_target: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    invite_link: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    invite_hash: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    is_private: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=_utcnow,
+        onupdate=_utcnow,
+    )
+
+    memberships: Mapped[List["ChannelMembership"]] = relationship(
+        back_populates="channel",
+        cascade="all, delete-orphan",
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "telegram_channel_id": self.telegram_channel_id,
+            "normalized_target": self.normalized_target,
+            "username": self.username,
+            "title": self.title,
+            "invite_link": self.invite_link,
+            "invite_hash": self.invite_hash,
+            "is_private": self.is_private,
+            "last_error": self.last_error,
+            "last_resolved_at": _utc_iso(self.last_resolved_at),
+            "last_used_at": _utc_iso(self.last_used_at),
+            "created_at": _utc_iso(self.created_at),
+            "updated_at": _utc_iso(self.updated_at),
+            "display_name": self.title or self.normalized_target or self.invite_link or f"Channel #{self.id}",
+        }
+
+
+class ChannelMembership(Base):
+    """Last known subscription state for an account in a saved channel."""
+    __tablename__ = "channel_memberships"
+    __table_args__ = (
+        Index("ix_channel_memberships_channel_status", "channel_id", "status"),
+        Index("ix_channel_memberships_account_status", "account_id", "status"),
+        Index("ux_channel_memberships_channel_account", "channel_id", "account_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    channel_id: Mapped[int] = mapped_column(ForeignKey("saved_channels.id", ondelete="CASCADE"), index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="unknown")
+    joined_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=_utcnow,
+        onupdate=_utcnow,
+    )
+
+    channel: Mapped["SavedChannel"] = relationship(back_populates="memberships")
+    account: Mapped["Account"] = relationship()
+
+    def to_dict(self):
+        account_payload = None
+        if _is_loaded(self, "account") and self.account:
+            account_payload = {
+                "id": self.account.id,
+                "username": self.account.username,
+                "phone": self.account.phone,
+                "first_name": self.account.first_name,
+                "last_name": self.account.last_name,
+                "status": self.account.status,
+            }
+
+        return {
+            "id": self.id,
+            "channel_id": self.channel_id,
+            "account_id": self.account_id,
+            "status": self.status,
+            "joined_at": _utc_iso(self.joined_at),
+            "last_checked_at": _utc_iso(self.last_checked_at),
+            "last_error": self.last_error,
+            "created_at": _utc_iso(self.created_at),
+            "updated_at": _utc_iso(self.updated_at),
+            "account": account_payload,
+        }
+
+
 class AccountBlacklist(Base):
     """Per-account blacklist for channels where the account cannot operate."""
     __tablename__ = "account_blacklist"
@@ -462,7 +570,7 @@ class AccountBlacklist(Base):
     reason: Mapped[str] = mapped_column(String(50))  # banned, write_forbidden, no_access, restricted, kicked
     module_name: Mapped[str] = mapped_column(String(50), default="comments")
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     @staticmethod
     def is_blacklisted(db, account_id: int, channel_id: Optional[int] = None, channel_username: Optional[str] = None) -> bool:
@@ -548,7 +656,7 @@ class CommentHistory(Base):
     ai_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     ai_prompt_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     def to_dict(self):
         return {
@@ -583,7 +691,7 @@ class AIPromptTemplate(Base):
     temperature: Mapped[float] = mapped_column(Float, default=0.7)
     max_length: Mapped[int] = mapped_column(Integer, default=200)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     def to_dict(self):
         return {

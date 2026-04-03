@@ -41,49 +41,60 @@ class TestWarmingWorkerHelpers:
 async def test_warm_single_target_invite_success():
     worker = WarmingWorker(task_id=1)
     worker._join_via_invite = AsyncMock(return_value=(True, None, None))
+    worker._resolve_entity_after_invite_join = AsyncMock(return_value=None)
 
-    success, message, error = await worker._warm_single_target(1, "https://t.me/+abc123")
+    success, message, error, entity, invite_link = await worker._warm_single_target(1, "https://t.me/+abc123")
 
     assert success is True
     assert message == "Joined via invite link"
     assert error is None
+    assert entity is None
+    assert invite_link == "https://t.me/+abc123"
 
 
 @pytest.mark.asyncio
 async def test_warm_single_target_already_subscribed():
     worker = WarmingWorker(task_id=1)
-    worker._resolve_entity = AsyncMock(return_value=object())
+    entity = object()
+    worker._resolve_entity = AsyncMock(return_value=entity)
     worker._check_subscription = AsyncMock(return_value=(True, None))
 
-    success, message, error = await worker._warm_single_target(1, "@channel")
+    success, message, error, resolved_entity, invite_link = await worker._warm_single_target(1, "@channel")
 
     assert success is True
     assert message == "Already subscribed"
     assert error is None
+    assert resolved_entity is entity
+    assert invite_link is None
 
 
 @pytest.mark.asyncio
 async def test_warm_single_target_private_channel_needs_invite():
     worker = WarmingWorker(task_id=1)
-    worker._resolve_entity = AsyncMock(return_value=object())
+    entity = object()
+    worker._resolve_entity = AsyncMock(return_value=entity)
     worker._check_subscription = AsyncMock(return_value=(False, "CHANNEL_PRIVATE"))
 
-    success, message, error = await worker._warm_single_target(1, "@channel")
+    success, message, error, resolved_entity, invite_link = await worker._warm_single_target(1, "@channel")
 
     assert success is False
     assert message == "Action was not executed"
     assert error == PRIVATE_CHANNEL_INVITE_REQUIRED
+    assert resolved_entity is entity
+    assert invite_link is None
 
 
 @pytest.mark.asyncio
 async def test_warm_single_target_rejects_invalid_target():
     worker = WarmingWorker(task_id=1)
 
-    success, message, error = await worker._warm_single_target(1, "bad target!")
+    success, message, error, entity, invite_link = await worker._warm_single_target(1, "bad target!")
 
     assert success is False
     assert message == "Action was not executed"
     assert error == INVALID_WARMING_TARGET
+    assert entity is None
+    assert invite_link is None
 
 
 @pytest.mark.asyncio

@@ -61,6 +61,7 @@ from telegram.account_metadata import (
     normalize_device_fingerprint,
     resolve_account_connection_params,
 )
+from utils.channel_registry import upsert_channel_membership
 from workers.spintax import parse_spintax, DEFAULT_COMMENT_TEMPLATES
 from workers.shared import SendStatus, SendResult, ErrorClassifier
 from workers.shared.ai_service import AIService
@@ -152,6 +153,46 @@ class CommentsWorker:
             error=error_message,
             extra_data={"error_code": error_code},
         ))
+
+    @staticmethod
+    def _membership_status_from_error(error: Optional[str]) -> Optional[str]:
+        if not error:
+            return None
+        if "awaiting admin approval" in error.lower():
+            return "pending_approval"
+        return "failed"
+
+    def _track_channel_membership(
+        self,
+        db: Session,
+        *,
+        account_id: int,
+        status: str,
+        target: Optional[str],
+        invite_link: Optional[str] = None,
+        entity: Any = None,
+        title: Optional[str] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        try:
+            upsert_channel_membership(
+                db,
+                account_id=account_id,
+                status=status,
+                target=target,
+                invite_link=invite_link,
+                entity=entity,
+                title=title,
+                error=error,
+                touch_last_used=status == "member",
+            )
+        except ValueError:
+            logger.debug(
+                "Account %s: skipped channel registry update for unresolved target=%s invite=%s",
+                account_id,
+                target,
+                invite_link,
+            )
 
     # ── Client pool management ──
 
@@ -569,6 +610,16 @@ class CommentsWorker:
                         entity,
                     )
                     if not joined or not entity:
+                        membership_status = self._membership_status_from_error(join_error or "Join via invite failed")
+                        if membership_status:
+                            self._track_channel_membership(
+                                db,
+                                account_id=account_id,
+                                status=membership_status,
+                                target=target.channel_username,
+                                invite_link=f"https://t.me/+{use_invite_hash}" if use_invite_hash else None,
+                                error=join_error or "Join via invite failed",
+                            )
                         logger.warning(
                             f"Account {account_id}: cannot join {target.channel_username} via invite — {join_error}"
                         )
@@ -576,6 +627,15 @@ class CommentsWorker:
                     self._entities[(account_id, target.channel_username)] = entity
                     target.channel_id = entity.id
                     target.channel_title = getattr(entity, 'title', None)
+                    self._track_channel_membership(
+                        db,
+                        account_id=account_id,
+                        status="member",
+                        target=target.channel_username,
+                        invite_link=f"https://t.me/+{use_invite_hash}" if use_invite_hash else None,
+                        entity=entity,
+                        title=target.channel_title,
+                    )
                     await asyncio.sleep(random.uniform(1, 3))
                 else:
                     # Public channel flow: resolve → check subscription → join
@@ -584,37 +644,67 @@ class CommentsWorker:
                     target.channel_title = getattr(entity, 'title', None)
 
                     # Check subscription
-                    if (account_id, target.channel_username) not in self._entities:
-                        is_subscribed, sub_error = await self._check_subscription(account_id, entity)
+                    is_subscribed, sub_error = await self._check_subscription(account_id, entity)
 
-                        if sub_error == "CHANNEL_PRIVATE":
-                            is_subscribed = False
+                    if sub_error == "CHANNEL_PRIVATE":
+                        is_subscribed = False
 
-                        if not is_subscribed:
-                            joined, join_error = await self._join_channel(account_id, entity, target.channel_username)
-                            if not joined and self._invite_hashes:
-                                # Fallback: try invite links
-                                for ih in self._invite_hashes:
-                                    joined, join_error, inv_entity = await self._join_via_invite(account_id, ih)
-                                    if joined:
-                                        if inv_entity:
-                                            entity = inv_entity
-                                            self._entities[(account_id, target.channel_username)] = entity
-                                            target.channel_id = entity.id
-                                            target.channel_title = getattr(entity, 'title', None)
-                                        break
-                            if not joined:
-                                logger.warning(
-                                    f"Account {account_id}: cannot join {target.channel_username} — {join_error}"
-                                )
-                                continue
+                    successful_invite_hash = None
+                    if not is_subscribed:
+                        joined, join_error = await self._join_channel(account_id, entity, target.channel_username)
+                        if not joined and self._invite_hashes:
+                            # Fallback: try invite links
+                            for ih in self._invite_hashes:
+                                joined, join_error, inv_entity = await self._join_via_invite(account_id, ih)
+                                if joined:
+                                    successful_invite_hash = ih
+                                    if inv_entity:
+                                        entity = inv_entity
+                                        self._entities[(account_id, target.channel_username)] = entity
+                                        target.channel_id = entity.id
+                                        target.channel_title = getattr(entity, 'title', None)
+                                    break
+                        if not joined:
+                            membership_status = self._membership_status_from_error(join_error or "Join failed") or "failed"
+                            self._track_channel_membership(
+                                db,
+                                account_id=account_id,
+                                status=membership_status,
+                                target=target.channel_username,
+                                invite_link=(
+                                    f"https://t.me/+{successful_invite_hash or self._invite_hashes[0]}"
+                                    if self._invite_hashes
+                                    else None
+                                ),
+                                entity=entity,
+                                title=target.channel_title,
+                                error=join_error or "Join failed",
+                            )
+                            logger.warning(
+                                f"Account {account_id}: cannot join {target.channel_username} — {join_error}"
+                            )
+                            continue
 
-                            # Re-resolve after join
-                            if (account_id, target.channel_username) not in self._entities:
-                                self._entities.pop((account_id, target.channel_username), None)
-                                entity = await self._resolve_entity(account_id, target.channel_username)
-                                target.channel_id = entity.id
-                            await asyncio.sleep(random.uniform(1, 3))
+                        # Re-resolve after join to refresh the account-specific entity cache.
+                        self._entities.pop((account_id, target.channel_username), None)
+                        entity = await self._resolve_entity(account_id, target.channel_username)
+                        target.channel_id = entity.id
+                        target.channel_title = getattr(entity, 'title', None)
+                        await asyncio.sleep(random.uniform(1, 3))
+
+                    self._track_channel_membership(
+                        db,
+                        account_id=account_id,
+                        status="member",
+                        target=target.channel_username,
+                        invite_link=(
+                            f"https://t.me/+{successful_invite_hash or self._invite_hashes[0]}"
+                            if self._invite_hashes and target.channel_username.lstrip("@").lstrip("-").isdigit()
+                            else None
+                        ),
+                        entity=entity,
+                        title=target.channel_title,
+                    )
 
                 # Get linked discussion group
                 linked_chat_id = await self._get_linked_chat(account_id, entity)
@@ -639,12 +729,28 @@ class CommentsWorker:
                     target.error_message = "No discussion group linked"
 
             except ChannelPrivateError:
+                self._track_channel_membership(
+                    db,
+                    account_id=account_id,
+                    status="failed",
+                    target=target.channel_username,
+                    error="Private channel requires invite link",
+                )
                 logger.warning(f"Account {account_id}: {target.channel_username} — channel private")
             except FloodWaitError as e:
                 logger.warning(f"Account {account_id}: FloodWait {e.seconds}s during setup — cooldown")
                 self._flood_wait_until[account_id] = time.monotonic() + e.seconds
                 return ready
             except Exception as e:
+                membership_status = self._membership_status_from_error(str(e)[:50])
+                if membership_status:
+                    self._track_channel_membership(
+                        db,
+                        account_id=account_id,
+                        status=membership_status,
+                        target=target.channel_username,
+                        error=str(e)[:50],
+                    )
                 logger.warning(
                     f"Account {account_id}: {target.channel_username} setup failed — {e}"
                 )

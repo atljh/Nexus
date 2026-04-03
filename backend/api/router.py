@@ -5,6 +5,7 @@ from api.proxy import router as proxy_router
 from api.groups import router as groups_router
 from api.tags import router as tags_router
 from api.tasks import router as tasks_router
+from api.channels import router as channels_router
 from api.webk import router as webk_router
 from api.settings import router as settings_router
 
@@ -15,5 +16,6 @@ api_router.include_router(proxy_router, prefix="/proxy", tags=["proxy"])
 api_router.include_router(groups_router, prefix="/groups", tags=["groups"])
 api_router.include_router(tags_router, prefix="/tags", tags=["tags"])
 api_router.include_router(tasks_router, prefix="/tasks", tags=["tasks"])
+api_router.include_router(channels_router, prefix="/channels", tags=["channels"])
 api_router.include_router(webk_router, prefix="/accounts", tags=["webk"])
 api_router.include_router(settings_router, prefix="/settings", tags=["settings"])

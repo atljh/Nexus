@@ -84,6 +84,55 @@ export interface GroupCreate {
   color?: string
 }
 
+export interface SavedChannel {
+  id: number
+  telegram_channel_id: number | null
+  normalized_target: string | null
+  username: string | null
+  title: string | null
+  invite_link: string | null
+  invite_hash: string | null
+  is_private: boolean
+  last_error: string | null
+  last_resolved_at: string | null
+  last_used_at: string | null
+  created_at: string
+  updated_at: string
+  display_name: string
+  memberships_count: number
+  members_count: number
+  pending_count: number
+  failed_count: number
+}
+
+export type ChannelMembershipStatus = 'member' | 'pending_approval' | 'failed' | 'unknown'
+
+export interface ChannelMembership {
+  id: number
+  channel_id: number
+  account_id: number
+  status: ChannelMembershipStatus
+  joined_at: string | null
+  last_checked_at: string | null
+  last_error: string | null
+  created_at: string
+  updated_at: string
+  account: {
+    id: number
+    username: string | null
+    phone: string | null
+    first_name: string | null
+    last_name: string | null
+    status: AccountStatus
+  } | null
+}
+
+export interface CreateSavedChannelParams {
+  target?: string
+  invite_link?: string
+  title?: string
+}
+
 // Tag Types
 export interface AccountTag {
   id: number

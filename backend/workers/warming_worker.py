@@ -198,38 +198,40 @@ class WarmingWorker(LikesWorker):
         self,
         account_id: int,
         target: str,
-    ) -> tuple[bool, Optional[str], Optional[str]]:
+    ) -> tuple[bool, Optional[str], Optional[str], Any, Optional[str]]:
         invite_hash = self._extract_invite_hash(target)
         if invite_hash:
-            joined, join_error, _entity = await self._join_via_invite(account_id, invite_hash)
+            joined, join_error, entity = await self._join_via_invite(account_id, invite_hash)
+            entity = await self._resolve_entity_after_invite_join(account_id, target, entity)
             if joined:
-                return True, "Joined via invite link", None
-            return False, ACTION_SKIPPED_MESSAGE, join_error or "Join via invite failed"
+                return True, "Joined via invite link", None, entity, target
+            return False, ACTION_SKIPPED_MESSAGE, join_error or "Join via invite failed", entity, target
 
         normalized_target = self._normalize_public_target(target)
         if not normalized_target:
-            return False, ACTION_SKIPPED_MESSAGE, INVALID_WARMING_TARGET
+            return False, ACTION_SKIPPED_MESSAGE, INVALID_WARMING_TARGET, None, None
 
         try:
             entity = await self._resolve_entity(account_id, normalized_target)
         except ChannelPrivateError:
-            return False, ACTION_SKIPPED_MESSAGE, PRIVATE_CHANNEL_INVITE_REQUIRED
+            return False, ACTION_SKIPPED_MESSAGE, PRIVATE_CHANNEL_INVITE_REQUIRED, None, None
 
         is_subscribed, sub_error = await self._check_subscription(account_id, entity)
         if is_subscribed:
-            return True, "Already subscribed", None
+            return True, "Already subscribed", None, entity, None
 
         if sub_error == "CHANNEL_PRIVATE":
-            return False, ACTION_SKIPPED_MESSAGE, PRIVATE_CHANNEL_INVITE_REQUIRED
+            return False, ACTION_SKIPPED_MESSAGE, PRIVATE_CHANNEL_INVITE_REQUIRED, entity, None
         if sub_error:
-            return False, ACTION_SKIPPED_MESSAGE, sub_error
+            return False, ACTION_SKIPPED_MESSAGE, sub_error, entity, None
 
         joined, join_error = await self._join_channel(account_id, entity, normalized_target)
         if joined:
             self._entities.pop((account_id, normalized_target), None)
-            return True, "Joined channel", None
+            entity = await self._resolve_entity(account_id, normalized_target)
+            return True, "Joined channel", None, entity, None
 
-        return False, ACTION_SKIPPED_MESSAGE, join_error or "Join failed"
+        return False, ACTION_SKIPPED_MESSAGE, join_error or "Join failed", entity, None
 
     async def execute(
         self,
@@ -345,12 +347,14 @@ class WarmingWorker(LikesWorker):
                         continue
 
                     try:
-                        success, message, error = await self._warm_single_target(account.id, target)
+                        success, message, error, entity, invite_link_used = await self._warm_single_target(account.id, target)
                     except FloodWaitError as exc:
                         self._flood_wait_until[account.id] = time.monotonic() + exc.seconds
                         success = False
                         message = ACTION_SKIPPED_MESSAGE
                         error = f"FloodWait: {exc.seconds}s"
+                        entity = None
+                        invite_link_used = None
                     except Exception as exc:
                         logger.warning(
                             "Task %s: account %s failed while warming %s: %s",
@@ -362,6 +366,30 @@ class WarmingWorker(LikesWorker):
                         success = False
                         message = ACTION_SKIPPED_MESSAGE
                         error = str(exc)[:200]
+                        entity = None
+                        invite_link_used = None
+
+                    if success:
+                        self._track_channel_membership(
+                            db,
+                            account_id=account.id,
+                            status="member",
+                            target=target,
+                            invite_link=invite_link_used,
+                            entity=entity,
+                        )
+                    else:
+                        membership_status = self._membership_status_from_error(error) if error else None
+                        if membership_status:
+                            self._track_channel_membership(
+                                db,
+                                account_id=account.id,
+                                status=membership_status,
+                                target=target,
+                                invite_link=invite_link_used,
+                                entity=entity,
+                                error=error,
+                            )
 
                     block_reason = self._get_account_block_reason(error)
                     if block_reason:

@@ -47,6 +47,7 @@ export default {
     autoLikes: 'Авто-лайки',
     autoComments: 'Авто-коментарі',
     warming: 'Прогрів',
+    channels: 'Канали',
     settings: 'Налаштування'
   },
 
@@ -671,6 +672,9 @@ export default {
     delay: 'Затримка між діями',
     sec: 'сек',
     targetChannel: 'Цільовий канал / пост',
+    savedChannel: 'Збережений канал',
+    savedChannelPlaceholder: 'Оберіть збережений канал',
+    savedChannelHint: 'Можна повторно використовувати приватний або публічний канал без повторного вставлення інвайту',
     inviteLink: 'Посилання для вступу',
     inviteLinkPlaceholder: 'https://t.me/+XXXXX',
     inviteLinkHint: 'Обов\'язково для приватних каналів — акаунти вступлять за цим посиланням',
@@ -753,6 +757,9 @@ export default {
     channelsHint: 'Додайте канали через Enter або кому. Підтримує інвайт-посилання для приватних каналів',
     targetChannels: 'Цільові канали',
     targetPost: 'Цільовий пост',
+    savedChannel: 'Збережений канал',
+    savedChannelPlaceholder: 'Оберіть збережений канал',
+    savedChannelHint: 'Підставляє ціль і інвайт із реєстру каналів',
     channelPlaceholder: "{'@'}channel, t.me/channel/post або t.me/c/id/post",
     linkParsed: 'Посилання розпізнано: {channel}',
     linkParsedWithPost: 'Посилання розпізнано: {channel} / пост #{postId}',
@@ -929,6 +936,9 @@ export default {
     createTask: 'Створити завдання прогріву',
     createTaskHint: 'Вкажіть канали для вступу та дуже повільний діапазон затримок для безпечнішого прогріву. Молоді акаунти додатково сповільнюються автоматично.',
     targetsTitle: 'Канали для вступу',
+    savedChannelsPlaceholder: 'Оберіть збережені канали',
+    addSavedChannels: 'Додати збережені',
+    savedChannelsHint: 'Для приватних каналів за замовчуванням використовується збережене інвайт-посилання, тому його не потрібно вставляти щоразу.',
     targetsPlaceholder: '@publicchannel\nhttps://t.me/publicchannel\nhttps://t.me/+privateInviteHash',
     targetsCount: '{count} цілей',
     supportedFormats: 'Підтримуються публічні @username/t.me-посилання та приватні інвайт-посилання',
@@ -958,6 +968,68 @@ export default {
       taskCreated: 'Завдання створено',
       createFailed: 'Не вдалося створити завдання прогріву',
       taskDeleted: 'Завдання видалено'
+    }
+  },
+
+  channels: {
+    subtitle: 'Зберігайте приватні й публічні канали один раз та дивіться, які акаунти вже підписані.',
+    private: 'Приватний',
+    public: 'Публічний',
+    stats: {
+      saved: 'Збережено',
+      members: 'Підписані',
+      pending: 'Очікують'
+    },
+    counts: {
+      members: '{count} підписані',
+      pending: '{count} очікують',
+      failed: '{count} з помилкою'
+    },
+    form: {
+      createTitle: 'Зберегти канал',
+      editTitle: 'Редагувати канал',
+      hint: 'Вставте публічний @username/t.me-лінк, приватний -100 ID або інвайт-посилання один раз.',
+      target: 'Ціль каналу',
+      targetPlaceholder: '@channel, -1001234567890 або https://t.me/c/1234567890',
+      inviteLink: 'Інвайт-посилання',
+      invitePlaceholder: 'https://t.me/+XXXXX',
+      title: 'Назва',
+      titlePlaceholder: 'Необовʼязкова назва для відображення',
+      save: 'Зберегти канал',
+      update: 'Оновити канал',
+      reset: 'Очистити форму'
+    },
+    list: {
+      title: 'Збережені канали',
+      hint: 'Канали оновлюються автоматично після вступів у лайках, коментах і прогріві.',
+      searchPlaceholder: 'Пошук каналу...',
+      empty: 'Збережених каналів поки немає'
+    },
+    details: {
+      title: 'Підписки по каналу',
+      placeholder: 'Оберіть збережений канал, щоб подивитися стани підписок акаунтів.',
+      selectPrompt: 'Оберіть канал зліва, щоб побачити, які акаунти на нього підписані.',
+      empty: 'Для цього каналу ще немає збережених membership-записів.',
+      members: 'Підписані',
+      pending: 'Очікують',
+      failed: 'Помилки',
+      lastResolved: 'Останній резолв',
+      checkedAt: 'Перевірено'
+    },
+    filters: {
+      all: 'Усі стани',
+      member: 'Підписаний',
+      pending: 'Очікує підтвердження',
+      failed: 'Помилка',
+      unknown: 'Невідомо'
+    },
+    messages: {
+      targetRequired: 'Додайте валідну ціль каналу або інвайт-посилання',
+      created: 'Канал збережено',
+      updated: 'Канал оновлено',
+      deleted: 'Канал видалено',
+      saveFailed: 'Не вдалося зберегти канал',
+      deleteFailed: 'Не вдалося видалити канал'
     }
   },
 

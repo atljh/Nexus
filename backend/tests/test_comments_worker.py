@@ -140,6 +140,30 @@ async def test_connect_accounts_success(worker):
 
     assert connected == 1
     assert 1 in worker._clients
+
+
+@pytest.mark.asyncio
+async def test_setup_channels_public_flow_checks_subscription_and_joins(worker):
+    """Public/numeric targets must still run subscription/join logic after entity resolution."""
+    target = make_target(channel_username="@publictest", channel_id=None, channel_title=None, can_comment=False, status="pending")
+    entity = make_entity(channel_id=777, title="Public Test", username="publictest")
+
+    worker._clients[1] = MagicMock()
+    worker._resolve_entity = AsyncMock(return_value=entity)
+    worker._check_subscription = AsyncMock(return_value=(False, None))
+    worker._join_channel = AsyncMock(return_value=(True, None))
+    worker._get_linked_chat = AsyncMock(return_value=999)
+    worker._join_discussion_group = AsyncMock(return_value=(True, None))
+    worker._track_channel_membership = MagicMock()
+
+    with patch("workers.comments_worker.asyncio.sleep", new=AsyncMock()):
+        ready = await worker._setup_channels_for_account(1, [target], MagicMock())
+
+    assert ready == 1
+    worker._check_subscription.assert_awaited_once_with(1, entity)
+    worker._join_channel.assert_awaited_once_with(1, entity, "@publictest")
+    assert target.status == "joined"
+    assert target.can_comment is True
     assert 1 not in worker._failed_accounts
 
 

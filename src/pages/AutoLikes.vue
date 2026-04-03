@@ -14,7 +14,8 @@ import { AccountPicker } from '@/components/shared'
 
 import { useTaskStore } from '@/stores/useTaskStore'
 import { useAccountStore } from '@/stores/useAccountStore'
-import type { Task } from '@/types'
+import { useChannelStore } from '@/stores/useChannelStore'
+import type { Task, SavedChannel } from '@/types'
 import { REACTION_EMOJIS } from '@/types'
 
 // Convert readonly array to mutable for Dropdown
@@ -25,11 +26,13 @@ const { t } = useI18n()
 const toast = useToast()
 const taskStore = useTaskStore()
 const accountStore = useAccountStore()
+const channelStore = useChannelStore()
 
 // Form state
 const channel = ref('')
 const postId = ref<number | null>(null)
 const inviteLink = ref('')
+const selectedSavedChannelId = ref<number | null>(null)
 const selectedReactions = ref<string[]>(['👍'])
 const emojiMode = ref<'single' | 'random' | 'all'>('single')
 const minDelay = ref(30)
@@ -43,6 +46,34 @@ let formSaveTimer: number | null = null
 
 // UI state
 const isCreating = ref(false)
+
+const savedChannelOptions = computed(() =>
+  channelStore.channels.map((savedChannel) => ({
+    value: savedChannel.id,
+    label: savedChannel.title
+      ? `${savedChannel.title} · ${savedChannel.normalized_target || savedChannel.invite_link || ''}`
+      : savedChannel.display_name
+  }))
+)
+
+function getSavedChannelTaskTarget(savedChannel: SavedChannel): string {
+  if (savedChannel.normalized_target) return savedChannel.normalized_target
+  return (savedChannel.invite_link || '').replace(/^https?:\/\//, '')
+}
+
+function applySavedChannel(savedChannel: SavedChannel): void {
+  skipWatch = true
+  channel.value = getSavedChannelTaskTarget(savedChannel)
+  inviteLink.value = savedChannel.is_private ? (savedChannel.invite_link || '') : ''
+  parsedFromLink.value = false
+}
+
+watch(selectedSavedChannelId, (channelId) => {
+  if (!channelId) return
+  const savedChannel = channelStore.channels.find((item) => item.id === channelId)
+  if (!savedChannel) return
+  applySavedChannel(savedChannel)
+})
 
 // Parse t.me links:
 //   https://t.me/channel/12345 → @channel + postId
@@ -432,7 +463,8 @@ onMounted(async () => {
   loadForm()
   await Promise.all([
     taskStore.fetchTasks('likes'),
-    accountStore.fetchAccounts()
+    accountStore.fetchAccounts(),
+    channelStore.fetchChannels()
   ])
 
   if (taskStore.hasRunningTasks) {
@@ -530,6 +562,20 @@ onUnmounted(() => {
                   <span>{{ t('autoLikes.targetChannel') }}</span>
                 </div>
                 <div class="form-group">
+                  <label class="form-label">{{ t('autoLikes.savedChannel') }}</label>
+                  <Select
+                    v-model="selectedSavedChannelId"
+                    :options="savedChannelOptions"
+                    option-label="label"
+                    option-value="value"
+                    :placeholder="t('autoLikes.savedChannelPlaceholder')"
+                    class="w-full"
+                    showClear
+                  />
+                  <small class="input-hint">
+                    <i class="pi pi-bookmark"></i>
+                    {{ t('autoLikes.savedChannelHint') }}
+                  </small>
                   <InputText
                     v-model="channel"
                     :placeholder="t('autoLikes.channelPlaceholder')"

@@ -15,6 +15,7 @@ const menuItems = computed(() => [
   { label: t('nav.autoLikes'), icon: 'pi-heart', to: '/autolikes' },
   { label: t('nav.autoComments'), icon: 'pi-comments', to: '/autocomments' },
   { label: t('nav.warming'), icon: 'pi-sun', to: '/warming' },
+  { label: t('nav.channels'), icon: 'pi-bookmark', to: '/channels' },
   { label: t('nav.settings'), icon: 'pi-cog', to: '/settings' }
 ])
 

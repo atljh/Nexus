@@ -17,7 +17,8 @@ import { AccountPicker, DropZone } from '@/components/shared'
 
 import { useTaskStore } from '@/stores/useTaskStore'
 import { useAccountStore } from '@/stores/useAccountStore'
-import type { Task, CommentTemplate } from '@/types'
+import { useChannelStore } from '@/stores/useChannelStore'
+import type { Task, CommentTemplate, SavedChannel } from '@/types'
 import { DEFAULT_COMMENT_TEMPLATES } from '@/types'
 
 const router = useRouter()
@@ -37,10 +38,12 @@ const spintaxHintText = computed(() =>
 const toast = useToast()
 const taskStore = useTaskStore()
 const accountStore = useAccountStore()
+const channelStore = useChannelStore()
 
 // Form state
 const channelInput = ref('')
 const inviteLinkInput = ref('')
+const selectedSavedChannelId = ref<number | null>(null)
 const parsedFromLink = ref(false)
 const selectedTemplateIds = ref<number[]>([])
 const customTemplates = ref<string[]>([])
@@ -203,6 +206,34 @@ const templatePreview = ref<string[]>([])
 // UI state
 const isCreating = ref(false)
 const activeTab = ref(0)
+
+const savedChannelOptions = computed(() =>
+  channelStore.channels.map((savedChannel) => ({
+    value: savedChannel.id,
+    label: savedChannel.title
+      ? `${savedChannel.title} · ${savedChannel.normalized_target || savedChannel.invite_link || ''}`
+      : savedChannel.display_name
+  }))
+)
+
+function getSavedChannelTaskTarget(savedChannel: SavedChannel): string {
+  if (savedChannel.normalized_target) return savedChannel.normalized_target
+  return (savedChannel.invite_link || '').replace(/^https?:\/\//, '')
+}
+
+function applySavedChannel(savedChannel: SavedChannel): void {
+  skipWatch = true
+  channelInput.value = getSavedChannelTaskTarget(savedChannel)
+  inviteLinkInput.value = savedChannel.is_private ? (savedChannel.invite_link || '') : ''
+  parsedFromLink.value = false
+}
+
+watch(selectedSavedChannelId, (channelId) => {
+  if (!channelId) return
+  const savedChannel = channelStore.channels.find((item) => item.id === channelId)
+  if (!savedChannel) return
+  applySavedChannel(savedChannel)
+})
 
 // Tabs configuration (Settings + Templates only, accounts moved to settings)
 const tabs = computed(() => [
@@ -755,7 +786,8 @@ onMounted(async () => {
   await Promise.all([
     taskStore.fetchTasks('comments'),
     taskStore.fetchTemplates(),
-    accountStore.fetchAccounts()
+    accountStore.fetchAccounts(),
+    channelStore.fetchChannels()
   ])
 
   if (taskStore.hasRunningTasks) {
@@ -867,6 +899,20 @@ onUnmounted(() => {
                   <span>{{ t('autoComments.targetPost') }}</span>
                 </div>
                 <div class="form-group">
+                  <label class="form-label">{{ t('autoComments.savedChannel') }}</label>
+                  <Select
+                    v-model="selectedSavedChannelId"
+                    :options="savedChannelOptions"
+                    option-label="label"
+                    option-value="value"
+                    :placeholder="t('autoComments.savedChannelPlaceholder')"
+                    class="w-full"
+                    showClear
+                  />
+                  <small class="input-hint">
+                    <i class="pi pi-bookmark"></i>
+                    {{ t('autoComments.savedChannelHint') }}
+                  </small>
                   <InputText
                     v-model="channelInput"
                     :placeholder="t('autoComments.channelPlaceholder')"

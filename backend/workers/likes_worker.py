@@ -59,6 +59,7 @@ from telegram.account_metadata import (
     normalize_device_fingerprint,
     resolve_account_connection_params,
 )
+from utils.channel_registry import upsert_channel_membership
 from workers.shared.account_safety import AccountSafetyValidator
 
 logger = logging.getLogger(__name__)
@@ -189,6 +190,44 @@ class LikesWorker:
             error=error_message,
             extra_data=extra_data,
         ))
+
+    @staticmethod
+    def _membership_status_from_error(error: Optional[str]) -> Optional[str]:
+        if not error:
+            return None
+        if "awaiting admin approval" in error.lower():
+            return "pending_approval"
+        return "failed"
+
+    def _track_channel_membership(
+        self,
+        db: Session,
+        *,
+        account_id: int,
+        status: str,
+        target: Optional[str],
+        invite_link: Optional[str] = None,
+        entity: Any = None,
+        error: Optional[str] = None,
+    ) -> None:
+        try:
+            upsert_channel_membership(
+                db,
+                account_id=account_id,
+                status=status,
+                target=target,
+                invite_link=invite_link,
+                entity=entity,
+                error=error,
+                touch_last_used=status == "member",
+            )
+        except ValueError:
+            logger.debug(
+                "Account %s: skipped channel registry update for unresolved target=%s invite=%s",
+                account_id,
+                target,
+                invite_link,
+            )
 
     # ── Client pool management ──
 
@@ -735,6 +774,16 @@ class LikesWorker:
                             )
                             if not joined or not entity:
                                 failure_reason = join_error or "Channel entity could not be resolved after join"
+                                membership_status = self._membership_status_from_error(failure_reason)
+                                if membership_status:
+                                    self._track_channel_membership(
+                                        db,
+                                        account_id=account.id,
+                                        status=membership_status,
+                                        target=channel,
+                                        invite_link=invite_link or channel,
+                                        error=failure_reason,
+                                    )
                                 logger.warning(
                                     f"Account {account.id}: cannot join via invite — {failure_reason}"
                                 )
@@ -750,6 +799,14 @@ class LikesWorker:
                                 self._failed_accounts.add(account.id)
                                 continue
                             self._entities[account.id] = entity
+                            self._track_channel_membership(
+                                db,
+                                account_id=account.id,
+                                status="member",
+                                target=channel,
+                                invite_link=invite_link or channel,
+                                entity=entity,
+                            )
                             await asyncio.sleep(random.uniform(2, 5))
                         else:
                             # Public / numeric ID channel flow
@@ -759,6 +816,14 @@ class LikesWorker:
                             except ChannelPrivateError:
                                 # Channel is private — no invite hash available
                                 failure_reason = "Private channel requires invite link"
+                                self._track_channel_membership(
+                                    db,
+                                    account_id=account.id,
+                                    status="failed",
+                                    target=channel,
+                                    invite_link=invite_link or None,
+                                    error=failure_reason,
+                                )
                                 logger.warning(
                                     f"Account {account.id}: channel private, no invite link"
                                 )
@@ -783,6 +848,16 @@ class LikesWorker:
                                 joined, join_error = await self._join_channel(account.id, entity, channel)
                                 if not joined:
                                     failure_reason = join_error or "Join failed"
+                                    membership_status = self._membership_status_from_error(failure_reason) or "failed"
+                                    self._track_channel_membership(
+                                        db,
+                                        account_id=account.id,
+                                        status=membership_status,
+                                        target=channel,
+                                        invite_link=invite_link or None,
+                                        entity=entity,
+                                        error=failure_reason,
+                                    )
                                     logger.warning(
                                         f"Account {account.id}: cannot join channel — {failure_reason}"
                                     )
@@ -801,11 +876,27 @@ class LikesWorker:
                                 # Re-resolve entity after join
                                 self._entities.pop(account.id, None)
                                 entity = await self._resolve_entity(account.id, channel)
+                            self._track_channel_membership(
+                                db,
+                                account_id=account.id,
+                                status="member",
+                                target=channel,
+                                invite_link=invite_link or None,
+                                entity=entity,
+                            )
 
-                                await asyncio.sleep(random.uniform(2, 5))
+                            await asyncio.sleep(random.uniform(2, 5))
 
                     except ChannelPrivateError:
                         failure_reason = "Private channel requires invite link"
+                        self._track_channel_membership(
+                            db,
+                            account_id=account.id,
+                            status="failed",
+                            target=channel,
+                            invite_link=invite_link or None,
+                            error=failure_reason,
+                        )
                         logger.warning(f"Account {account.id}: channel private")
                         self._record_setup_failure_log(
                             db,
@@ -832,6 +923,16 @@ class LikesWorker:
                         self._flood_wait_until[account.id] = time.monotonic() + e.seconds
                     except Exception as e:
                         failure_reason = str(e)[:200]
+                        membership_status = self._membership_status_from_error(failure_reason)
+                        if membership_status:
+                            self._track_channel_membership(
+                                db,
+                                account_id=account.id,
+                                status=membership_status,
+                                target=channel,
+                                invite_link=invite_link or None,
+                                error=failure_reason,
+                            )
                         logger.warning(f"Account {account.id}: resolve/join failed — {e}")
                         self._record_setup_failure_log(
                             db,

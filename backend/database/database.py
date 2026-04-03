@@ -174,7 +174,18 @@ def _run_schema_migrations():
 
 async def init_db():
     """Initialize database and create tables"""
-    from database.models import Account, Proxy, AccountGroup, AccountTag, Task, TaskLog, CommentTemplate, TargetChannel
+    from database.models import (
+        Account,
+        Proxy,
+        AccountGroup,
+        AccountTag,
+        Task,
+        TaskLog,
+        CommentTemplate,
+        TargetChannel,
+        SavedChannel,
+        ChannelMembership,
+    )
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
