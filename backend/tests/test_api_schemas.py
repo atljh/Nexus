@@ -125,8 +125,8 @@ class TestCreateWarmingTaskRequest:
         )
         assert req.config.targets == ["@test"]
         assert req.config.speed_preset is None
-        assert req.min_delay == 18000.0
-        assert req.max_delay == 36000.0
+        assert req.min_delay == 60.0
+        assert req.max_delay == 120.0
         assert req.max_concurrent == 1
 
     def test_custom_delays(self):

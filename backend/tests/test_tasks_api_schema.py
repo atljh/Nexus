@@ -166,16 +166,16 @@ class TestWarmingHelpers:
     def test_warming_delay_preset(self):
         from api.tasks import get_warming_delay_range
 
-        assert get_warming_delay_range("safe") == (14400.0, 21600.0)
-        assert get_warming_delay_range("normal") == (7200.0, 14400.0)
-        assert get_warming_delay_range(None) == (18000.0, 36000.0)
+        assert get_warming_delay_range("safe") == (600.0, 1200.0)
+        assert get_warming_delay_range("normal") == (300.0, 600.0)
+        assert get_warming_delay_range(None) == (60.0, 120.0)
 
     def test_warming_delay_range_normalization(self):
         from api.tasks import normalize_warming_delay_range
 
         assert normalize_warming_delay_range(36000.0, 18000.0) == (18000.0, 36000.0)
-        assert normalize_warming_delay_range(None, None, "normal") == (7200.0, 14400.0)
-        assert normalize_warming_delay_range(None, None, None) == (18000.0, 36000.0)
+        assert normalize_warming_delay_range(None, None, "normal") == (300.0, 600.0)
+        assert normalize_warming_delay_range(None, None, None) == (60.0, 120.0)
 
     def test_warming_safety_delay_floor_uses_youngest_account(self):
         from api.tasks import get_warming_safety_delay_floor, apply_warming_safety_delay_floor
@@ -187,8 +187,8 @@ class TestWarmingHelpers:
 
         accounts = [StubAccount(20), StubAccount(1)]
 
-        assert get_warming_safety_delay_floor(accounts) == (64800.0, 108000.0)
-        assert apply_warming_safety_delay_floor(accounts, 18000.0, 36000.0) == (64800.0, 108000.0)
+        assert get_warming_safety_delay_floor(accounts) == (1800.0, 3600.0)
+        assert apply_warming_safety_delay_floor(accounts, 60.0, 120.0) == (1800.0, 3600.0)
 
     def test_warming_task_config_normalization(self):
         from api.tasks import normalize_warming_task_config
@@ -243,7 +243,7 @@ class TestWarmingHelpers:
             config = {"targets": ["@channel"]}
             accounts = [StubAccount(1)]
 
-        assert normalize_updated_task_delays(StubTask(), 60.0, 300.0) == (64800.0, 108000.0)
+        assert normalize_updated_task_delays(StubTask(), 60.0, 300.0) == (1800.0, 3600.0)
 
     def test_update_non_warming_delays_swap_and_clamp(self):
         from api.tasks import normalize_updated_task_delays

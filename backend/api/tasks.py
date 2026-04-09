@@ -30,18 +30,18 @@ from workers.shared.account_safety import AccountSafetyValidator
 
 router = APIRouter()
 DEFAULT_TEMPLATE_CATEGORY = "General"
-WARMING_DEFAULT_MIN_DELAY = 5 * 3600.0
-WARMING_DEFAULT_MAX_DELAY = 10 * 3600.0
+WARMING_DEFAULT_MIN_DELAY = 1 * 60.0
+WARMING_DEFAULT_MAX_DELAY = 2 * 60.0
 WARMING_MIN_DELAY_LIMIT = 60.0
 WARMING_MAX_DELAY_LIMIT = 72 * 3600.0
 WARMING_SPEED_PRESETS = {
-    "safe": (4 * 3600.0, 6 * 3600.0),
-    "normal": (2 * 3600.0, 4 * 3600.0),
+    "safe": (10 * 60.0, 20 * 60.0),
+    "normal": (5 * 60.0, 10 * 60.0),
 }
 WARMING_ACCOUNT_AGE_DELAY_FLOORS = [
-    (0, 3, (18 * 3600.0, 30 * 3600.0)),
-    (3, 7, (12 * 3600.0, 20 * 3600.0)),
-    (7, 14, (8 * 3600.0, 14 * 3600.0)),
+    (0, 3, (30 * 60.0, 60 * 60.0)),
+    (3, 7, (15 * 60.0, 30 * 60.0)),
+    (7, 14, (5 * 60.0, 10 * 60.0)),
 ]
 PUBLIC_USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9_]{5,32}$")
 NUMERIC_CHANNEL_PATTERN = re.compile(r"^-?\d+$")

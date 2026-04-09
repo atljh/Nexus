@@ -2322,6 +2322,7 @@ onUnmounted(() => {
 .task-item {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   gap: 12px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.10);
