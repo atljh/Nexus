@@ -11,8 +11,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from database.database import init_db, SessionLocal
-from database.models import Task
 from api.router import api_router
+from utils.task_recovery import reconcile_stale_active_tasks
 
 
 @asynccontextmanager
@@ -21,28 +21,12 @@ async def lifespan(app: FastAPI):
     await init_db()
     print("[Backend] Database initialized")
 
-    # Reset stale running tasks (lost after restart)
+    # Reset stale running/paused tasks (queue is in-memory and cannot survive restart)
     db = SessionLocal()
     try:
-        stale = db.query(Task).filter(Task.status == "running").all()
-        if stale:
-            now = datetime.now(timezone.utc)
-            for t in stale:
-                done = t.completed_actions + t.failed_actions
-                if done >= t.total_actions:
-                    # All actions were processed before crash — mark completed
-                    t.status = "completed"
-                    t.completed_at = now
-                elif done > 0:
-                    # Partially done — mark cancelled (can't resume connections)
-                    t.status = "cancelled"
-                    t.completed_at = now
-                    t.last_error = "Interrupted by app restart"
-                else:
-                    # Not started yet — back to pending
-                    t.status = "pending"
-            db.commit()
-            print(f"[Backend] Reset {len(stale)} stale running tasks")
+        recovered = reconcile_stale_active_tasks(db, now=datetime.now(timezone.utc))
+        if recovered:
+            print(f"[Backend] Reconciled {recovered} stale active tasks")
     finally:
         db.close()
 

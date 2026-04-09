@@ -14,6 +14,10 @@ from database.models import (
     AccountBlacklist, CommentHistory, AIPromptTemplate,
 )
 from utils.encryption import encryption_service
+from utils.task_recovery import (
+    reconcile_interrupted_task,
+    TASK_RESTART_REQUIRED_ERROR,
+)
 from utils.comment_template_import import (
     default_import_category,
     generate_template_name,
@@ -1093,10 +1097,15 @@ async def start_task(task_id: int, db: Session = Depends(get_db)):
                 db.refresh(task)
         return task.to_dict()
 
-    # Stale running status (queue lost after restart) — reset to pending
-    if task.status == "running":
-        task.status = "pending"
+    # Queue state lives in memory only. If the queue no longer owns the task,
+    # reconcile stale running/paused states before allowing a fresh start.
+    if task.status in ["running", "paused"]:
+        reconcile_interrupted_task(task)
         db.commit()
+        db.refresh(task)
+
+        if task.status == "cancelled":
+            raise HTTPException(status_code=409, detail=TASK_RESTART_REQUIRED_ERROR)
 
     if task.status not in ["pending", "paused"]:
         raise HTTPException(status_code=400, detail=f"Cannot start task with status: {task.status}")
@@ -1175,12 +1184,18 @@ async def pause_task(task_id: int, db: Session = Depends(get_db)):
     # Pause in queue
     paused = await task_queue.pause(task_id)
     if not paused:
-        task.status = "pending"
-        task.last_error = "Task was not active in queue and has been reset to pending"
+        reconcile_interrupted_task(task)
+        detail = "Task was not active in queue and has been reset to pending"
+        if task.status == "cancelled":
+            detail = TASK_RESTART_REQUIRED_ERROR
+        elif task.status == "completed":
+            detail = "Task already completed"
+        elif task.status == "pending":
+            task.last_error = detail
         db.commit()
         raise HTTPException(
             status_code=409,
-            detail="Task was not active in queue and has been reset to pending"
+            detail=detail
         )
 
     task.status = "paused"

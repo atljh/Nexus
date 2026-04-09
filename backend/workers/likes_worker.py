@@ -410,6 +410,8 @@ class LikesWorker:
             return True, None
         except UserNotParticipantError:
             return False, None
+        except FloodWaitError:
+            raise
         except ChannelPrivateError:
             return False, "CHANNEL_PRIVATE"
         except Exception as e:

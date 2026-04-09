@@ -346,6 +346,20 @@ async def test_check_subscription_channel_private(worker):
 
 
 @pytest.mark.asyncio
+async def test_check_subscription_reraises_flood_wait(worker):
+    """FloodWaitError should reach the caller's cooldown handling."""
+    from telethon.errors import FloodWaitError
+
+    mock_client = MagicMock()
+    mock_client.client = AsyncMock(side_effect=FloodWaitError(request=None, capture=33))
+
+    worker._clients[1] = mock_client
+
+    with pytest.raises(FloodWaitError):
+        await worker._check_subscription(1, make_entity())
+
+
+@pytest.mark.asyncio
 async def test_join_channel_success(worker):
     """Successful join."""
     mock_client = MagicMock()

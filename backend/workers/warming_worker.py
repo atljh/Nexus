@@ -27,6 +27,8 @@ ACTION_SKIPPED_MESSAGE = "Action was not executed"
 ACCOUNT_UNAVAILABLE_ERROR = "Account unavailable before warming started"
 PRIVATE_CHANNEL_INVITE_REQUIRED = "Private channel requires invite link"
 ALL_WARMING_ACTIONS_FAILED = "All warming actions failed"
+ALL_ACCOUNTS_FAILED_TO_CONNECT = "All accounts failed to connect"
+ALL_ELIGIBLE_ACCOUNTS_EXHAUSTED = "All eligible accounts exhausted before reaching total actions"
 INVALID_WARMING_TARGET = "Invalid warming target"
 
 
@@ -35,6 +37,8 @@ class WarmingWorker(LikesWorker):
 
     INTER_ACCOUNT_STAGGER_MIN = 45.0
     INTER_ACCOUNT_STAGGER_MAX = 120.0
+    FAILURE_BACKOFF_MIN = 15.0
+    FAILURE_BACKOFF_MAX = 45.0
     WAIT_CHUNK_SECONDS = 5.0
 
     def __init__(
@@ -147,6 +151,49 @@ class WarmingWorker(LikesWorker):
         if "auth key" in lowered:
             return error
         return None
+
+    def _block_account_for_current_task(self, account_id: int, reason: str) -> str:
+        """Stop using an account for the rest of the current warming run."""
+        self._blocked_accounts[account_id] = reason
+        self._flood_wait_until.pop(account_id, None)
+        return reason
+
+    def _has_actionable_accounts(self, accounts: list[Any]) -> bool:
+        """Return True while at least one connected account can still warm targets."""
+        return any(
+            account.id in self._clients and account.id not in self._blocked_accounts
+            for account in accounts
+        )
+
+    def _fail_task_early(self, db, task: Task, error: str) -> None:
+        """Finish the task immediately once no future warming progress is possible."""
+        task.status = "failed"
+        if not task.last_error:
+            task.last_error = error
+        task.completed_at = datetime.now(timezone.utc)
+        db.commit()
+
+    async def _wait_after_account(
+        self,
+        *,
+        account_index: int,
+        total_accounts: int,
+        success: bool,
+        cancel_event: asyncio.Event,
+        pause_event: asyncio.Event,
+    ) -> bool:
+        """Apply a conservative delay before the next account in the wave."""
+        if account_index >= total_accounts - 1:
+            return True
+
+        delay_min = self.INTER_ACCOUNT_STAGGER_MIN if success else self.FAILURE_BACKOFF_MIN
+        delay_max = self.INTER_ACCOUNT_STAGGER_MAX if success else self.FAILURE_BACKOFF_MAX
+        delay = random.uniform(delay_min, delay_max)
+        return await self._wait_with_control(
+            delay,
+            cancel_event=cancel_event,
+            pause_event=pause_event,
+        )
 
     async def _record_action(
         self,
@@ -284,6 +331,11 @@ class WarmingWorker(LikesWorker):
                 if account.id not in self._clients:
                     self._blocked_accounts[account.id] = ACCOUNT_UNAVAILABLE_ERROR
 
+            if not self._has_actionable_accounts(accounts):
+                self._fail_task_early(db, task, ALL_ACCOUNTS_FAILED_TO_CONNECT)
+                logger.info("Task %s failed before warming started: no accounts connected", self.task_id)
+                return
+
             for index, target in enumerate(targets):
                 if cancel_event.is_set():
                     task.status = "cancelled"
@@ -325,6 +377,19 @@ class WarmingWorker(LikesWorker):
                             message=ACTION_SKIPPED_MESSAGE,
                             error=blocked_reason or ACCOUNT_UNAVAILABLE_ERROR,
                         )
+                        should_continue = await self._wait_after_account(
+                            account_index=account_index,
+                            total_accounts=len(wave_accounts),
+                            success=False,
+                            cancel_event=cancel_event,
+                            pause_event=pause_event,
+                        )
+                        if not should_continue:
+                            task.status = "cancelled"
+                            task.completed_at = datetime.now(timezone.utc)
+                            db.commit()
+                            logger.info(f"Task {self.task_id} cancelled")
+                            return
                         continue
 
                     cooldown_until = self._flood_wait_until.get(account.id)
@@ -344,15 +409,30 @@ class WarmingWorker(LikesWorker):
                             message=ACTION_SKIPPED_MESSAGE,
                             error=f"FloodWait: {remaining}s",
                         )
+                        should_continue = await self._wait_after_account(
+                            account_index=account_index,
+                            total_accounts=len(wave_accounts),
+                            success=False,
+                            cancel_event=cancel_event,
+                            pause_event=pause_event,
+                        )
+                        if not should_continue:
+                            task.status = "cancelled"
+                            task.completed_at = datetime.now(timezone.utc)
+                            db.commit()
+                            logger.info(f"Task {self.task_id} cancelled")
+                            return
                         continue
 
                     try:
                         success, message, error, entity, invite_link_used = await self._warm_single_target(account.id, target)
                     except FloodWaitError as exc:
-                        self._flood_wait_until[account.id] = time.monotonic() + exc.seconds
                         success = False
                         message = ACTION_SKIPPED_MESSAGE
-                        error = f"FloodWait: {exc.seconds}s"
+                        error = self._block_account_for_current_task(
+                            account.id,
+                            f"FloodWait: {exc.seconds}s",
+                        )
                         entity = None
                         invite_link_used = None
                     except Exception as exc:
@@ -406,13 +486,11 @@ class WarmingWorker(LikesWorker):
                         extra_data={"wave": index + 1},
                     )
 
-                    if account_index < len(accounts) - 1:
-                        stagger = random.uniform(
-                            self.INTER_ACCOUNT_STAGGER_MIN,
-                            self.INTER_ACCOUNT_STAGGER_MAX,
-                        )
-                        should_continue = await self._wait_with_control(
-                            stagger,
+                    if account_index < len(wave_accounts) - 1:
+                        should_continue = await self._wait_after_account(
+                            account_index=account_index,
+                            total_accounts=len(wave_accounts),
+                            success=success,
                             cancel_event=cancel_event,
                             pause_event=pause_event,
                         )
@@ -424,6 +502,16 @@ class WarmingWorker(LikesWorker):
                             return
 
                 if index < len(targets) - 1:
+                    if not self._has_actionable_accounts(accounts):
+                        self._fail_task_early(db, task, ALL_ELIGIBLE_ACCOUNTS_EXHAUSTED)
+                        logger.info(
+                            "Task %s stopped early: no actionable accounts remain after wave %s/%s",
+                            self.task_id,
+                            index + 1,
+                            len(targets),
+                        )
+                        return
+
                     delay = random.uniform(task.min_delay, task.max_delay)
                     should_continue = await self._wait_with_control(
                         delay,
@@ -436,6 +524,13 @@ class WarmingWorker(LikesWorker):
                         db.commit()
                         logger.info(f"Task {self.task_id} cancelled")
                         return
+
+            if cancel_event.is_set():
+                task.status = "cancelled"
+                task.completed_at = datetime.now(timezone.utc)
+                db.commit()
+                logger.info(f"Task {self.task_id} cancelled")
+                return
 
             if task.completed_actions > 0:
                 task.status = "completed"

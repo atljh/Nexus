@@ -455,7 +455,12 @@ function viewTaskDetails(task: Task) {
 }
 
 async function refreshTasks() {
-  await taskStore.fetchTasks('likes')
+  await taskStore.fetchTasks('likes', undefined, true)
+  if (taskStore.hasRunningTasks) {
+    taskStore.startPolling()
+  } else {
+    taskStore.stopPolling()
+  }
 }
 
 // Initialize

@@ -37,6 +37,10 @@ async function fileToUpload(name: string, file: File): Promise<UploadFile> {
 }
 
 export const useTaskStore = defineStore('task', () => {
+  function getErrorMessage(e: unknown, fallback: string): string {
+    return e instanceof Error ? e.message : fallback
+  }
+
   // State
   const tasks = ref<Task[]>([])
   const currentTask = ref<Task | null>(null)
@@ -92,7 +96,7 @@ export const useTaskStore = defineStore('task', () => {
       _tasksFetchedAt = Date.now()
       _tasksFetchedKey = cacheKey
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Failed to fetch tasks'
+      error.value = getErrorMessage(e, 'Failed to fetch tasks')
       console.error('Failed to fetch tasks:', e)
     } finally {
       loading.value = false
@@ -216,7 +220,7 @@ export const useTaskStore = defineStore('task', () => {
       tasks.value.unshift(response)
       return response
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Failed to create task'
+      error.value = getErrorMessage(e, 'Failed to create task')
       console.error('Failed to create task:', e)
       return null
     } finally {
@@ -232,7 +236,7 @@ export const useTaskStore = defineStore('task', () => {
       tasks.value.unshift(response)
       return response
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Failed to create comments task'
+      error.value = getErrorMessage(e, 'Failed to create comments task')
       console.error('Failed to create comments task:', e)
       return null
     } finally {
@@ -248,7 +252,7 @@ export const useTaskStore = defineStore('task', () => {
       tasks.value.unshift(response)
       return response
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Failed to create warming task'
+      error.value = getErrorMessage(e, 'Failed to create warming task')
       console.error('Failed to create warming task:', e)
       return null
     } finally {
@@ -404,6 +408,7 @@ export const useTaskStore = defineStore('task', () => {
       startPolling()
       return true
     } catch (e) {
+      error.value = getErrorMessage(e, 'Failed to start task')
       console.error('Failed to start task:', e)
       return false
     }
@@ -422,6 +427,7 @@ export const useTaskStore = defineStore('task', () => {
       }
       return true
     } catch (e) {
+      error.value = getErrorMessage(e, 'Failed to pause task')
       console.error('Failed to pause task:', e)
       return false
     }
@@ -440,6 +446,7 @@ export const useTaskStore = defineStore('task', () => {
       }
       return true
     } catch (e) {
+      error.value = getErrorMessage(e, 'Failed to cancel task')
       console.error('Failed to cancel task:', e)
       return false
     }
@@ -455,6 +462,7 @@ export const useTaskStore = defineStore('task', () => {
       }
       return true
     } catch (e) {
+      error.value = getErrorMessage(e, 'Failed to delete task')
       console.error('Failed to delete task:', e)
       return false
     }
@@ -473,6 +481,7 @@ export const useTaskStore = defineStore('task', () => {
       }
       return response
     } catch (e) {
+      error.value = getErrorMessage(e, 'Failed to restart task')
       console.error('Failed to restart task:', e)
       return null
     }

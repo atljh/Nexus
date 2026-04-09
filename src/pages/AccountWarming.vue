@@ -282,6 +282,10 @@ function timeAgo(dateStr: string): string {
   return t('common.time.daysShort', { count: days })
 }
 
+function getTaskStoreErrorMessage(fallback: string): string {
+  return taskStore.error || fallback
+}
+
 async function createTask() {
   if (parsedTargets.value.length === 0) {
     toast.add({
@@ -315,33 +319,43 @@ async function createTask() {
       max_concurrent: 1
     })
 
-    if (task) {
-      clearPendingFormSave()
-      localStorage.removeItem(FORM_KEY)
-
-      if ((task as Task & { skipped_accounts?: number }).skipped_accounts) {
-        toast.add({
-          severity: 'warn',
-          summary: t('common.warning'),
-          detail: t('warming.messages.accountsSkipped', { count: (task as Task & { skipped_accounts?: number }).skipped_accounts }),
-          life: 5000
-        })
-      }
-
-      const started = await taskStore.startTask(task.id)
+    if (!task) {
       toast.add({
-        severity: started ? 'success' : 'warn',
-        summary: started ? t('common.success') : t('common.warning'),
-        detail: started ? t('warming.messages.taskStarted') : t('warming.messages.taskCreated'),
-        life: 3000
+        severity: 'error',
+        summary: t('common.error'),
+        detail: getTaskStoreErrorMessage(t('warming.messages.createFailed')),
+        life: 4000
+      })
+      return
+    }
+
+    clearPendingFormSave()
+    localStorage.removeItem(FORM_KEY)
+
+    if ((task as Task & { skipped_accounts?: number }).skipped_accounts) {
+      toast.add({
+        severity: 'warn',
+        summary: t('common.warning'),
+        detail: t('warming.messages.accountsSkipped', { count: (task as Task & { skipped_accounts?: number }).skipped_accounts }),
+        life: 5000
       })
     }
+
+    const started = await taskStore.startTask(task.id)
+    toast.add({
+      severity: started ? 'success' : 'warn',
+      summary: started ? t('common.success') : t('common.warning'),
+      detail: started
+        ? t('warming.messages.taskStarted')
+        : getTaskStoreErrorMessage(t('warming.messages.taskCreated')),
+      life: 4000
+    })
   } catch {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: t('warming.messages.createFailed'),
-      life: 3000
+      detail: getTaskStoreErrorMessage(t('warming.messages.createFailed')),
+      life: 4000
     })
   } finally {
     isCreating.value = false
@@ -354,8 +368,8 @@ async function startTask(task: Task) {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: t('taskResults.loadError'),
-      life: 2500
+      detail: getTaskStoreErrorMessage(t('taskResults.loadError')),
+      life: 3500
     })
   }
 }
@@ -366,8 +380,8 @@ async function pauseTask(task: Task) {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: t('taskResults.loadError'),
-      life: 2500
+      detail: getTaskStoreErrorMessage(t('taskResults.loadError')),
+      life: 3500
     })
   }
 }
@@ -378,8 +392,8 @@ async function cancelTask(task: Task) {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: t('taskResults.loadError'),
-      life: 2500
+      detail: getTaskStoreErrorMessage(t('taskResults.loadError')),
+      life: 3500
     })
   }
 }
@@ -390,8 +404,8 @@ async function restartTask(task: Task) {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: t('taskResults.loadError'),
-      life: 2500
+      detail: getTaskStoreErrorMessage(t('taskResults.loadError')),
+      life: 3500
     })
   }
 }
@@ -402,8 +416,8 @@ async function deleteTask(task: Task) {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: t('taskResults.loadError'),
-      life: 2500
+      detail: getTaskStoreErrorMessage(t('taskResults.loadError')),
+      life: 3500
     })
     return
   }
@@ -421,6 +435,11 @@ function viewTaskDetails(task: Task) {
 
 async function refreshTasks() {
   await taskStore.fetchTasks('warming', undefined, true)
+  if (taskStore.hasRunningTasks) {
+    taskStore.startPolling()
+  } else {
+    taskStore.stopPolling()
+  }
 }
 
 onMounted(async () => {

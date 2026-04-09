@@ -676,7 +676,12 @@ function toggleTemplate(templateId: number) {
 
 // Refresh tasks
 async function refreshTasks() {
-  await taskStore.fetchTasks('comments')
+  await taskStore.fetchTasks('comments', undefined, true)
+  if (taskStore.hasRunningTasks) {
+    taskStore.startPolling()
+  } else {
+    taskStore.stopPolling()
+  }
 }
 
 // Preview spintax
