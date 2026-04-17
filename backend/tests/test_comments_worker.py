@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from workers.comments_worker import CommentsWorker, SKIP_ACCOUNT_STATUSES
+from workers.comments_worker import CommentsWorker, SKIP_ACCOUNT_STATUSES, UniqueCommentGenerationError
 from workers.shared import SendStatus, SendResult
 
 
@@ -44,8 +44,9 @@ def make_entity(channel_id=100, title="Test Channel", username="test"):
     return entity
 
 
-def make_target(channel_username="@test", channel_id=100, channel_title="Test", can_comment=True, status="joined"):
+def make_target(id=1, channel_username="@test", channel_id=100, channel_title="Test", can_comment=True, status="joined"):
     target = MagicMock()
+    target.id = id
     target.channel_username = channel_username
     target.channel_id = channel_id
     target.channel_title = channel_title
@@ -165,6 +166,32 @@ async def test_setup_channels_public_flow_checks_subscription_and_joins(worker):
     assert target.status == "joined"
     assert target.can_comment is True
     assert 1 not in worker._failed_accounts
+
+
+@pytest.mark.asyncio
+async def test_setup_channels_keeps_target_commentable_if_any_account_is_ready(worker):
+    """A later failing account must not overwrite a target already prepared by another account."""
+    target = make_target(id=10, channel_username="@publictest", channel_id=None, channel_title=None, can_comment=False, status="pending")
+    entity = make_entity(channel_id=777, title="Public Test", username="publictest")
+
+    worker._clients[1] = MagicMock()
+    worker._clients[2] = MagicMock()
+    worker._resolve_entity = AsyncMock(return_value=entity)
+    worker._check_subscription = AsyncMock(return_value=(True, None))
+    worker._get_linked_chat = AsyncMock(return_value=999)
+    worker._join_discussion_group = AsyncMock(side_effect=[(True, None), (False, "denied")])
+    worker._track_channel_membership = MagicMock()
+
+    with patch("workers.comments_worker.asyncio.sleep", new=AsyncMock()):
+        ready_first = await worker._setup_channels_for_account(1, [target], MagicMock())
+        ready_second = await worker._setup_channels_for_account(2, [target], MagicMock())
+
+    assert ready_first == 1
+    assert ready_second == 0
+    assert target.can_comment is True
+    assert target.status == "joined"
+    assert worker._is_account_ready_for_target(1, 10) is True
+    assert worker._is_account_ready_for_target(2, 10) is False
 
 
 @pytest.mark.asyncio
@@ -1049,6 +1076,91 @@ class TestSelectTargetChannel:
 
         result = worker._select_target_channel([t1])
         assert result is None
+
+    def test_skips_targets_without_immediately_available_accounts(self):
+        worker = CommentsWorker(task_id=1)
+        worker._clients = {1: MagicMock(), 2: MagicMock()}
+        worker._ready_target_accounts = {
+            (1, 200),
+            (2, 200),
+        }
+        worker._blacklist_cache = {
+            (1, "id:100"),
+            (2, "id:100"),
+        }
+
+        blocked = make_target(id=1000, channel_username="@blocked", channel_id=100, can_comment=True, status="joined")
+        available = make_target(id=200, channel_username="@available", channel_id=200, can_comment=True, status="joined")
+        accounts = [make_account(1), make_account(2)]
+
+        result = worker._select_target_channel([blocked, available], accounts=accounts, limit=5)
+
+        assert result is available
+
+    def test_select_account_respects_target_readiness(self):
+        worker = CommentsWorker(task_id=1)
+        worker._clients = {1: MagicMock(), 2: MagicMock()}
+        worker._ready_target_accounts = {(2, 10)}
+
+        accounts = [make_account(1), make_account(2)]
+        result = worker._select_account(accounts, "random", 10, 0, target_id=10, channel_id=100)
+
+        assert result.id == 2
+
+
+class TestUniqueCommentGeneration:
+    @pytest.mark.asyncio
+    async def test_generate_comment_uses_different_templates_before_reuse(self):
+        worker = CommentsWorker(task_id=1)
+        db = MagicMock()
+        worker.UNIQUE_TEMPLATE_ATTEMPTS = 2
+
+        with patch("workers.comments_worker.random.choice", side_effect=lambda seq: seq[0]):
+            first_text, first_is_ai, first_template_key = await worker._generate_comment(
+                {},
+                ["First comment", "Second comment"],
+                db,
+            )
+            worker._mark_comment_used(first_text, first_template_key)
+
+            second_text, second_is_ai, second_template_key = await worker._generate_comment(
+                {},
+                ["First comment", "Second comment"],
+                db,
+            )
+
+        assert first_text == "First comment"
+        assert second_text == "Second comment"
+        assert first_is_ai is False
+        assert second_is_ai is False
+        assert first_template_key != second_template_key
+
+    @pytest.mark.asyncio
+    async def test_generate_comment_raises_when_unique_templates_exhausted(self):
+        worker = CommentsWorker(task_id=1)
+        db = MagicMock()
+        worker.UNIQUE_TEMPLATE_ATTEMPTS = 1
+        worker._mark_comment_used("Only comment")
+
+        with patch("workers.spintax.random.choice", side_effect=lambda seq: seq[0]):
+            with pytest.raises(UniqueCommentGenerationError, match="Unique comment templates exhausted"):
+                await worker._generate_comment({}, ["Only comment"], db)
+
+    @pytest.mark.asyncio
+    async def test_generate_comment_uses_unused_spintax_variant_without_false_exhaustion(self):
+        worker = CommentsWorker(task_id=1)
+        db = MagicMock()
+        worker.UNIQUE_TEMPLATE_ATTEMPTS = 1
+
+        with patch("workers.spintax.random.choice", side_effect=lambda seq: seq[0]):
+            first_text, _, first_template_key = await worker._generate_comment({}, ["{A|B}"], db)
+            worker._mark_comment_used(first_text, first_template_key)
+
+            second_text, _, second_template_key = await worker._generate_comment({}, ["{A|B}"], db)
+
+        assert first_text == "A"
+        assert second_text == "B"
+        assert first_template_key == second_template_key
 
 
 # ── Blacklist Cache ──

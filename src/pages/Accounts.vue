@@ -79,8 +79,10 @@ const webViewerAccount = ref<Account | null>(null)
 const batchChecking = ref(false)
 const searchQuery = ref('')
 const bulkMenu = ref()
+const editingGroupId = ref<number | null>(null)
 const newGroupName = ref('')
 const newGroupColor = ref('#a855f7')
+const editingTagId = ref<number | null>(null)
 const newTagName = ref('')
 const newTagColor = ref('#a855f7')
 // Drag & drop state
@@ -1473,22 +1475,60 @@ function setStatusFilter(status: AccountStatus | null) {
   accountStore.setFilter('status', status || undefined)
 }
 
-async function createGroup() {
-  if (!newGroupName.value.trim()) return
+function resetGroupForm() {
+  editingGroupId.value = null
+  newGroupName.value = ''
+  newGroupColor.value = '#a855f7'
+}
+
+function resetTagForm() {
+  editingTagId.value = null
+  newTagName.value = ''
+  newTagColor.value = '#a855f7'
+}
+
+function startEditGroup(group: { id: number; name: string; color: string | null }) {
+  editingGroupId.value = group.id
+  newGroupName.value = group.name
+  newGroupColor.value = group.color || '#a855f7'
+}
+
+function startEditTag(tag: { id: number; name: string; color: string }) {
+  editingTagId.value = tag.id
+  newTagName.value = tag.name
+  newTagColor.value = tag.color || '#a855f7'
+}
+
+async function saveGroup() {
+  const name = newGroupName.value.trim()
+  if (!name) return
 
   try {
-    await groupStore.createGroup({
-      name: newGroupName.value.trim(),
-      color: newGroupColor.value
-    })
-    newGroupName.value = ''
-    showGroupDialog.value = false
-    toast.add({
-      severity: 'success',
-      summary: t('common.success'),
-      detail: t('groups.created'),
-      life: 3000
-    })
+    if (editingGroupId.value !== null) {
+      await groupStore.updateGroup(editingGroupId.value, {
+        name,
+        color: newGroupColor.value
+      })
+      await accountStore.fetchAccounts(true)
+      toast.add({
+        severity: 'success',
+        summary: t('common.success'),
+        detail: t('groups.updated'),
+        life: 3000
+      })
+    } else {
+      await groupStore.createGroup({
+        name,
+        color: newGroupColor.value
+      })
+      toast.add({
+        severity: 'success',
+        summary: t('common.success'),
+        detail: t('groups.created'),
+        life: 3000
+      })
+    }
+    resetGroupForm()
   } catch (error: any) {
     toast.add({
       severity: 'error',
@@ -1499,22 +1539,36 @@ async function createGroup() {
   }
 }
 
-async function createTag() {
-  if (!newTagName.value.trim()) return
+async function saveTag() {
+  const name = newTagName.value.trim()
+  if (!name) return
 
   try {
-    await tagStore.createTag({
-      name: newTagName.value.trim(),
-      color: newTagColor.value
-    })
-    newTagName.value = ''
-    showTagDialog.value = false
-    toast.add({
-      severity: 'success',
-      summary: t('common.success'),
-      detail: t('tags.created'),
-      life: 3000
-    })
+    if (editingTagId.value !== null) {
+      await tagStore.updateTag(editingTagId.value, {
+        name,
+        color: newTagColor.value
+      })
+      await accountStore.fetchAccounts(true)
+      toast.add({
+        severity: 'success',
+        summary: t('common.success'),
+        detail: t('tags.updated'),
+        life: 3000
+      })
+    } else {
+      await tagStore.createTag({
+        name,
+        color: newTagColor.value
+      })
+      toast.add({
+        severity: 'success',
+        summary: t('common.success'),
+        detail: t('tags.created'),
+        life: 3000
+      })
+    }
+    resetTagForm()
   } catch (error: any) {
     toast.add({
       severity: 'error',
@@ -1523,6 +1577,68 @@ async function createTag() {
       life: 3000
     })
   }
+}
+
+function confirmDeleteGroup(group: { id: number; name: string }) {
+  confirm.require({
+    message: t('groups.deleteConfirm', { name: group.name }),
+    header: t('common.confirmation'),
+    icon: 'pi pi-exclamation-triangle',
+    acceptClass: 'p-button-danger',
+    accept: async () => {
+      try {
+        await groupStore.deleteGroup(group.id)
+        await accountStore.fetchAccounts(true)
+        if (editingGroupId.value === group.id) {
+          resetGroupForm()
+        }
+        toast.add({
+          severity: 'success',
+          summary: t('common.success'),
+          detail: t('groups.deleted'),
+          life: 3000
+        })
+      } catch (error: any) {
+        toast.add({
+          severity: 'error',
+          summary: t('common.error'),
+          detail: error.message,
+          life: 3000
+        })
+      }
+    }
+  })
+}
+
+function confirmDeleteTag(tag: { id: number; name: string }) {
+  confirm.require({
+    message: t('tags.deleteConfirm', { name: tag.name }),
+    header: t('common.confirmation'),
+    icon: 'pi pi-exclamation-triangle',
+    acceptClass: 'p-button-danger',
+    accept: async () => {
+      try {
+        await tagStore.deleteTag(tag.id)
+        await accountStore.fetchAccounts(true)
+        if (editingTagId.value === tag.id) {
+          resetTagForm()
+        }
+        toast.add({
+          severity: 'success',
+          summary: t('common.success'),
+          detail: t('tags.deleted'),
+          life: 3000
+        })
+      } catch (error: any) {
+        toast.add({
+          severity: 'error',
+          summary: t('common.error'),
+          detail: error.message,
+          life: 3000
+        })
+      }
+    }
+  })
 }
 
 function getStatusSeverity(status: string): "success" | "info" | "warn" | "danger" | "secondary" | "contrast" | undefined {
@@ -2720,17 +2836,20 @@ login:pass:1.2.3.4:8080"
       <!-- Create Group Dialog -->
       <Dialog
         v-model:visible="showGroupDialog"
-        :header="t('groups.create')"
+        :header="t('groups.title')"
         modal
         :style="{ width: '400px' }"
         class="custom-dialog"
+        @hide="resetGroupForm"
       >
+        <p class="dialog-hint">{{ t('groups.manageHint') }}</p>
         <div class="form-field">
           <label class="form-label">{{ t('groups.name') }}</label>
           <InputText
             v-model="newGroupName"
             :placeholder="t('groups.namePlaceholder')"
             class="w-full"
+            @keyup.enter="saveGroup"
           />
         </div>
         <div class="form-field">
@@ -2746,27 +2865,61 @@ login:pass:1.2.3.4:8080"
             ></div>
           </div>
         </div>
+        <div v-if="groupStore.groups.length > 0" class="manage-list">
+          <div
+            v-for="group in groupStore.groups"
+            :key="group.id"
+            class="manage-list-item"
+            :class="{ active: editingGroupId === group.id }"
+          >
+            <div class="manage-item-main">
+              <span class="manage-item-swatch" :style="{ background: group.color || '#a855f7' }"></span>
+              <div class="manage-item-text">
+                <span class="manage-item-name">{{ group.name }}</span>
+                <small class="manage-item-meta">{{ t('accounts.bulk.accountsCount', { count: group.accounts_count }) }}</small>
+              </div>
+            </div>
+            <div class="manage-item-actions">
+              <Button icon="pi pi-pencil" text rounded size="small" @click="startEditGroup(group)" />
+              <Button icon="pi pi-trash" text rounded severity="danger" size="small" @click="confirmDeleteGroup(group)" />
+            </div>
+          </div>
+        </div>
+        <p v-else class="manage-empty">{{ t('groups.empty') }}</p>
 
         <template #footer>
-          <Button :label="t('common.cancel')" severity="secondary" @click="showGroupDialog = false" />
-          <Button :label="t('common.create')" icon="pi pi-check" @click="createGroup" />
+          <Button
+            v-if="editingGroupId !== null"
+            :label="t('common.cancel')"
+            severity="secondary"
+            @click="resetGroupForm"
+          />
+          <Button
+            :label="editingGroupId !== null ? t('common.save') : t('common.create')"
+            icon="pi pi-check"
+            @click="saveGroup"
+          />
+          <Button :label="t('common.close')" severity="secondary" @click="showGroupDialog = false" />
         </template>
       </Dialog>
 
       <!-- Create Tag Dialog -->
       <Dialog
         v-model:visible="showTagDialog"
-        :header="t('tags.create')"
+        :header="t('tags.title')"
         modal
         :style="{ width: '400px' }"
         class="custom-dialog"
+        @hide="resetTagForm"
       >
+        <p class="dialog-hint">{{ t('tags.manageHint') }}</p>
         <div class="form-field">
           <label class="form-label">{{ t('tags.name') }}</label>
           <InputText
             v-model="newTagName"
             :placeholder="t('tags.namePlaceholder')"
             class="w-full"
+            @keyup.enter="saveTag"
           />
         </div>
         <div class="form-field">
@@ -2782,10 +2935,40 @@ login:pass:1.2.3.4:8080"
             ></div>
           </div>
         </div>
+        <div v-if="tagStore.tags.length > 0" class="manage-list">
+          <div
+            v-for="tag in tagStore.tags"
+            :key="tag.id"
+            class="manage-list-item"
+            :class="{ active: editingTagId === tag.id }"
+          >
+            <div class="manage-item-main">
+              <span class="manage-item-swatch" :style="{ background: tag.color || '#a855f7' }"></span>
+              <div class="manage-item-text">
+                <span class="manage-item-name">{{ tag.name }}</span>
+              </div>
+            </div>
+            <div class="manage-item-actions">
+              <Button icon="pi pi-pencil" text rounded size="small" @click="startEditTag(tag)" />
+              <Button icon="pi pi-trash" text rounded severity="danger" size="small" @click="confirmDeleteTag(tag)" />
+            </div>
+          </div>
+        </div>
+        <p v-else class="manage-empty">{{ t('tags.empty') }}</p>
 
         <template #footer>
-          <Button :label="t('common.cancel')" severity="secondary" @click="showTagDialog = false" />
-          <Button :label="t('common.create')" icon="pi pi-check" @click="createTag" />
+          <Button
+            v-if="editingTagId !== null"
+            :label="t('common.cancel')"
+            severity="secondary"
+            @click="resetTagForm"
+          />
+          <Button
+            :label="editingTagId !== null ? t('common.save') : t('common.create')"
+            icon="pi pi-check"
+            @click="saveTag"
+          />
+          <Button :label="t('common.close')" severity="secondary" @click="showTagDialog = false" />
         </template>
       </Dialog>
 
@@ -4026,6 +4209,82 @@ login:pass:1.2.3.4:8080"
 
 .color-option.active {
   box-shadow: 0 0 0 2px #161616, 0 0 0 4px white;
+}
+
+.dialog-hint {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.manage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 240px;
+  overflow-y: auto;
+  margin-top: 18px;
+}
+
+.manage-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.manage-list-item.active {
+  border-color: rgba(168, 85, 247, 0.7);
+  background: rgba(168, 85, 247, 0.10);
+}
+
+.manage-item-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.manage-item-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.manage-item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.manage-item-name {
+  color: #f3f4f6;
+  font-size: 14px;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.manage-item-meta {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.manage-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.manage-empty {
+  margin: 18px 0 0;
+  color: #9ca3af;
+  font-size: 13px;
 }
 
 /* Checkbox */

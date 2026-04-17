@@ -66,7 +66,74 @@ const isPrivateChannel = computed(() => channelInput.value.startsWith('-100'))
 //   t.me/+HASH or t.me/joinchat/HASH → kept as invite link
 const detectedPostId = ref<number | null>(null)
 const FORM_SAVE_DELAY_MS = 250
+const COMMENT_VARIANT_LIMIT = 2000
 let formSaveTimer: number | null = null
+
+function normalizeCommentKey(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function expandSpintaxVariants(text: string, limit = COMMENT_VARIANT_LIMIT): string[] | null {
+  const innermostPattern = /\{([^{}]*)\}/
+  let variants = new Set([text])
+  const maxIterations = 20
+
+  for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+    const nextVariants = new Set<string>()
+    let changed = false
+
+    for (const variant of variants) {
+      const match = innermostPattern.exec(variant)
+      if (!match) {
+        nextVariants.add(variant)
+        continue
+      }
+
+      changed = true
+      const [wholeMatch, group] = match
+      const options = group.split('|')
+      for (const option of options) {
+        const nextVariant = `${variant.slice(0, match.index)}${option}${variant.slice(match.index + wholeMatch.length)}`
+        nextVariants.add(nextVariant)
+        if (nextVariants.size > limit) return null
+      }
+    }
+
+    variants = nextVariants
+    if (!changed) {
+      return Array.from(variants).sort()
+    }
+    if (variants.size > limit) return null
+  }
+
+  return null
+}
+
+function estimateExactUniqueCommentCapacity(templates: string[], limit = COMMENT_VARIANT_LIMIT): number | null {
+  const normalizedTemplates: string[] = []
+  const seenTemplates = new Set<string>()
+
+  for (const template of templates) {
+    const cleaned = template.trim().replace(/\s+/g, ' ')
+    if (!cleaned) continue
+    const key = normalizeCommentKey(cleaned)
+    if (seenTemplates.has(key)) continue
+    seenTemplates.add(key)
+    normalizedTemplates.push(cleaned)
+  }
+
+  const uniqueComments = new Set<string>()
+  for (const template of normalizedTemplates) {
+    const expanded = expandSpintaxVariants(template, limit)
+    if (!expanded) return null
+    for (const variant of expanded) {
+      uniqueComments.add(normalizeCommentKey(variant))
+      if (uniqueComments.size > limit) return null
+    }
+  }
+
+  return uniqueComments.size
+}
 
 function parseTelegramLink(input: string): { channel: string; postId?: number } | null {
   // Private channel: t.me/c/CHANNEL_ID/POST_ID
@@ -125,6 +192,10 @@ watch(selectedAccountIds, (ids) => {
 watch(commentsPerAccount, (perAcc) => {
   totalActions.value = perAcc * (selectedAccountIds.value.length || 1)
 })
+
+function getTaskStoreErrorMessage(fallback: string): string {
+  return taskStore.error || fallback
+}
 
 // Form persistence
 const FORM_KEY = 'nexus_autocomments_form'
@@ -324,6 +395,20 @@ const selectedTemplates = computed(() => {
     })
 })
 
+const maxTaskActions = computed(() => selectedAccountIds.value.length * commentsPerAccount.value)
+const exactUniqueCommentCapacity = computed(() => estimateExactUniqueCommentCapacity(selectedTemplates.value))
+const totalCommentsInputMax = computed(() => {
+  const byAccounts = maxTaskActions.value
+  if (byAccounts <= 0) return 1
+  return Math.min(10000, byAccounts)
+})
+
+watch(maxTaskActions, (max) => {
+  if (max > 0 && totalActions.value > max) {
+    totalActions.value = max
+  }
+})
+
 watch(templateCategories, (categories) => {
   if (templateCategoryFilter.value === 'all') return
   const exists = categories.some(category => category.value === templateCategoryFilter.value)
@@ -406,6 +491,33 @@ async function createTask() {
     return
   }
 
+  if (totalActions.value > maxTaskActions.value) {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: t('autoComments.errors.totalExceedsAccountLimit', {
+        max: maxTaskActions.value,
+        accounts: selectedAccountIds.value.length,
+        perAccount: commentsPerAccount.value
+      }),
+      life: 4000
+    })
+    return
+  }
+
+  if (exactUniqueCommentCapacity.value !== null && totalActions.value > exactUniqueCommentCapacity.value) {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: t('autoComments.errors.notEnoughUniqueComments', {
+        required: totalActions.value,
+        available: exactUniqueCommentCapacity.value
+      }),
+      life: 5000
+    })
+    return
+  }
+
   isCreating.value = true
   try {
     const cleanChannel = channelVal.startsWith('@') ? channelVal.slice(1) : channelVal
@@ -426,42 +538,50 @@ async function createTask() {
       max_concurrent: maxConcurrent.value
     })
 
-    if (task) {
-      clearPendingFormSave()
-      localStorage.removeItem(FORM_KEY)
-      // Warn if some accounts were skipped
-      if ((task as any).skipped_accounts) {
-        toast.add({
-          severity: 'warn',
-          summary: t('common.warning'),
-          detail: t('autoComments.messages.accountsSkipped', { count: (task as any).skipped_accounts }),
-          life: 5000
-        })
-      }
-      // Auto-start the created task
-      const started = await taskStore.startTask(task.id)
-      if (started) {
-        toast.add({
-          severity: 'success',
-          summary: t('common.success'),
-          detail: t('autoComments.messages.taskStarted'),
-          life: 3000
-        })
-      } else {
-        toast.add({
-          severity: 'warn',
-          summary: t('common.warning'),
-          detail: t('autoComments.messages.taskCreated'),
-          life: 3000
-        })
-      }
+    if (!task) {
+      toast.add({
+        severity: 'error',
+        summary: t('common.error'),
+        detail: getTaskStoreErrorMessage(t('autoComments.messages.createFailed')),
+        life: 4000
+      })
+      return
+    }
+
+    clearPendingFormSave()
+    localStorage.removeItem(FORM_KEY)
+    // Warn if some accounts were skipped
+    if ((task as any).skipped_accounts) {
+      toast.add({
+        severity: 'warn',
+        summary: t('common.warning'),
+        detail: t('autoComments.messages.accountsSkipped', { count: (task as any).skipped_accounts }),
+        life: 5000
+      })
+    }
+    // Auto-start the created task
+    const started = await taskStore.startTask(task.id)
+    if (started) {
+      toast.add({
+        severity: 'success',
+        summary: t('common.success'),
+        detail: t('autoComments.messages.taskStarted'),
+        life: 3000
+      })
+    } else {
+      toast.add({
+        severity: 'warn',
+        summary: t('common.warning'),
+        detail: getTaskStoreErrorMessage(t('autoComments.messages.taskCreated')),
+        life: 4000
+      })
     }
   } catch (e) {
     toast.add({
       severity: 'error',
       summary: t('common.error'),
-      detail: t('autoComments.messages.createFailed'),
-      life: 3000
+      detail: getTaskStoreErrorMessage(t('autoComments.messages.createFailed')),
+      life: 4000
     })
   } finally {
     isCreating.value = false
@@ -972,13 +1092,17 @@ onUnmounted(() => {
                     <InputNumber
                       v-model="totalActions"
                       :min="1"
-                      :max="10000"
+                      :max="totalCommentsInputMax"
                       class="w-full"
                       showButtons
                       buttonLayout="horizontal"
                       decrementButtonClass="decrement-btn"
                       incrementButtonClass="increment-btn"
                     />
+                    <small class="input-hint">
+                      <i class="pi pi-info-circle"></i>
+                      {{ t('autoComments.totalCommentsLimitHint', { max: maxTaskActions }) }}
+                    </small>
                   </div>
                 </div>
                 <div class="form-grid-2" style="margin-top: 12px;">

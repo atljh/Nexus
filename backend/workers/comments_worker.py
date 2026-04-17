@@ -62,7 +62,7 @@ from telegram.account_metadata import (
     resolve_account_connection_params,
 )
 from utils.channel_registry import upsert_channel_membership
-from workers.spintax import parse_spintax, DEFAULT_COMMENT_TEMPLATES
+from workers.spintax import choose_unique_variant, DEFAULT_COMMENT_TEMPLATES
 from workers.shared import SendStatus, SendResult, ErrorClassifier
 from workers.shared.ai_service import AIService
 from workers.shared.account_safety import AccountSafetyValidator
@@ -77,6 +77,10 @@ SKIP_ACCOUNT_STATUSES = {
     "invalid",
     "deactivated",
 }
+
+
+class UniqueCommentGenerationError(RuntimeError):
+    """Raised when a task can no longer produce a unique comment."""
 
 
 class CommentsWorker:
@@ -102,6 +106,9 @@ class CommentsWorker:
         self._account_comment_count: Dict[int, int] = {}
         self._account_action_times: Dict[int, list] = {}  # account_id -> list of timestamps
         self._blacklist_cache: Set[Tuple[int, str]] = set()
+        self._ready_target_accounts: Set[Tuple[int, int]] = set()
+        self._used_comment_keys: Set[str] = set()
+        self._used_template_keys: Set[str] = set()
         self._ai_service: Optional[AIService] = None
         self._accounts_map: Dict[int, Any] = {}  # account_id -> Account (for warming multiplier)
         self._invite_hashes: List[str] = []  # invite hashes from config invite_links
@@ -585,6 +592,8 @@ class CommentsWorker:
         Returns number of channels ready for commenting."""
         ready = 0
         for target in targets:
+            self._mark_target_unready_for_account(account_id, target.id)
+
             if self._is_blacklisted_cached(account_id, target.channel_id, target.channel_username):
                 continue
 
@@ -715,20 +724,22 @@ class CommentsWorker:
                     # Join discussion group (required for commenting)
                     dg_joined, dg_error = await self._join_discussion_group(account_id, linked_chat_id)
                     if dg_joined:
+                        self._mark_target_ready_for_account(account_id, target.id)
                         target.can_comment = True
                         target.status = "joined"
+                        target.error_message = None
                         ready += 1
                     else:
                         logger.warning(
                             f"Account {account_id}: cannot join discussion group — {dg_error}"
                         )
-                        target.can_comment = False
-                        target.status = "error"
-                        target.error_message = f"Discussion group join failed: {dg_error}"
+                        if not target.can_comment:
+                            target.status = "error"
+                            target.error_message = f"Discussion group join failed: {dg_error}"
                 else:
-                    target.can_comment = False
-                    target.status = "cannot_comment"
-                    target.error_message = "No discussion group linked"
+                    if not target.can_comment:
+                        target.status = "cannot_comment"
+                        target.error_message = "No discussion group linked"
 
             except ChannelPrivateError:
                 self._track_channel_membership(
@@ -739,6 +750,9 @@ class CommentsWorker:
                     error="Private channel requires invite link",
                 )
                 logger.warning(f"Account {account_id}: {target.channel_username} — channel private")
+                if not target.can_comment:
+                    target.status = "error"
+                    target.error_message = "Private channel requires invite link"
             except FloodWaitError as e:
                 logger.warning(f"Account {account_id}: FloodWait {e.seconds}s during setup — cooldown")
                 self._flood_wait_until[account_id] = time.monotonic() + e.seconds
@@ -756,6 +770,9 @@ class CommentsWorker:
                 logger.warning(
                     f"Account {account_id}: {target.channel_username} setup failed — {e}"
                 )
+                if not target.can_comment:
+                    target.status = "error"
+                    target.error_message = str(e)[:200]
 
         db.commit()
         return ready
@@ -795,6 +812,91 @@ class CommentsWorker:
         if channel_username:
             self._blacklist_cache.add((account_id, f"un:{channel_username}"))
 
+    def _mark_target_ready_for_account(self, account_id: int, target_id: Optional[int]) -> None:
+        if target_id is not None:
+            self._ready_target_accounts.add((account_id, target_id))
+
+    def _mark_target_unready_for_account(self, account_id: int, target_id: Optional[int]) -> None:
+        if target_id is not None:
+            self._ready_target_accounts.discard((account_id, target_id))
+
+    def _is_account_ready_for_target(self, account_id: int, target_id: Optional[int]) -> bool:
+        if target_id is None:
+            return True
+        return (account_id, target_id) in self._ready_target_accounts
+
+    def _is_account_permanently_unavailable(self, account: Account, limit: int) -> bool:
+        """Check whether an account is exhausted for the remainder of the task."""
+        return (
+            account.id in self._failed_accounts
+            or account.id not in self._clients
+            or self._account_comment_count.get(account.id, 0) >= limit
+            or account.status in SKIP_ACCOUNT_STATUSES
+        )
+
+    def _is_account_temporarily_unavailable(self, account_id: int) -> bool:
+        """Check whether an account may recover later in this task."""
+        return account_id in self._flood_wait_until or self._is_account_rate_limited(account_id)
+
+    def _has_immediately_available_account_for_target(
+        self,
+        accounts: List[Account],
+        limit: int,
+        target_id: Optional[int],
+        channel_id: Optional[int],
+        channel_username: Optional[str],
+    ) -> bool:
+        """Return True when an account can comment right now for this target."""
+        for account in accounts:
+            if self._is_account_permanently_unavailable(account, limit):
+                continue
+            if self._is_account_temporarily_unavailable(account.id):
+                continue
+            if not self._is_account_ready_for_target(account.id, target_id):
+                continue
+            if self._is_blacklisted_cached(account.id, channel_id, channel_username):
+                continue
+            return True
+        return False
+
+    def _has_recoverable_account_for_target(
+        self,
+        accounts: List[Account],
+        limit: int,
+        target_id: Optional[int],
+        channel_id: Optional[int],
+        channel_username: Optional[str],
+    ) -> bool:
+        """Return True when a target still has any non-blacklisted account left."""
+        for account in accounts:
+            if self._is_account_permanently_unavailable(account, limit):
+                continue
+            if not self._is_account_ready_for_target(account.id, target_id):
+                continue
+            if self._is_blacklisted_cached(account.id, channel_id, channel_username):
+                continue
+            return True
+        return False
+
+    def _has_recoverable_account_for_any_target(
+        self,
+        accounts: List[Account],
+        targets: List[TargetChannel],
+        limit: int,
+    ) -> bool:
+        """Check whether any target can still be served later by any account."""
+        valid_targets = [t for t in targets if t.can_comment and t.status == "joined"]
+        for target in valid_targets:
+            if self._has_recoverable_account_for_target(
+                accounts,
+                limit,
+                target.id,
+                target.channel_id,
+                target.channel_username,
+            ):
+                return True
+        return False
+
     # ── Rate limiting ──
 
     # Max comments per account per hour (soft limit — skips to next account)
@@ -827,23 +929,18 @@ class CommentsWorker:
         mode: str,
         limit: int,
         index: int,
+        target_id: Optional[int] = None,
         channel_id: Optional[int] = None,
         channel_username: Optional[str] = None,
     ) -> Optional[Account]:
         """Select next account with blacklist, pool, and rate limit filtering."""
         available = []
         for a in accounts:
-            if a.id in self._failed_accounts:
+            if self._is_account_permanently_unavailable(a, limit):
                 continue
-            if a.id not in self._clients:
+            if self._is_account_temporarily_unavailable(a.id):
                 continue
-            if a.id in self._flood_wait_until:
-                continue
-            if self._account_comment_count.get(a.id, 0) >= limit:
-                continue
-            if self._is_account_rate_limited(a.id):
-                continue
-            if a.status in SKIP_ACCOUNT_STATUSES:
+            if not self._is_account_ready_for_target(a.id, target_id):
                 continue
             if self._is_blacklisted_cached(a.id, channel_id, channel_username):
                 continue
@@ -857,14 +954,72 @@ class CommentsWorker:
         else:
             return random.choice(available)
 
-    def _select_target_channel(self, targets: List[TargetChannel]) -> Optional[TargetChannel]:
+    def _select_target_channel(
+        self,
+        targets: List[TargetChannel],
+        accounts: Optional[List[Account]] = None,
+        limit: Optional[int] = None,
+    ) -> Optional[TargetChannel]:
         """Select a target channel that can receive comments."""
         valid = [t for t in targets if t.can_comment and t.status == "joined"]
+        if accounts is not None and limit is not None:
+            valid = [
+                target for target in valid
+                if self._has_immediately_available_account_for_target(
+                    accounts,
+                    limit,
+                    target.id,
+                    target.channel_id,
+                    target.channel_username,
+                )
+            ]
         if not valid:
             return None
         return random.choice(valid)
 
     # ── Comment Generation ──
+
+    UNIQUE_AI_ATTEMPTS = 3
+    UNIQUE_TEMPLATE_ATTEMPTS = 40
+    UNIQUE_VARIANT_POOL_LIMIT = 512
+
+    @staticmethod
+    def _normalize_text_key(value: Optional[str]) -> str:
+        return " ".join((value or "").split()).casefold()
+
+    @classmethod
+    def _normalize_templates(cls, templates: List[str]) -> List[str]:
+        normalized: List[str] = []
+        seen: Set[str] = set()
+        for template in templates:
+            cleaned = " ".join((template or "").split())
+            if not cleaned:
+                continue
+            key = cls._normalize_text_key(cleaned)
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(cleaned)
+        return normalized
+
+    def _load_used_comment_keys(self, db: Session) -> None:
+        """Restore already sent comments for restarted tasks."""
+        history_rows = db.query(CommentHistory.comment_text).filter(
+            CommentHistory.task_id == self.task_id,
+            CommentHistory.success.is_(True),
+        ).all()
+        for (comment_text,) in history_rows:
+            key = self._normalize_text_key(comment_text)
+            if key:
+                self._used_comment_keys.add(key)
+
+    def _mark_comment_used(self, comment_text: str, template_key: Optional[str] = None) -> None:
+        """Mark a successfully sent comment as consumed for this task."""
+        comment_key = self._normalize_text_key(comment_text)
+        if comment_key:
+            self._used_comment_keys.add(comment_key)
+        if template_key:
+            self._used_template_keys.add(template_key)
 
     async def _generate_comment(
         self,
@@ -873,8 +1028,8 @@ class CommentsWorker:
         db: Session,
         post_text: str = "",
         channel_title: str = "",
-    ) -> Tuple[str, bool]:
-        """Generate a comment. Returns (comment_text, is_ai_generated)."""
+    ) -> Tuple[str, bool, Optional[str]]:
+        """Generate a unique comment. Returns (comment_text, is_ai_generated, template_key)."""
         if self._ai_service:
             prompt_template = None
             prompt_id = config.get("ai_prompt_id")
@@ -883,20 +1038,54 @@ class CommentsWorker:
                 if prompt:
                     prompt_template = prompt.prompt_template
 
-            ai_comment = await self._ai_service.generate_comment(
-                post_text=post_text,
-                channel_title=channel_title,
-                prompt_template=prompt_template,
-                temperature=config.get("ai_temperature", 0.7),
-                max_tokens=config.get("ai_max_tokens", 200),
-            )
-            if ai_comment:
-                return ai_comment, True
+            for _ in range(self.UNIQUE_AI_ATTEMPTS):
+                ai_comment = await self._ai_service.generate_comment(
+                    post_text=post_text,
+                    channel_title=channel_title,
+                    prompt_template=prompt_template,
+                    temperature=config.get("ai_temperature", 0.7),
+                    max_tokens=config.get("ai_max_tokens", 200),
+                )
+                comment_text = " ".join((ai_comment or "").split())
+                if not comment_text:
+                    continue
+                if self._normalize_text_key(comment_text) not in self._used_comment_keys:
+                    return comment_text, True, None
 
             logger.warning("AI generation failed, falling back to spintax")
 
-        template = random.choice(templates)
-        return parse_spintax(template), False
+        normalized_templates = self._normalize_templates(templates)
+        if not normalized_templates:
+            raise UniqueCommentGenerationError("No comment templates available")
+
+        attempted_template_keys: Set[str] = set()
+        for _ in range(max(self.UNIQUE_TEMPLATE_ATTEMPTS, len(normalized_templates) * 3)):
+            unused_templates = [
+                template for template in normalized_templates
+                if self._normalize_text_key(template) not in self._used_template_keys
+            ]
+            candidate_pool = unused_templates or normalized_templates
+            candidate_pool = [
+                template for template in candidate_pool
+                if self._normalize_text_key(template) not in attempted_template_keys
+            ] or (unused_templates or normalized_templates)
+
+            template = random.choice(candidate_pool)
+            template_key = self._normalize_text_key(template)
+            attempted_template_keys.add(template_key)
+
+            comment_text = choose_unique_variant(
+                template,
+                self._used_comment_keys,
+                limit=self.UNIQUE_VARIANT_POOL_LIMIT,
+                max_random_attempts=self.UNIQUE_TEMPLATE_ATTEMPTS,
+            )
+            if not comment_text:
+                continue
+            comment_text = " ".join(comment_text.split())
+            return comment_text, False, template_key
+
+        raise UniqueCommentGenerationError("Unique comment templates exhausted")
 
     def _should_comment(self, post_text: str, config: dict) -> bool:
         """Decide whether to comment on a post based on config."""
@@ -1235,6 +1424,7 @@ class CommentsWorker:
 
             self._init_ai_service(config)
             self._load_blacklist_cache(db, [a.id for a in accounts])
+            self._load_used_comment_keys(db)
 
             max_concurrent = task.max_concurrent or 1
 
@@ -1325,32 +1515,50 @@ class CommentsWorker:
                         del self._flood_wait_until[aid]
 
                     # Select target channel
-                    target = self._select_target_channel(valid_targets)
+                    target = self._select_target_channel(
+                        valid_targets,
+                        accounts=accounts,
+                        limit=comments_per_account,
+                    )
                     if not target:
-                        logger.warning("No valid target channels remaining")
-                        termination_reason = "No valid target channels remaining"
+                        if self._has_recoverable_account_for_any_target(
+                            accounts,
+                            valid_targets,
+                            comments_per_account,
+                        ):
+                            if self._flood_wait_until:
+                                earliest = min(self._flood_wait_until.values())
+                                wait = max(1, earliest - time.monotonic())
+                                logger.info(
+                                    "No target has an immediately available account, waiting %.0fs",
+                                    wait,
+                                )
+                                await asyncio.sleep(min(wait, 60))
+                            else:
+                                logger.info("All eligible accounts are rate-limited, cooling down 60s")
+                                await asyncio.sleep(60)
+                            continue
+
+                        logger.warning("All accounts exhausted or blacklisted for remaining targets")
+                        termination_reason = "All accounts exhausted or blacklisted for remaining targets"
                         break
 
                     # Select account (with blacklist + pool check)
                     account = self._select_account(
                         accounts, rotation_mode, comments_per_account,
-                        account_index, target.channel_id, target.channel_username
+                        account_index, target.id, target.channel_id, target.channel_username
                     )
                     account_index += 1
 
                     if not account:
-                        # Check if all accounts are permanently exhausted or just in flood-wait
-                        all_exhausted = all(
-                            a.id in self._failed_accounts
-                            or self._account_comment_count.get(a.id, 0) >= comments_per_account
-                            or a.status in SKIP_ACCOUNT_STATUSES
-                            for a in accounts if a.id in self._clients
-                        )
-                        if all_exhausted:
-                            logger.warning("All accounts exhausted or blacklisted")
-                            termination_reason = "All accounts exhausted or blacklisted"
+                        if not self._has_recoverable_account_for_any_target(
+                            accounts,
+                            valid_targets,
+                            comments_per_account,
+                        ):
+                            logger.warning("All accounts exhausted or blacklisted for remaining targets")
+                            termination_reason = "All accounts exhausted or blacklisted for remaining targets"
                             break
-                        # Some accounts in flood-wait or rate-limited — wait and retry
                         if self._flood_wait_until:
                             earliest = min(self._flood_wait_until.values())
                             wait = max(1, earliest - time.monotonic())
@@ -1362,10 +1570,16 @@ class CommentsWorker:
                         continue
 
                     # Generate comment
-                    comment_text, is_ai = await self._generate_comment(
-                        config, comment_templates, db,
-                        post_text="", channel_title=target.channel_title or target.channel_username
-                    )
+                    try:
+                        comment_text, is_ai, template_key = await self._generate_comment(
+                            config, comment_templates, db,
+                            post_text="", channel_title=target.channel_title or target.channel_username
+                        )
+                    except UniqueCommentGenerationError as exc:
+                        logger.warning("Task %s: %s", self.task_id, exc)
+                        termination_reason = str(exc)
+                        task.last_error = termination_reason
+                        break
 
                     # Send comment
                     result = await self._send_comment(
@@ -1407,6 +1621,7 @@ class CommentsWorker:
                         completed += 1
                         task.completed_actions = completed
                         target.comments_sent += 1
+                        self._mark_comment_used(comment_text, template_key)
                         self._account_comment_count[account.id] = \
                             self._account_comment_count.get(account.id, 0) + 1
                         self._record_account_action(account.id)
@@ -1520,10 +1735,11 @@ class CommentsWorker:
         comments_per_account = config.get("comments_per_account", 10)
         account_index = 0
         handler_lock = asyncio.Lock()
+        stop_reason: Optional[str] = None
 
         @monitor_client.client.on(events.NewMessage(chats=channel_entities))
         async def handler(event):
-            nonlocal completed, account_index
+            nonlocal completed, account_index, stop_reason
 
             if cancel_event.is_set():
                 return
@@ -1570,18 +1786,38 @@ class CommentsWorker:
                 # Select commenting account
                 commenting_account = self._select_account(
                     accounts, rotation_mode, comments_per_account,
-                    account_index, chat.id, channel_username
+                    account_index,
+                    target_obj.id if target_obj else None,
+                    chat.id,
+                    channel_username,
                 )
                 account_index += 1
 
                 if not commenting_account:
-                    logger.warning("No available account for commenting")
+                    if not self._has_recoverable_account_for_any_target(
+                        accounts,
+                        valid_targets,
+                        comments_per_account,
+                    ):
+                        stop_reason = "All accounts exhausted or blacklisted for remaining targets"
+                        task.last_error = stop_reason
+                        db.commit()
+                        cancel_event.set()
+                    else:
+                        logger.warning("No available account for commenting")
                     return
 
-                comment_text, is_ai = await self._generate_comment(
-                    config, comment_templates, db,
-                    post_text=post_text, channel_title=channel_title
-                )
+                try:
+                    comment_text, is_ai, template_key = await self._generate_comment(
+                        config, comment_templates, db,
+                        post_text=post_text, channel_title=channel_title
+                    )
+                except UniqueCommentGenerationError as exc:
+                    stop_reason = str(exc)
+                    task.last_error = stop_reason
+                    db.commit()
+                    cancel_event.set()
+                    return
 
                 # Random delay before commenting
                 delay = random.uniform(task.min_delay, task.max_delay)
@@ -1617,6 +1853,7 @@ class CommentsWorker:
                     task.completed_actions = completed
                     if target_obj:
                         target_obj.comments_sent += 1
+                    self._mark_comment_used(comment_text, template_key)
                     self._account_comment_count[commenting_account.id] = \
                         self._account_comment_count.get(commenting_account.id, 0) + 1
                     self._record_account_action(commenting_account.id)
@@ -1671,7 +1908,11 @@ class CommentsWorker:
             # Remove event handler to prevent memory leak
             monitor_client.client.remove_event_handler(handler)
 
-        task.status = "completed" if completed >= task.total_actions else "cancelled"
+        if stop_reason:
+            task.status = "failed"
+            task.last_error = stop_reason
+        else:
+            task.status = "completed" if completed >= task.total_actions else "cancelled"
         task.completed_at = datetime.now(timezone.utc)
         db.commit()
         logger.info(f"Task {self.task_id} monitoring ended: {completed} comments sent")

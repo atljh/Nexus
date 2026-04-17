@@ -508,7 +508,11 @@ export default {
     create: 'Створити групу',
     name: 'Назва',
     namePlaceholder: 'Введіть назву групи',
+    manageHint: 'Створюйте, перейменовуйте та видаляйте групи в одному вікні.',
+    empty: 'Груп поки немає',
     created: 'Групу створено',
+    updated: 'Групу оновлено',
+    deleteConfirm: 'Видалити групу "{name}"?',
     deleted: 'Групу видалено'
   },
 
@@ -517,7 +521,11 @@ export default {
     create: 'Створити тег',
     name: 'Назва',
     namePlaceholder: 'Введіть назву тегу',
+    manageHint: 'Створюйте, перейменовуйте та видаляйте теги в одному вікні.',
+    empty: 'Тегів поки немає',
     created: 'Тег створено',
+    updated: 'Тег оновлено',
+    deleteConfirm: 'Видалити тег "{name}"?',
     deleted: 'Тег видалено'
   },
 
@@ -782,6 +790,7 @@ export default {
     },
     commentsPerAccount: 'Коментарів на акаунт',
     totalComments: 'Всього коментарів',
+    totalCommentsLimitHint: 'Максимум за поточними лімітами: {max}',
     concurrent: 'Паралельно акаунтів',
     limits: 'Ліміти',
     delay: 'Затримка між діями',
@@ -879,6 +888,8 @@ export default {
       invalidChannel: 'Невірний канал: {channel} (використовуйте @username, 5-32 символи)',
       templatesRequired: 'Оберіть або додайте хоча б один шаблон',
       accountsRequired: 'Оберіть хоча б один акаунт',
+      totalExceedsAccountLimit: 'Загальна кількість коментарів не може перевищувати {max} ({accounts} акаунтів × {perAccount} на акаунт)',
+      notEnoughUniqueComments: 'Недостатньо унікальних коментарів без дублів: потрібно {required}, доступно {available}',
       templateRequired: 'Заповніть назву та текст шаблону'
     },
     messages: {

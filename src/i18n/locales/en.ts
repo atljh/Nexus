@@ -508,7 +508,11 @@ export default {
     create: 'Create Group',
     name: 'Name',
     namePlaceholder: 'Enter group name',
+    manageHint: 'Create, rename, and delete groups from one dialog.',
+    empty: 'No groups yet',
     created: 'Group created',
+    updated: 'Group updated',
+    deleteConfirm: 'Delete group "{name}"?',
     deleted: 'Group deleted'
   },
 
@@ -517,7 +521,11 @@ export default {
     create: 'Create Tag',
     name: 'Name',
     namePlaceholder: 'Enter tag name',
+    manageHint: 'Create, rename, and delete tags from one dialog.',
+    empty: 'No tags yet',
     created: 'Tag created',
+    updated: 'Tag updated',
+    deleteConfirm: 'Delete tag "{name}"?',
     deleted: 'Tag deleted'
   },
 
@@ -782,6 +790,7 @@ export default {
     },
     commentsPerAccount: 'Comments Per Account',
     totalComments: 'Total Comments',
+    totalCommentsLimitHint: 'Maximum with current limits: {max}',
     concurrent: 'Parallel accounts',
     limits: 'Limits',
     delay: 'Delay between actions',
@@ -879,6 +888,8 @@ export default {
       invalidChannel: 'Invalid channel: {channel} (use @username, 5-32 characters)',
       templatesRequired: 'Select or add at least one template',
       accountsRequired: 'Select at least one account',
+      totalExceedsAccountLimit: 'Total comments cannot exceed {max} ({accounts} accounts × {perAccount} per account)',
+      notEnoughUniqueComments: 'Not enough unique comments without duplicates: need {required}, available {available}',
       templateRequired: 'Fill in template name and content'
     },
     messages: {

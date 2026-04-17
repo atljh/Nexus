@@ -27,6 +27,7 @@ from utils.comment_template_import import (
     parse_xlsx_comment_rows,
 )
 from workers.shared.account_safety import AccountSafetyValidator
+from workers.spintax import expand_spintax_variants
 
 router = APIRouter()
 DEFAULT_TEMPLATE_CATEGORY = "General"
@@ -45,6 +46,7 @@ WARMING_ACCOUNT_AGE_DELAY_FLOORS = [
 ]
 PUBLIC_USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9_]{5,32}$")
 NUMERIC_CHANNEL_PATTERN = re.compile(r"^-?\d+$")
+COMMENT_UNIQUENESS_VALIDATION_LIMIT = 2000
 
 
 def _normalize_category_value(value: Optional[str], fallback: str = DEFAULT_TEMPLATE_CATEGORY) -> str:
@@ -56,6 +58,53 @@ def _normalize_template_name_value(name: Optional[str], content: str) -> str:
     if normalized:
         return normalized[:100]
     return generate_template_name(content, "Comment")[:100]
+
+
+def _normalize_comment_text_key(value: str) -> str:
+    return " ".join((value or "").split()).casefold()
+
+
+def estimate_exact_unique_comment_capacity(
+    templates: List[str],
+    *,
+    limit: int = COMMENT_UNIQUENESS_VALIDATION_LIMIT,
+) -> Optional[int]:
+    """
+    Return the exact number of unique final comments when the pool is small enough.
+
+    Returns None when expansion would be too large to validate cheaply.
+    """
+    normalized_templates: list[str] = []
+    seen_templates: set[str] = set()
+    for template in templates:
+        cleaned = " ".join((template or "").split())
+        if not cleaned:
+            continue
+        key = _normalize_comment_text_key(cleaned)
+        if key in seen_templates:
+            continue
+        seen_templates.add(key)
+        normalized_templates.append(cleaned)
+
+    unique_comments: set[str] = set()
+    for template in normalized_templates:
+        expanded = expand_spintax_variants(template, limit=limit)
+        if expanded is None:
+            return None
+        for variant in expanded:
+            unique_comments.add(_normalize_comment_text_key(variant))
+            if len(unique_comments) > limit:
+                return None
+
+    return len(unique_comments)
+
+
+def calculate_comments_task_action_capacity(
+    account_count: int,
+    comments_per_account: int,
+) -> int:
+    """Return the maximum number of comments a task can physically send."""
+    return max(0, int(account_count)) * max(0, int(comments_per_account))
 
 
 def normalize_warming_target(value: str) -> str:
@@ -877,6 +926,32 @@ def create_comments_task(request: CreateCommentsTaskRequest, db: Session = Depen
         elif not ch.startswith("@") and not ch.lstrip("-").isdigit():
             ch = "@" + ch
         channels.append(ch)
+
+    comment_templates = request.config.templates or [t["content"] for t in DEFAULT_COMMENT_TEMPLATES]
+    max_actions = calculate_comments_task_action_capacity(
+        len(accounts),
+        request.config.comments_per_account,
+    )
+    if request.total_actions > max_actions:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Total actions exceed task capacity. "
+                f"Need {request.total_actions}, maximum {max_actions} "
+                f"({len(accounts)} accounts x {request.config.comments_per_account} comments per account)."
+            ),
+        )
+
+    if not request.config.ai_enabled:
+        exact_capacity = estimate_exact_unique_comment_capacity(comment_templates)
+        if exact_capacity is not None and request.total_actions > exact_capacity:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Not enough unique comment variants for this task. "
+                    f"Need {request.total_actions}, available {exact_capacity}."
+                ),
+            )
 
     # Build config with AI settings
     task_config = {

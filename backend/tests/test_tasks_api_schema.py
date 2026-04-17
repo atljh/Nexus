@@ -256,3 +256,29 @@ class TestWarmingHelpers:
             accounts = []
 
         assert normalize_updated_task_delays(StubTask(), 5000.0, 10.0) == (10.0, 3600.0)
+
+
+class TestCommentUniquenessCapacity:
+    def test_exact_capacity_counts_plain_unique_templates(self):
+        from api.tasks import estimate_exact_unique_comment_capacity
+
+        assert estimate_exact_unique_comment_capacity([
+            "First comment",
+            "Second comment",
+            "First comment",
+        ]) == 2
+
+    def test_exact_capacity_expands_small_spintax_pool(self):
+        from api.tasks import estimate_exact_unique_comment_capacity
+
+        assert estimate_exact_unique_comment_capacity([
+            "{A|B}",
+            "{B|C}",
+        ]) == 3
+
+    def test_comments_task_action_capacity(self):
+        from api.tasks import calculate_comments_task_action_capacity
+
+        assert calculate_comments_task_action_capacity(10, 3) == 30
+        assert calculate_comments_task_action_capacity(0, 3) == 0
+        assert calculate_comments_task_action_capacity(10, 0) == 0
