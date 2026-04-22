@@ -1150,7 +1150,13 @@ export default {
         accountUnavailableBeforeWarming: 'Account unavailable before warming started',
         allWarmingActionsFailed: 'All warming actions failed',
         noWarmingTargetsSpecified: 'No warming targets specified',
-        noValidWarmingTargetsFound: 'No valid warming targets found'
+        noValidWarmingTargetsFound: 'No valid warming targets found',
+        discussionGroupReady: 'Discussion group {id} ready',
+        discussionGroupJoinFailed: 'Discussion group join failed: {reason}',
+        discussionGroupId: 'Discussion group ID: {id}',
+        setupFailed: 'Setup failed',
+        channelBlacklistedFromPrevRun: 'Channel blacklisted from a previous run',
+        getFullChannelNoLinked: 'GetFullChannel returned no linked discussion group'
       }
     },
     time: {

@@ -1150,7 +1150,13 @@ export default {
         accountUnavailableBeforeWarming: 'Акаунт недоступний до початку прогріву',
         allWarmingActionsFailed: 'Усі дії прогріву завершилися невдачею',
         noWarmingTargetsSpecified: 'Не вказано цілі для прогріву',
-        noValidWarmingTargetsFound: 'Не знайдено жодної валідної цілі для прогріву'
+        noValidWarmingTargetsFound: 'Не знайдено жодної валідної цілі для прогріву',
+        discussionGroupReady: 'Група обговорення {id} готова',
+        discussionGroupJoinFailed: 'Не вдалося приєднатися до групи обговорення: {reason}',
+        discussionGroupId: 'ID групи обговорення: {id}',
+        setupFailed: 'Помилка налаштування',
+        channelBlacklistedFromPrevRun: 'Канал у чорному списку з попереднього запуску',
+        getFullChannelNoLinked: 'GetFullChannel не повернув ID групи обговорення'
       }
     },
     time: {

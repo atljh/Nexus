@@ -215,6 +215,9 @@ function translateLogText(text?: string | null): string {
     'All warming actions failed': 'taskResults.logs.translate.allWarmingActionsFailed',
     'No warming targets specified': 'taskResults.logs.translate.noWarmingTargetsSpecified',
     'No valid warming targets found': 'taskResults.logs.translate.noValidWarmingTargetsFound',
+    'Setup failed': 'taskResults.logs.translate.setupFailed',
+    'Channel blacklisted from a previous run': 'taskResults.logs.translate.channelBlacklistedFromPrevRun',
+    'GetFullChannel returned no linked_chat_id': 'taskResults.logs.translate.getFullChannelNoLinked',
   }
 
   const mappedKey = exactMap[value]
@@ -258,6 +261,21 @@ function translateLogText(text?: string | null): string {
   const reactionsUnavailableMatch = value.match(/^Requested reactions not available in channel\. Available: (.+)$/i)
   if (reactionsUnavailableMatch) {
     return t('taskResults.logs.translate.reactionsNotAvailable', { available: reactionsUnavailableMatch[1] })
+  }
+
+  const discussionGroupReadyMatch = value.match(/^Discussion group (\d+) ready$/i)
+  if (discussionGroupReadyMatch) {
+    return t('taskResults.logs.translate.discussionGroupReady', { id: discussionGroupReadyMatch[1] })
+  }
+
+  const discussionGroupJoinFailedMatch = value.match(/^Discussion group join failed:\s*(.+)$/i)
+  if (discussionGroupJoinFailedMatch) {
+    return t('taskResults.logs.translate.discussionGroupJoinFailed', { reason: discussionGroupJoinFailedMatch[1] })
+  }
+
+  const discussionGroupIdMatch = value.match(/^discussion_group_id=(\d+)$/i)
+  if (discussionGroupIdMatch) {
+    return t('taskResults.logs.translate.discussionGroupId', { id: discussionGroupIdMatch[1] })
   }
 
   return value

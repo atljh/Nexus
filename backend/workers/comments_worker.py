@@ -604,8 +604,7 @@ class CommentsWorker:
                     action_type="setup",
                     target=target.channel_username,
                     success=False,
-                    message="Skipped (blacklisted)",
-                    error="Channel blacklisted for this account from a previous run",
+                    message="Channel blacklisted from a previous run",
                 ))
                 continue
 
@@ -762,8 +761,8 @@ class CommentsWorker:
                             action_type="setup",
                             target=target.channel_username,
                             success=False,
-                            message="Cannot join discussion group",
-                            error=f"discussion_group={linked_chat_id}; {dg_error}",
+                            message=f"Discussion group join failed: {dg_error}",
+                            error=f"discussion_group_id={linked_chat_id}",
                         ))
                 else:
                     if not target.can_comment:
@@ -775,8 +774,8 @@ class CommentsWorker:
                         action_type="setup",
                         target=target.channel_username,
                         success=False,
-                        message="No discussion group",
-                        error=link_error or "GetFullChannel returned no linked_chat_id",
+                        message="No discussion group linked",
+                        error=link_error,
                     ))
 
             except ChannelPrivateError:
@@ -797,8 +796,7 @@ class CommentsWorker:
                     action_type="setup",
                     target=target.channel_username,
                     success=False,
-                    message="Channel private",
-                    error="ChannelPrivateError: invite link required",
+                    message="Private channel requires invite link",
                 ))
             except FloodWaitError as e:
                 logger.warning(f"Account {account_id}: FloodWait {e.seconds}s during setup — cooldown")
@@ -809,8 +807,7 @@ class CommentsWorker:
                     action_type="setup",
                     target=target.channel_username,
                     success=False,
-                    message=f"FloodWait {e.seconds}s",
-                    error=f"FloodWaitError: {e.seconds}s",
+                    message=f"FloodWait: {e.seconds}s",
                 ))
                 return ready
             except Exception as e:
