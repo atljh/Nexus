@@ -1318,10 +1318,14 @@ def restart_task(task_id: int, db: Session = Depends(get_db)):
     # Delete old logs
     db.query(TaskLog).filter(TaskLog.task_id == task_id).delete()
 
-    # Reset target channels for comments tasks
+    # Reset target channels for comments tasks. can_comment must be reset to
+    # False so the next setup pass re-validates discussion-group access — if
+    # it carries over from a previous successful run, a silent setup failure
+    # can't flip status off "joined", leaving valid_targets empty with no
+    # visible cause.
     if task.task_type == "comments":
         db.query(TargetChannel).filter(TargetChannel.task_id == task_id).update(
-            {"comments_sent": 0, "status": "pending", "error_message": None}
+            {"comments_sent": 0, "status": "pending", "error_message": None, "can_comment": False}
         )
 
     db.commit()
