@@ -25,7 +25,7 @@ from telethon.tl.functions.messages import (
     CheckChatInviteRequest,
     ImportChatInviteRequest,
 )
-from telethon.tl.types import ChatInviteAlready
+from telethon.tl.types import ChatInviteAlready, InputPeerSelf
 from telethon.errors import (
     FloodWaitError,
     ChannelPrivateError,
@@ -1152,11 +1152,15 @@ class CommentsWorker:
                     entity_title=target.channel_title,
                 )
 
-            # Send comment using comment_to (simpler than GetDiscussionMessageRequest)
+            # Send comment using comment_to (simpler than GetDiscussionMessageRequest).
+            # Force send_as=InputPeerSelf() so Telegram doesn't fall back to a non-self
+            # default identity that can't post in the discussion group (ChatWriteForbidden).
             sent = await client.client.send_message(
                 entity=entity,
                 message=comment,
                 comment_to=post_id,
+                send_as=InputPeerSelf(),
+                parse_mode=None,
             )
 
             return SendResult(
@@ -1241,6 +1245,8 @@ class CommentsWorker:
                                 entity=entity,
                                 message=comment,
                                 comment_to=post_id,
+                                send_as=InputPeerSelf(),
+                                parse_mode=None,
                             )
                             return SendResult(
                                 status=SendStatus.OK,

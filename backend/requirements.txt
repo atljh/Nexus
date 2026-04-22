@@ -4,7 +4,7 @@ uvicorn[standard]==0.34.0
 python-multipart==0.0.19
 
 # Telegram
-telethon==1.37.0
+telethon==1.42.0
 cryptg==0.4.0
 
 # Database
