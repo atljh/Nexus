@@ -469,28 +469,31 @@ class CommentsWorker:
             )
             return None
 
-    async def _get_linked_chat(self, account_id: int, entity: Any) -> Optional[int]:
+    async def _get_linked_chat(
+        self, account_id: int, entity: Any
+    ) -> Tuple[Optional[int], Optional[str]]:
         """Get linked discussion group ID for a channel.
-        Each account calls GetFullChannelRequest so Telethon caches the entity
-        (with access_hash) for that specific client."""
+        Returns (linked_chat_id, error). linked_chat_id is None when the channel
+        has no discussion group linked OR the API call failed; in the failure case
+        the error string describes the underlying cause for diagnostics."""
         entity_id = entity.id
         cache_key = (account_id, entity_id)
 
         # Only cache the numeric ID; each account needs its own GetFullChannelRequest
         # call to populate Telethon's internal entity cache for get_input_entity()
         if cache_key in self._linked_chat_cache:
-            return self._linked_chat_cache[cache_key]
+            return self._linked_chat_cache[cache_key], None
 
         client = self._clients[account_id]
         try:
             full = await client.client(GetFullChannelRequest(entity))
             linked_chat_id = full.full_chat.linked_chat_id
             self._linked_chat_cache[cache_key] = linked_chat_id
-            return linked_chat_id
+            return linked_chat_id, None
         except Exception as e:
-            logger.debug(f"Cannot get linked chat: {e}")
+            logger.warning(f"Account {account_id}: GetFullChannelRequest failed — {e}")
             self._linked_chat_cache[cache_key] = None
-            return None
+            return None, f"{type(e).__name__}: {str(e)[:200]}"
 
     async def _join_discussion_group(self, account_id: int, linked_chat_id: int) -> Tuple[bool, Optional[str]]:
         """Join the linked discussion group by ID.
@@ -718,7 +721,7 @@ class CommentsWorker:
                     )
 
                 # Get linked discussion group
-                linked_chat_id = await self._get_linked_chat(account_id, entity)
+                linked_chat_id, link_error = await self._get_linked_chat(account_id, entity)
 
                 if linked_chat_id:
                     # Join discussion group (required for commenting)
@@ -729,6 +732,14 @@ class CommentsWorker:
                         target.status = "joined"
                         target.error_message = None
                         ready += 1
+                        db.add(TaskLog(
+                            task_id=self.task_id,
+                            account_id=account_id,
+                            action_type="setup",
+                            target=target.channel_username,
+                            success=True,
+                            message=f"Discussion group {linked_chat_id} ready",
+                        ))
                     else:
                         logger.warning(
                             f"Account {account_id}: cannot join discussion group — {dg_error}"
@@ -736,10 +747,28 @@ class CommentsWorker:
                         if not target.can_comment:
                             target.status = "error"
                             target.error_message = f"Discussion group join failed: {dg_error}"
+                        db.add(TaskLog(
+                            task_id=self.task_id,
+                            account_id=account_id,
+                            action_type="setup",
+                            target=target.channel_username,
+                            success=False,
+                            message="Cannot join discussion group",
+                            error=f"discussion_group={linked_chat_id}; {dg_error}",
+                        ))
                 else:
                     if not target.can_comment:
                         target.status = "cannot_comment"
-                        target.error_message = "No discussion group linked"
+                        target.error_message = link_error or "No discussion group linked"
+                    db.add(TaskLog(
+                        task_id=self.task_id,
+                        account_id=account_id,
+                        action_type="setup",
+                        target=target.channel_username,
+                        success=False,
+                        message="No discussion group",
+                        error=link_error or "GetFullChannel returned no linked_chat_id",
+                    ))
 
             except ChannelPrivateError:
                 self._track_channel_membership(
@@ -753,9 +782,27 @@ class CommentsWorker:
                 if not target.can_comment:
                     target.status = "error"
                     target.error_message = "Private channel requires invite link"
+                db.add(TaskLog(
+                    task_id=self.task_id,
+                    account_id=account_id,
+                    action_type="setup",
+                    target=target.channel_username,
+                    success=False,
+                    message="Channel private",
+                    error="ChannelPrivateError: invite link required",
+                ))
             except FloodWaitError as e:
                 logger.warning(f"Account {account_id}: FloodWait {e.seconds}s during setup — cooldown")
                 self._flood_wait_until[account_id] = time.monotonic() + e.seconds
+                db.add(TaskLog(
+                    task_id=self.task_id,
+                    account_id=account_id,
+                    action_type="setup",
+                    target=target.channel_username,
+                    success=False,
+                    message=f"FloodWait {e.seconds}s",
+                    error=f"FloodWaitError: {e.seconds}s",
+                ))
                 return ready
             except Exception as e:
                 membership_status = self._membership_status_from_error(str(e)[:50])
@@ -773,6 +820,15 @@ class CommentsWorker:
                 if not target.can_comment:
                     target.status = "error"
                     target.error_message = str(e)[:200]
+                db.add(TaskLog(
+                    task_id=self.task_id,
+                    account_id=account_id,
+                    action_type="setup",
+                    target=target.channel_username,
+                    success=False,
+                    message="Setup failed",
+                    error=f"{type(e).__name__}: {str(e)[:200]}",
+                ))
 
         db.commit()
         return ready
@@ -1235,7 +1291,7 @@ class CommentsWorker:
             if ChatGuestSendForbiddenError and isinstance(e, ChatGuestSendForbiddenError):
                 # Need to join the linked discussion group first, then retry once.
                 logger.info(f"Account {account_id}: ChatGuestSendForbidden — joining discussion group and retrying")
-                linked_chat_id = await self._get_linked_chat(account_id, entity)
+                linked_chat_id, _ = await self._get_linked_chat(account_id, entity)
                 if linked_chat_id:
                     dg_joined, _ = await self._join_discussion_group(account_id, linked_chat_id)
                     if dg_joined:

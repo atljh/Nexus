@@ -153,7 +153,7 @@ async def test_setup_channels_public_flow_checks_subscription_and_joins(worker):
     worker._resolve_entity = AsyncMock(return_value=entity)
     worker._check_subscription = AsyncMock(return_value=(False, None))
     worker._join_channel = AsyncMock(return_value=(True, None))
-    worker._get_linked_chat = AsyncMock(return_value=999)
+    worker._get_linked_chat = AsyncMock(return_value=(999, None))
     worker._join_discussion_group = AsyncMock(return_value=(True, None))
     worker._track_channel_membership = MagicMock()
 
@@ -178,7 +178,7 @@ async def test_setup_channels_keeps_target_commentable_if_any_account_is_ready(w
     worker._clients[2] = MagicMock()
     worker._resolve_entity = AsyncMock(return_value=entity)
     worker._check_subscription = AsyncMock(return_value=(True, None))
-    worker._get_linked_chat = AsyncMock(return_value=999)
+    worker._get_linked_chat = AsyncMock(return_value=(999, None))
     worker._join_discussion_group = AsyncMock(side_effect=[(True, None), (False, "denied")])
     worker._track_channel_membership = MagicMock()
 
@@ -500,9 +500,10 @@ async def test_get_linked_chat_found(worker):
     worker._clients[1] = mock_client
     entity = make_entity(100)
 
-    linked = await worker._get_linked_chat(1, entity)
+    linked, err = await worker._get_linked_chat(1, entity)
 
     assert linked == 999
+    assert err is None
     assert worker._linked_chat_cache[(1, 100)] == 999
 
 
@@ -517,9 +518,10 @@ async def test_get_linked_chat_none(worker):
     worker._clients[1] = mock_client
     entity = make_entity(100)
 
-    linked = await worker._get_linked_chat(1, entity)
+    linked, err = await worker._get_linked_chat(1, entity)
 
     assert linked is None
+    assert err is None
     assert worker._linked_chat_cache[(1, 100)] is None
 
 
@@ -533,9 +535,10 @@ async def test_get_linked_chat_cached(worker):
     worker._linked_chat_cache[(1, 100)] = 999
 
     entity = make_entity(100)
-    linked = await worker._get_linked_chat(1, entity)
+    linked, err = await worker._get_linked_chat(1, entity)
 
     assert linked == 999
+    assert err is None
     mock_client.client.assert_not_called()
 
 
@@ -548,9 +551,11 @@ async def test_get_linked_chat_error_returns_none(worker):
     worker._clients[1] = mock_client
     entity = make_entity(100)
 
-    linked = await worker._get_linked_chat(1, entity)
+    linked, err = await worker._get_linked_chat(1, entity)
 
     assert linked is None
+    assert err is not None
+    assert "network error" in err
     assert worker._linked_chat_cache[(1, 100)] is None
 
 
@@ -1314,7 +1319,7 @@ async def test_setup_channels_with_discussion_group(worker):
 
     with patch.object(worker, '_resolve_entity', AsyncMock(return_value=entity)), \
          patch.object(worker, '_check_subscription', AsyncMock(return_value=(True, None))), \
-         patch.object(worker, '_get_linked_chat', AsyncMock(return_value=999)), \
+         patch.object(worker, '_get_linked_chat', AsyncMock(return_value=(999, None))), \
          patch.object(worker, '_join_discussion_group', AsyncMock(return_value=(True, None))):
 
         target = make_target(can_comment=False, status="pending")
@@ -1334,7 +1339,7 @@ async def test_setup_channels_no_discussion_group(worker):
 
     with patch.object(worker, '_resolve_entity', AsyncMock(return_value=entity)), \
          patch.object(worker, '_check_subscription', AsyncMock(return_value=(True, None))), \
-         patch.object(worker, '_get_linked_chat', AsyncMock(return_value=None)):
+         patch.object(worker, '_get_linked_chat', AsyncMock(return_value=(None, None))):
 
         target = make_target(can_comment=False, status="pending")
         db = MagicMock()
@@ -1361,7 +1366,7 @@ async def test_setup_channels_auto_join(worker):
     with patch.object(worker, '_resolve_entity', side_effect=mock_resolve), \
          patch.object(worker, '_check_subscription', AsyncMock(return_value=(False, None))), \
          patch.object(worker, '_join_channel', AsyncMock(return_value=(True, None))), \
-         patch.object(worker, '_get_linked_chat', AsyncMock(return_value=999)), \
+         patch.object(worker, '_get_linked_chat', AsyncMock(return_value=(999, None))), \
          patch.object(worker, '_join_discussion_group', AsyncMock(return_value=(True, None))):
 
         target = make_target(can_comment=False, status="pending")
