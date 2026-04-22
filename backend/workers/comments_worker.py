@@ -598,6 +598,15 @@ class CommentsWorker:
             self._mark_target_unready_for_account(account_id, target.id)
 
             if self._is_blacklisted_cached(account_id, target.channel_id, target.channel_username):
+                db.add(TaskLog(
+                    task_id=self.task_id,
+                    account_id=account_id,
+                    action_type="setup",
+                    target=target.channel_username,
+                    success=False,
+                    message="Skipped (blacklisted)",
+                    error="Channel blacklisted for this account from a previous run",
+                ))
                 continue
 
             try:

@@ -1327,6 +1327,27 @@ def restart_task(task_id: int, db: Session = Depends(get_db)):
         db.query(TargetChannel).filter(TargetChannel.task_id == task_id).update(
             {"comments_sent": 0, "status": "pending", "error_message": None, "can_comment": False}
         )
+        # Clear per-account blacklists for channels targeted by this task.
+        # Restart is the user saying "try again"; carrying over blacklist
+        # entries from a prior ChatWriteForbidden / BANNED causes the setup
+        # phase to silently skip those targets for every account, leaving
+        # valid_targets empty with "No commentable channels found" and no
+        # way to recover short of deleting the task.
+        account_ids = [a.id for a in task.accounts]
+        target_rows = db.query(TargetChannel).filter(TargetChannel.task_id == task_id).all()
+        channel_usernames = [t.channel_username for t in target_rows if t.channel_username]
+        channel_ids = [t.channel_id for t in target_rows if t.channel_id]
+        if account_ids and (channel_usernames or channel_ids):
+            blacklist_q = db.query(AccountBlacklist).filter(
+                AccountBlacklist.account_id.in_(account_ids)
+            )
+            conditions = []
+            if channel_usernames:
+                conditions.append(AccountBlacklist.channel_username.in_(channel_usernames))
+            if channel_ids:
+                conditions.append(AccountBlacklist.channel_id.in_(channel_ids))
+            from sqlalchemy import or_
+            blacklist_q.filter(or_(*conditions)).delete(synchronize_session=False)
 
     db.commit()
     db.refresh(task)
