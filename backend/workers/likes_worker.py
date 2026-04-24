@@ -556,8 +556,16 @@ class LikesWorker:
         entity = self._entities.get(account_id)
 
         if not entity:
+            logger.warning(
+                f"Account {account_id}: entity missing when sending reaction "
+                f"msg_id={msg_id} reaction={reaction!r}"
+            )
             return False, None, "Entity not resolved"
 
+        logger.debug(
+            f"Account {account_id}: SendReactionRequest msg_id={msg_id} "
+            f"reaction={reaction!r} peer_id={entity.id}"
+        )
         try:
             await client.client(SendReactionRequest(
                 peer=entity,
@@ -707,6 +715,7 @@ class LikesWorker:
             config = task.config
             channel = config.get("channel", "")
             post_id = config.get("post_id")
+            raw_channel = channel
             # Parse t.me links (e.g. https://t.me/channel/12345, t.me/c/ID/post, t.me/+HASH)
             channel, post_id, invite_hash = self._parse_channel(channel, post_id)
 
@@ -719,6 +728,12 @@ class LikesWorker:
                     m = re.match(r'(?:https?://)?t\.me/(?:\+|joinchat/)([a-zA-Z0-9_-]+)', invite_link)
                     if m:
                         invite_hash = m.group(1)
+
+            logger.debug(
+                f"Task {self.task_id}: parsed config raw_channel={raw_channel!r} "
+                f"channel={channel!r} post_id={post_id!r} "
+                f"invite_link={invite_link!r} invite_hash={invite_hash!r}"
+            )
 
             # Backward compat: old "reaction" (str) → new "reactions" (list)
             reactions = config.get("reactions")
@@ -754,8 +769,16 @@ class LikesWorker:
                 resolution_errors: list[str] = []
                 for account in accounts:
                     if account.id in self._failed_accounts:
+                        logger.debug(
+                            f"Task {self.task_id}: skip setup for account {account.id} "
+                            f"(in _failed_accounts)"
+                        )
                         continue
                     if account.id not in self._clients:
+                        logger.debug(
+                            f"Task {self.task_id}: skip setup for account {account.id} "
+                            f"(no client)"
+                        )
                         continue
 
                     # Delay between account setups to avoid mass-join detection
@@ -763,16 +786,31 @@ class LikesWorker:
                         await asyncio.sleep(random.uniform(1, 3))
                     setup_index += 1
 
+                    logger.debug(
+                        f"Account {account.id}: setup via "
+                        f"{'invite' if invite_hash else 'public'} flow"
+                    )
                     try:
                         if invite_hash:
                             # Invite link flow: join via hash, then resolve entity
                             joined, join_error, entity = await self._join_via_invite(
                                 account.id, invite_hash
                             )
+                            logger.debug(
+                                f"Account {account.id}: _join_via_invite → "
+                                f"joined={joined} error={join_error!r} "
+                                f"entity={type(entity).__name__ if entity else None}"
+                                f"{f' id={entity.id}' if entity is not None else ''}"
+                            )
                             entity = await self._resolve_entity_after_invite_join(
                                 account.id,
                                 channel,
                                 entity,
+                            )
+                            logger.debug(
+                                f"Account {account.id}: after _resolve_entity_after_invite_join "
+                                f"entity={type(entity).__name__ if entity else None}"
+                                f"{f' id={entity.id}' if entity is not None else ''}"
                             )
                             if not joined or not entity:
                                 failure_reason = join_error or "Channel entity could not be resolved after join"
@@ -956,6 +994,11 @@ class LikesWorker:
                 for a in accounts:
                     if a.id in self._flood_wait_until and a.id in self._clients and a.id not in active_ids:
                         active_ids.append(a.id)
+                logger.info(
+                    f"Task {self.task_id}: setup complete — active={len(active_ids)} "
+                    f"failed={len(self._failed_accounts)} flood_wait={len(self._flood_wait_until)} "
+                    f"entities_resolved={len(self._entities)}"
+                )
                 if not active_ids:
                     task.status = "failed"
                     unique_resolution_errors = {error for error in resolution_errors if error}
@@ -969,6 +1012,9 @@ class LikesWorker:
                 # Phase 3: Check available reactions (using first active account)
                 first_id = active_ids[0]
                 available = await self._get_available_reactions(first_id, self._entities[first_id])
+                logger.debug(
+                    f"Task {self.task_id}: available reactions via account {first_id} = {available!r}"
+                )
                 if available is not None and len(available) == 0:
                     task.status = "failed"
                     task.last_error = "Reactions are disabled in this channel"
@@ -976,6 +1022,10 @@ class LikesWorker:
                     return
 
                 filtered_reactions = self._filter_reactions(reactions, available)
+                logger.debug(
+                    f"Task {self.task_id}: requested reactions={reactions} → "
+                    f"filtered={filtered_reactions} emoji_mode={emoji_mode}"
+                )
                 if not filtered_reactions:
                     task.status = "failed"
                     task.last_error = f"Requested reactions not available in channel. Available: {available}"
@@ -1002,6 +1052,12 @@ class LikesWorker:
                 done_accounts: set = set()  # accounts that already reacted
                 termination_reason: Optional[str] = None
                 db_lock = asyncio.Lock()
+                logger.info(
+                    f"Task {self.task_id}: entering reaction loop with post_id={post_id} "
+                    f"total_actions={task.total_actions} starting "
+                    f"completed={completed} failed={failed}"
+                )
+                empty_batch_ticks = 0
 
                 async def _process_account_reaction(account_id: int, emoji: str):
                     """Send reaction for a single account. Returns (account_id, success)."""
@@ -1097,6 +1153,27 @@ class LikesWorker:
                             logger.info(f"Task {self.task_id}: all accounts exhausted")
                             termination_reason = "All eligible accounts exhausted before reaching total actions"
                             break
+                        # Log WHY batch is empty (throttled: first few ticks, then every ~5 min).
+                        empty_batch_ticks += 1
+                        if empty_batch_ticks <= 3 or empty_batch_ticks % 5 == 0:
+                            reasons: Dict[str, int] = {}
+                            for aid in active_ids:
+                                if aid in self._failed_accounts:
+                                    reasons["failed"] = reasons.get("failed", 0) + 1
+                                elif aid in done_accounts:
+                                    reasons["done"] = reasons.get("done", 0) + 1
+                                elif aid in self._flood_wait_until:
+                                    reasons["flood_wait"] = reasons.get("flood_wait", 0) + 1
+                                elif self._is_account_rate_limited(aid):
+                                    reasons["rate_limited"] = reasons.get("rate_limited", 0) + 1
+                                else:
+                                    reasons["eligible_but_missed"] = (
+                                        reasons.get("eligible_but_missed", 0) + 1
+                                    )
+                            logger.info(
+                                f"Task {self.task_id}: empty batch (tick {empty_batch_ticks}) "
+                                f"active={len(active_ids)} breakdown={reasons}"
+                            )
                         # Some accounts may be in flood-wait cooldown or rate-limited — wait and retry
                         if self._flood_wait_until:
                             # Wait until earliest cooldown expires
@@ -1108,6 +1185,7 @@ class LikesWorker:
                             logger.info("All accounts rate-limited, cooling down 60s")
                             await asyncio.sleep(60)
                         continue
+                    empty_batch_ticks = 0
 
                     # Send reactions for the whole batch in parallel
                     tasks_list = []
