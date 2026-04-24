@@ -12,12 +12,16 @@ from datetime import datetime, timezone
 
 from database.database import init_db, SessionLocal
 from api.router import api_router
+from utils.logging_config import setup_logging
 from utils.task_recovery import reconcile_stale_active_tasks
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    log_file = setup_logging()
+    print(f"[Backend] File logging: {log_file}")
+
     await init_db()
     print("[Backend] Database initialized")
 

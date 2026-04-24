@@ -485,13 +485,22 @@ class CommentsWorker:
             return self._linked_chat_cache[cache_key], None
 
         client = self._clients[account_id]
+        logger.debug(
+            f"Account {account_id}: GetFullChannelRequest for channel_id={entity_id}"
+        )
         try:
             full = await client.client(GetFullChannelRequest(entity))
             linked_chat_id = full.full_chat.linked_chat_id
             self._linked_chat_cache[cache_key] = linked_chat_id
+            logger.debug(
+                f"Account {account_id}: channel {entity_id} linked_chat_id={linked_chat_id!r}"
+            )
             return linked_chat_id, None
         except Exception as e:
-            logger.warning(f"Account {account_id}: GetFullChannelRequest failed — {e}")
+            logger.warning(
+                f"Account {account_id}: GetFullChannelRequest failed for channel {entity_id} — "
+                f"{type(e).__name__}: {e}"
+            )
             self._linked_chat_cache[cache_key] = None
             return None, f"{type(e).__name__}: {str(e)[:200]}"
 
@@ -499,25 +508,41 @@ class CommentsWorker:
         """Join the linked discussion group by ID.
         Relies on Telethon's internal entity cache (populated by prior GetFullChannelRequest)."""
         client = self._clients[account_id]
+        logger.debug(
+            f"Account {account_id}: joining discussion group {linked_chat_id}"
+        )
         try:
             # Resolve via Telethon's cache (populated by GetFullChannelRequest in _get_linked_chat)
             try:
                 input_entity = await client.client.get_input_entity(linked_chat_id)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError) as e:
+                logger.debug(
+                    f"Account {account_id}: get_input_entity({linked_chat_id}) "
+                    f"missed cache ({type(e).__name__}), falling back to get_entity"
+                )
                 # Fallback: try get_entity
                 try:
                     input_entity = await client.client.get_entity(linked_chat_id)
-                except Exception:
-                    logger.warning(f"Account {account_id}: cannot resolve discussion group {linked_chat_id}")
+                except Exception as e2:
+                    logger.warning(
+                        f"Account {account_id}: cannot resolve discussion group {linked_chat_id} — "
+                        f"{type(e2).__name__}: {e2}"
+                    )
                     return False, f"Cannot resolve group {linked_chat_id}"
 
             try:
                 await client.client(GetParticipantRequest(input_entity, "me"))
+                logger.debug(
+                    f"Account {account_id}: already a member of discussion group {linked_chat_id}"
+                )
                 return True, None  # Already joined
             except UserNotParticipantError:
                 pass  # Need to join
-            except Exception:
-                pass  # Can't check — try joining anyway
+            except Exception as e:
+                logger.debug(
+                    f"Account {account_id}: membership check for discussion group {linked_chat_id} "
+                    f"failed ({type(e).__name__}: {e}), attempting join anyway"
+                )
 
             await client.client(JoinChannelRequest(input_entity))
             logger.info(f"Account {account_id}: joined discussion group {linked_chat_id}")
@@ -525,7 +550,10 @@ class CommentsWorker:
         except FloodWaitError:
             raise
         except Exception as e:
-            logger.warning(f"Account {account_id}: discussion group {linked_chat_id} join error: {e}")
+            logger.warning(
+                f"Account {account_id}: discussion group {linked_chat_id} join error — "
+                f"{type(e).__name__}: {e}"
+            )
             return False, str(e)[:50]
 
     # ── AI Service ──
@@ -593,8 +621,17 @@ class CommentsWorker:
     ) -> int:
         """Setup all channels for a single account: resolve, join, get discussion group.
         Returns number of channels ready for commenting."""
+        logger.debug(
+            f"Account {account_id}: setup start, targets={len(targets)} "
+            f"({[t.channel_username for t in targets]})"
+        )
         ready = 0
         for target in targets:
+            logger.debug(
+                f"Account {account_id}: setup target id={target.id} "
+                f"username={target.channel_username!r} status={target.status!r} "
+                f"can_comment={target.can_comment}"
+            )
             self._mark_target_unready_for_account(account_id, target.id)
 
             if self._is_blacklisted_cached(account_id, target.channel_id, target.channel_username):
@@ -837,6 +874,9 @@ class CommentsWorker:
                 ))
 
         db.commit()
+        logger.debug(
+            f"Account {account_id}: setup done, ready={ready}/{len(targets)}"
+        )
         return ready
 
     # ── Account Selection (blacklist) ──
@@ -1517,13 +1557,33 @@ class CommentsWorker:
             try:
                 # Phase 2: Initialize target channels in DB
                 target_channels = await self._init_target_channels(db, task, channels)
+                logger.debug(
+                    f"Task {self.task_id}: target_channels initialized, count={len(target_channels)} "
+                    f"usernames={[t.channel_username for t in target_channels]}"
+                )
 
                 # Phase 3: Setup channels for each account (resolve, join, discussion group)
+                eligible_account_ids = [
+                    a.id for a in accounts
+                    if a.id in self._clients and a.id not in self._failed_accounts
+                ]
+                logger.debug(
+                    f"Task {self.task_id}: setup phase eligible accounts "
+                    f"{len(eligible_account_ids)}/{len(accounts)} — {eligible_account_ids}"
+                )
                 setup_index = 0
                 for account in accounts:
                     if account.id in self._failed_accounts:
+                        logger.debug(
+                            f"Task {self.task_id}: skip setup for account {account.id} "
+                            f"(in _failed_accounts)"
+                        )
                         continue
                     if account.id not in self._clients:
+                        logger.debug(
+                            f"Task {self.task_id}: skip setup for account {account.id} "
+                            f"(no client)"
+                        )
                         continue
 
                     # Delay between account setups to avoid mass-join detection
@@ -1534,7 +1594,18 @@ class CommentsWorker:
                     await self._setup_channels_for_account(account.id, target_channels, db)
 
                 # Check we have commentable channels
+                for t in target_channels:
+                    logger.debug(
+                        f"Task {self.task_id}: target {t.channel_username!r} "
+                        f"status={t.status!r} can_comment={t.can_comment} "
+                        f"error={t.error_message!r}"
+                    )
                 valid_targets = [t for t in target_channels if t.can_comment and t.status == "joined"]
+                logger.info(
+                    f"Task {self.task_id}: setup complete — valid_targets="
+                    f"{[t.channel_username for t in valid_targets]} "
+                    f"(out of {len(target_channels)})"
+                )
                 if not valid_targets:
                     task.status = "failed"
                     task.last_error = "No commentable channels found (no discussion groups linked)"
