@@ -740,7 +740,7 @@ export default {
     },
     errors: {
       channelRequired: 'Please enter a channel',
-      invalidChannel: 'Invalid channel format (use @username, 5-32 characters)',
+      invalidChannel: "Invalid channel format (use {'@'}username, 5-32 characters)",
       reactionsRequired: 'Select at least one reaction',
       accountsRequired: 'Select at least one account'
     },
@@ -885,7 +885,7 @@ export default {
     },
     errors: {
       channelsRequired: 'Add at least one channel',
-      invalidChannel: 'Invalid channel: {channel} (use @username, 5-32 characters)',
+      invalidChannel: "Invalid channel: {channel} (use {'@'}username, 5-32 characters)",
       templatesRequired: 'Select or add at least one template',
       accountsRequired: 'Select at least one account',
       totalExceedsAccountLimit: 'Total comments cannot exceed {max} ({accounts} accounts × {perAccount} per account)',
@@ -950,9 +950,9 @@ export default {
     savedChannelsPlaceholder: 'Select saved channels',
     addSavedChannels: 'Add saved',
     savedChannelsHint: 'Private channels use the saved invite link by default, so you do not need to paste it every time.',
-    targetsPlaceholder: '@publicchannel\nhttps://t.me/publicchannel\nhttps://t.me/+privateInviteHash',
+    targetsPlaceholder: "{'@'}publicchannel\nhttps://t.me/publicchannel\nhttps://t.me/+privateInviteHash",
     targetsCount: '{count} targets',
-    supportedFormats: 'Supports public @username/t.me links and private invite links',
+    supportedFormats: "Supports public {'@'}username/t.me links and private invite links",
     invalidTargets: '{count} lines were ignored as invalid',
     duplicateTargets: '{count} duplicate targets were merged',
     delayTitle: 'Delay between joins',
@@ -1001,9 +1001,9 @@ export default {
     form: {
       createTitle: 'Save channel',
       editTitle: 'Edit channel',
-      hint: 'Paste a public @username/t.me link, a private -100 ID, or an invite link once.',
+      hint: "Paste a public {'@'}username/t.me link, a private -100 ID, or an invite link once.",
       target: 'Channel target',
-      targetPlaceholder: '@channel, -1001234567890 or https://t.me/c/1234567890',
+      targetPlaceholder: "{'@'}channel, -1001234567890 or https://t.me/c/1234567890",
       inviteLink: 'Invite link',
       invitePlaceholder: 'https://t.me/+XXXXX',
       title: 'Title',

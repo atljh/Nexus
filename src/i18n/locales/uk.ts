@@ -740,7 +740,7 @@ export default {
     },
     errors: {
       channelRequired: 'Вкажіть канал',
-      invalidChannel: 'Невірний формат каналу (використовуйте @username, 5-32 символи)',
+      invalidChannel: "Невірний формат каналу (використовуйте {'@'}username, 5-32 символи)",
       reactionsRequired: 'Оберіть хоча б одну реакцію',
       accountsRequired: 'Оберіть хоча б один акаунт'
     },
@@ -885,7 +885,7 @@ export default {
     },
     errors: {
       channelsRequired: 'Додайте хоча б один канал',
-      invalidChannel: 'Невірний канал: {channel} (використовуйте @username, 5-32 символи)',
+      invalidChannel: "Невірний канал: {channel} (використовуйте {'@'}username, 5-32 символи)",
       templatesRequired: 'Оберіть або додайте хоча б один шаблон',
       accountsRequired: 'Оберіть хоча б один акаунт',
       totalExceedsAccountLimit: 'Загальна кількість коментарів не може перевищувати {max} ({accounts} акаунтів × {perAccount} на акаунт)',
@@ -950,9 +950,9 @@ export default {
     savedChannelsPlaceholder: 'Оберіть збережені канали',
     addSavedChannels: 'Додати збережені',
     savedChannelsHint: 'Для приватних каналів за замовчуванням використовується збережене інвайт-посилання, тому його не потрібно вставляти щоразу.',
-    targetsPlaceholder: '@publicchannel\nhttps://t.me/publicchannel\nhttps://t.me/+privateInviteHash',
+    targetsPlaceholder: "{'@'}publicchannel\nhttps://t.me/publicchannel\nhttps://t.me/+privateInviteHash",
     targetsCount: '{count} цілей',
-    supportedFormats: 'Підтримуються публічні @username/t.me-посилання та приватні інвайт-посилання',
+    supportedFormats: "Підтримуються публічні {'@'}username/t.me-посилання та приватні інвайт-посилання",
     invalidTargets: '{count} рядків проігноровано як невалідні',
     duplicateTargets: '{count} дублікатів об’єднано',
     delayTitle: 'Затримка між вступами',
@@ -1001,9 +1001,9 @@ export default {
     form: {
       createTitle: 'Зберегти канал',
       editTitle: 'Редагувати канал',
-      hint: 'Вставте публічний @username/t.me-лінк, приватний -100 ID або інвайт-посилання один раз.',
+      hint: "Вставте публічний {'@'}username/t.me-лінк, приватний -100 ID або інвайт-посилання один раз.",
       target: 'Ціль каналу',
-      targetPlaceholder: '@channel, -1001234567890 або https://t.me/c/1234567890',
+      targetPlaceholder: "{'@'}channel, -1001234567890 або https://t.me/c/1234567890",
       inviteLink: 'Інвайт-посилання',
       invitePlaceholder: 'https://t.me/+XXXXX',
       title: 'Назва',
