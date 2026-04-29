@@ -61,6 +61,10 @@ class BaseClient:
         system_lang_code: Optional[str] = None,
         unique_id: Optional[str] = None,  # For consistent fingerprint generation
         receive_updates: bool = True,
+        # Raise FloodWaitError instead of letting Telethon silently sleep through it.
+        # Default 0 = always raise so callers can route the account to flood_wait state
+        # rather than blocking sequential setup loops.
+        flood_sleep_threshold: int = 0,
     ):
         self.session_string = session_string
         self.api_id = api_id or self.DEFAULT_API_ID
@@ -71,6 +75,7 @@ class BaseClient:
         self.request_retries = request_retries
         self.timeout = timeout
         self.receive_updates = receive_updates
+        self.flood_sleep_threshold = flood_sleep_threshold
 
         # Generate device fingerprint if not provided
         self._setup_device_fingerprint(
@@ -151,6 +156,7 @@ class BaseClient:
             # Raise actual last error instead of generic "Request unsuccessful N times"
             raise_last_call_error=True,
             receive_updates=self.receive_updates,
+            flood_sleep_threshold=self.flood_sleep_threshold,
         )
         if self.device_model:
             kwargs["device_model"] = self.device_model

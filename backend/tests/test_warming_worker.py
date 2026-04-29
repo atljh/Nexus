@@ -95,7 +95,7 @@ async def test_wait_after_account_skips_last_account_delay():
 @pytest.mark.asyncio
 async def test_warm_single_target_invite_success():
     worker = WarmingWorker(task_id=1)
-    worker._join_via_invite = AsyncMock(return_value=(True, None, None))
+    worker._join_via_invite = AsyncMock(return_value=(True, None, None, True))
     worker._resolve_entity_after_invite_join = AsyncMock(return_value=None)
 
     success, message, error, entity, invite_link = await worker._warm_single_target(1, "https://t.me/+abc123")

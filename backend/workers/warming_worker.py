@@ -248,7 +248,7 @@ class WarmingWorker(LikesWorker):
     ) -> tuple[bool, Optional[str], Optional[str], Any, Optional[str]]:
         invite_hash = self._extract_invite_hash(target)
         if invite_hash:
-            joined, join_error, entity = await self._join_via_invite(account_id, invite_hash)
+            joined, join_error, entity, _ = await self._join_via_invite(account_id, invite_hash)
             entity = await self._resolve_entity_after_invite_join(account_id, target, entity)
             if joined:
                 return True, "Joined via invite link", None, entity, target

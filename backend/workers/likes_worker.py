@@ -191,6 +191,23 @@ class LikesWorker:
             extra_data=extra_data,
         ))
 
+    def _record_setup_success_log(
+        self,
+        db: Session,
+        account_id: int,
+        target: Optional[str],
+        message: str,
+    ) -> None:
+        db.add(TaskLog(
+            task_id=self.task_id,
+            account_id=account_id,
+            action_type="setup",
+            target=target,
+            success=True,
+            message=message,
+            error=None,
+        ))
+
     @staticmethod
     def _membership_status_from_error(error: Optional[str]) -> Optional[str]:
         if not error:
@@ -434,48 +451,54 @@ class LikesWorker:
         except Exception as e:
             return False, f"Join failed: {str(e)[:50]}"
 
-    async def _join_via_invite(self, account_id: int, invite_hash: str) -> Tuple[bool, Optional[str], Any]:
-        """Join channel via invite hash. Returns (success, error, entity)."""
+    async def _join_via_invite(
+        self, account_id: int, invite_hash: str
+    ) -> Tuple[bool, Optional[str], Any, bool]:
+        """Join channel via invite hash.
+
+        Returns (success, error, entity, joined_now). joined_now is True only when
+        ImportChatInviteRequest actually executed; False if account was already a member.
+        """
         client = self._clients[account_id]
         try:
             # Check if already a member
             invite_info = await client.client(CheckChatInviteRequest(hash=invite_hash))
             if isinstance(invite_info, ChatInviteAlready):
-                return True, None, invite_info.chat
+                return True, None, invite_info.chat, False
         except Exception:
             pass
 
         try:
             updates = await client.client(ImportChatInviteRequest(hash=invite_hash))
             entity = updates.chats[0] if updates.chats else None
-            return True, None, entity
+            return True, None, entity, True
         except UserAlreadyParticipantError:
             # Already in, re-check to get entity
             try:
                 invite_info = await client.client(CheckChatInviteRequest(hash=invite_hash))
                 if isinstance(invite_info, ChatInviteAlready):
-                    return True, None, invite_info.chat
+                    return True, None, invite_info.chat, False
             except Exception:
                 pass
-            return True, None, None
+            return True, None, None, False
         except InviteHashExpiredError:
-            return False, "Invite link expired", None
+            return False, "Invite link expired", None, False
         except InviteHashInvalidError:
-            return False, "Invite link invalid", None
+            return False, "Invite link invalid", None, False
         except ChannelPrivateError:
-            return False, "Channel is private, cannot join", None
+            return False, "Channel is private, cannot join", None, False
         except UserBannedInChannelError:
-            return False, "Account banned in channel", None
+            return False, "Account banned in channel", None, False
         except ChannelsTooMuchError:
-            return False, "Account joined too many channels", None
+            return False, "Account joined too many channels", None, False
         except FloodWaitError:
             raise
         except Exception as e:
             err_str = str(e).lower()
             # InviteRequestSentError — channel requires admin approval
             if "inviterequestsent" in err_str or "request" in err_str and "sent" in err_str:
-                return False, "Join request sent, awaiting admin approval", None
-            return False, f"Join via invite failed: {str(e)[:50]}", None
+                return False, "Join request sent, awaiting admin approval", None, False
+            return False, f"Join via invite failed: {str(e)[:50]}", None, False
 
     @staticmethod
     def _is_invite_target(value: Optional[str]) -> bool:
@@ -765,8 +788,11 @@ class LikesWorker:
 
             try:
                 # Phase 2: Resolve entity + check subscription + auto-join for each account
-                setup_index = 0
                 resolution_errors: list[str] = []
+                setup_progress = 0
+                setup_total = len(accounts)
+                setup_start = time.monotonic()
+                last_progress_log = setup_start
                 for account in accounts:
                     if account.id in self._failed_accounts:
                         logger.debug(
@@ -781,19 +807,34 @@ class LikesWorker:
                         )
                         continue
 
-                    # Delay between account setups to avoid mass-join detection
-                    if setup_index > 0:
-                        await asyncio.sleep(random.uniform(1, 3))
-                    setup_index += 1
+                    setup_progress += 1
+                    # Periodic INFO progress so file logs show liveness during long setups.
+                    # Logs every 25 accounts OR every 60s of wall time, whichever comes first.
+                    now = time.monotonic()
+                    if (
+                        setup_progress == 1
+                        or setup_progress % 25 == 0
+                        or now - last_progress_log >= 60
+                    ):
+                        elapsed = now - setup_start
+                        rate = setup_progress / elapsed if elapsed > 0 else 0
+                        logger.info(
+                            f"Task {self.task_id}: setup progress "
+                            f"{setup_progress}/{setup_total} "
+                            f"(elapsed={elapsed:.0f}s, rate={rate:.2f}/s, "
+                            f"flood_wait={len(self._flood_wait_until)})"
+                        )
+                        last_progress_log = now
 
                     logger.debug(
                         f"Account {account.id}: setup via "
                         f"{'invite' if invite_hash else 'public'} flow"
                     )
+                    did_join = False
                     try:
                         if invite_hash:
                             # Invite link flow: join via hash, then resolve entity
-                            joined, join_error, entity = await self._join_via_invite(
+                            joined, join_error, entity, did_join = await self._join_via_invite(
                                 account.id, invite_hash
                             )
                             logger.debug(
@@ -847,7 +888,17 @@ class LikesWorker:
                                 invite_link=invite_link or channel,
                                 entity=entity,
                             )
-                            await asyncio.sleep(random.uniform(2, 5))
+                            self._record_setup_success_log(
+                                db,
+                                account.id,
+                                channel,
+                                "Joined via invite link" if did_join else "Already subscribed",
+                            )
+                            db.commit()
+                            # Anti-detection delay only when an actual join happened.
+                            # Already-member accounts have no detection risk to spread out.
+                            if did_join:
+                                await asyncio.sleep(random.uniform(2, 5))
                         else:
                             # Public / numeric ID channel flow
                             entity = None
@@ -885,6 +936,7 @@ class LikesWorker:
                                 is_subscribed = False
 
                             if not is_subscribed:
+                                did_join = True
                                 joined, join_error = await self._join_channel(account.id, entity, channel)
                                 if not joined:
                                     failure_reason = join_error or "Join failed"
@@ -924,8 +976,18 @@ class LikesWorker:
                                 invite_link=invite_link or None,
                                 entity=entity,
                             )
+                            self._record_setup_success_log(
+                                db,
+                                account.id,
+                                channel,
+                                "Joined channel" if did_join else "Already subscribed",
+                            )
+                            db.commit()
 
-                            await asyncio.sleep(random.uniform(2, 5))
+                            # Anti-detection delay only when an actual join happened.
+                            # Already-member accounts have no detection risk to spread out.
+                            if did_join:
+                                await asyncio.sleep(random.uniform(2, 5))
 
                     except ChannelPrivateError:
                         failure_reason = "Private channel requires invite link"
@@ -1059,6 +1121,37 @@ class LikesWorker:
                 )
                 empty_batch_ticks = 0
 
+                async def _ensure_entity_resolved(account_id: int) -> Optional[str]:
+                    """Lazy entity resolve for accounts that missed setup (e.g. FloodWait).
+
+                    Returns None on success (entity available), or an error string for the
+                    caller to skip this account this tick. On FloodWait, the account is
+                    re-cooldowned via _flood_wait_until and tried again later.
+                    """
+                    if account_id in self._entities:
+                        return None
+                    try:
+                        if invite_hash:
+                            joined, join_err, ent, _ = await self._join_via_invite(
+                                account_id, invite_hash
+                            )
+                            ent = await self._resolve_entity_after_invite_join(
+                                account_id, channel, ent
+                            )
+                            if not joined or not ent:
+                                self._failed_accounts.add(account_id)
+                                return join_err or "Channel entity could not be resolved"
+                            self._entities[account_id] = ent
+                        else:
+                            await self._resolve_entity(account_id, channel)
+                        return None
+                    except FloodWaitError as e:
+                        self._flood_wait_until[account_id] = time.monotonic() + e.seconds
+                        return f"FloodWait: {e.seconds}s"
+                    except Exception as e:
+                        self._failed_accounts.add(account_id)
+                        return f"Resolve failed: {str(e)[:100]}"
+
                 async def _process_account_reaction(account_id: int, emoji: str):
                     """Send reaction for a single account. Returns (account_id, success)."""
                     nonlocal completed, failed
@@ -1142,6 +1235,14 @@ class LikesWorker:
                             and aid not in self._flood_wait_until
                             and not self._is_account_rate_limited(aid)
                         ):
+                            # Lazy entity resolve. For most accounts setup already
+                            # populated _entities, so this is a cheap dict check.
+                            # Only accounts that hit FloodWait/error during setup
+                            # (their cooldown has now expired) actually do a resolve.
+                            if aid not in self._entities:
+                                err = await _ensure_entity_resolved(aid)
+                                if err is not None:
+                                    continue
                             batch.append(aid)
 
                     if not batch:
