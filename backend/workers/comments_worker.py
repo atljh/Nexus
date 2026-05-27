@@ -25,7 +25,7 @@ from telethon.tl.functions.messages import (
     CheckChatInviteRequest,
     ImportChatInviteRequest,
 )
-from telethon.tl.types import ChatInviteAlready, InputPeerSelf
+from telethon.tl.types import ChatInviteAlready, InputPeerSelf, InputChannel
 from telethon.errors import (
     FloodWaitError,
     ChannelPrivateError,
@@ -102,7 +102,10 @@ class CommentsWorker:
         self._entities: Dict[Tuple[int, str], Any] = {}  # (account_id, channel) -> entity
         self._failed_accounts: set = set()
         self._flood_wait_until: Dict[int, float] = {}  # account_id -> monotonic timestamp when cooldown expires
-        self._linked_chat_cache: Dict[int, Optional[int]] = {}  # channel_entity_id -> linked_chat_id
+        # (account_id, channel_entity_id) -> (linked_chat_id, InputChannel or None)
+        self._linked_chat_cache: Dict[Tuple[int, int], Tuple[Optional[int], Optional[InputChannel]]] = {}
+        # target_id -> {cause: count, last_<cause>_error: str}
+        self._setup_outcomes: Dict[int, Dict[str, Any]] = {}
         self._account_comment_count: Dict[int, int] = {}
         self._account_action_times: Dict[int, list] = {}  # account_id -> list of timestamps
         self._blacklist_cache: Set[Tuple[int, str]] = set()
@@ -473,16 +476,21 @@ class CommentsWorker:
         self, account_id: int, entity: Any
     ) -> Tuple[Optional[int], Optional[str]]:
         """Get linked discussion group ID for a channel.
+
         Returns (linked_chat_id, error). linked_chat_id is None when the channel
         has no discussion group linked OR the API call failed; in the failure case
-        the error string describes the underlying cause for diagnostics."""
+        the error string describes the underlying cause for diagnostics.
+
+        Side effect: caches an InputChannel built from full.chats so that
+        _join_discussion_group can resolve the discussion group reliably without
+        relying on Telethon's internal entity cache (which is fragile across
+        request boundaries for newly-fetched channels)."""
         entity_id = entity.id
         cache_key = (account_id, entity_id)
 
-        # Only cache the numeric ID; each account needs its own GetFullChannelRequest
-        # call to populate Telethon's internal entity cache for get_input_entity()
         if cache_key in self._linked_chat_cache:
-            return self._linked_chat_cache[cache_key], None
+            cached_id, _ = self._linked_chat_cache[cache_key]
+            return cached_id, None
 
         client = self._clients[account_id]
         logger.debug(
@@ -491,9 +499,20 @@ class CommentsWorker:
         try:
             full = await client.client(GetFullChannelRequest(entity))
             linked_chat_id = full.full_chat.linked_chat_id
-            self._linked_chat_cache[cache_key] = linked_chat_id
+
+            input_dg: Optional[InputChannel] = None
+            if linked_chat_id:
+                input_dg = self._build_input_channel_from_full(full, linked_chat_id)
+                if input_dg is None:
+                    logger.debug(
+                        f"Account {account_id}: linked_chat_id={linked_chat_id} present but "
+                        f"no matching access_hash in full.chats — fallback resolution will be used"
+                    )
+
+            self._linked_chat_cache[cache_key] = (linked_chat_id, input_dg)
             logger.debug(
-                f"Account {account_id}: channel {entity_id} linked_chat_id={linked_chat_id!r}"
+                f"Account {account_id}: channel {entity_id} linked_chat_id={linked_chat_id!r} "
+                f"input_dg_cached={input_dg is not None}"
             )
             return linked_chat_id, None
         except Exception as e:
@@ -501,41 +520,94 @@ class CommentsWorker:
                 f"Account {account_id}: GetFullChannelRequest failed for channel {entity_id} — "
                 f"{type(e).__name__}: {e}"
             )
-            self._linked_chat_cache[cache_key] = None
+            self._linked_chat_cache[cache_key] = (None, None)
             return None, f"{type(e).__name__}: {str(e)[:200]}"
 
-    async def _join_discussion_group(self, account_id: int, linked_chat_id: int) -> Tuple[bool, Optional[str]]:
+    @staticmethod
+    def _build_input_channel_from_full(
+        full: Any, linked_chat_id: int
+    ) -> Optional[InputChannel]:
+        """Extract InputChannel for the discussion group from a GetFullChannelRequest
+        response. Returns None if the discussion group is not in full.chats or has
+        no access_hash (e.g. legacy chat type)."""
+        for chat in (getattr(full, 'chats', None) or []):
+            if getattr(chat, 'id', None) != linked_chat_id:
+                continue
+            access_hash = getattr(chat, 'access_hash', None)
+            if access_hash is None:
+                return None
+            return InputChannel(channel_id=chat.id, access_hash=access_hash)
+        return None
+
+    def _cached_dg_input(
+        self, account_id: int, channel_entity_id: int
+    ) -> Optional[InputChannel]:
+        cached = self._linked_chat_cache.get((account_id, channel_entity_id))
+        if not cached:
+            return None
+        return cached[1]
+
+    async def _join_discussion_group(
+        self,
+        account_id: int,
+        linked_chat_id: int,
+        channel_entity_id: Optional[int] = None,
+    ) -> Tuple[bool, Optional[str]]:
         """Join the linked discussion group by ID.
-        Relies on Telethon's internal entity cache (populated by prior GetFullChannelRequest)."""
+
+        Resolution order:
+        1. InputChannel cached during _get_linked_chat (most reliable — uses the
+           access_hash returned together with linked_chat_id by GetFullChannelRequest).
+        2. Telethon's internal entity cache via get_input_entity.
+        3. get_entity by raw ID (slow path).
+
+        Without (1) Telethon often raises 'Invalid channel object' for newly seen
+        discussion groups, which is the root cause of the failure pattern we saw
+        in production logs."""
         client = self._clients[account_id]
         logger.debug(
-            f"Account {account_id}: joining discussion group {linked_chat_id}"
+            f"Account {account_id}: joining discussion group {linked_chat_id} "
+            f"(channel_entity_id={channel_entity_id})"
         )
         try:
-            # Resolve via Telethon's cache (populated by GetFullChannelRequest in _get_linked_chat)
-            try:
-                input_entity = await client.client.get_input_entity(linked_chat_id)
-            except (ValueError, TypeError) as e:
-                logger.debug(
-                    f"Account {account_id}: get_input_entity({linked_chat_id}) "
-                    f"missed cache ({type(e).__name__}), falling back to get_entity"
-                )
-                # Fallback: try get_entity
+            input_entity: Any = None
+            resolution_path = "unknown"
+
+            if channel_entity_id is not None:
+                input_entity = self._cached_dg_input(account_id, channel_entity_id)
+                if input_entity is not None:
+                    resolution_path = "input_channel_cache"
+
+            if input_entity is None:
                 try:
-                    input_entity = await client.client.get_entity(linked_chat_id)
-                except Exception as e2:
-                    logger.warning(
-                        f"Account {account_id}: cannot resolve discussion group {linked_chat_id} — "
-                        f"{type(e2).__name__}: {e2}"
+                    input_entity = await client.client.get_input_entity(linked_chat_id)
+                    resolution_path = "get_input_entity"
+                except (ValueError, TypeError) as e:
+                    logger.debug(
+                        f"Account {account_id}: get_input_entity({linked_chat_id}) "
+                        f"missed cache ({type(e).__name__}: {e}), falling back to get_entity"
                     )
-                    return False, f"Cannot resolve group {linked_chat_id}"
+                    try:
+                        input_entity = await client.client.get_entity(linked_chat_id)
+                        resolution_path = "get_entity"
+                    except Exception as e2:
+                        logger.warning(
+                            f"Account {account_id}: cannot resolve discussion group "
+                            f"{linked_chat_id} via any path — {type(e2).__name__}: {e2}"
+                        )
+                        return False, f"Cannot resolve group {linked_chat_id}: {type(e2).__name__}"
+
+            logger.debug(
+                f"Account {account_id}: discussion group {linked_chat_id} "
+                f"resolved via {resolution_path}"
+            )
 
             try:
                 await client.client(GetParticipantRequest(input_entity, "me"))
                 logger.debug(
                     f"Account {account_id}: already a member of discussion group {linked_chat_id}"
                 )
-                return True, None  # Already joined
+                return True, None
             except UserNotParticipantError:
                 pass  # Need to join
             except Exception as e:
@@ -545,7 +617,10 @@ class CommentsWorker:
                 )
 
             await client.client(JoinChannelRequest(input_entity))
-            logger.info(f"Account {account_id}: joined discussion group {linked_chat_id}")
+            logger.info(
+                f"Account {account_id}: joined discussion group {linked_chat_id} "
+                f"(resolved via {resolution_path})"
+            )
             return True, None
         except FloodWaitError:
             raise
@@ -554,7 +629,113 @@ class CommentsWorker:
                 f"Account {account_id}: discussion group {linked_chat_id} join error — "
                 f"{type(e).__name__}: {e}"
             )
-            return False, str(e)[:50]
+            return False, f"{type(e).__name__}: {str(e)[:120]}"
+
+    # ── Setup outcome tracking ──
+
+    # Cause ordering matters for _classify_target_failure: when several accounts
+    # see different failures, we want to report the most actionable one. Order:
+    # 1. dg_join_failed — DG exists but cannot be joined (fixable: re-auth, proxy, retry)
+    # 2. no_dg         — channel definitively has no linked discussion group (Telegram limit)
+    # 3. channel_join_failed — accounts couldn't even join the channel (proxy/auth)
+    # 4. api_error     — GetFullChannelRequest failed (proxy/network)
+    # 5. private       — private channel without invite link
+    # 6. blacklisted   — all accounts blacklisted from this channel
+    # 7. other_error   — uncategorised exception
+    _SETUP_CAUSE_PRIORITY: Tuple[str, ...] = (
+        "dg_join_failed",
+        "no_dg",
+        "channel_join_failed",
+        "api_error",
+        "private",
+        "blacklisted",
+        "other_error",
+    )
+
+    def _record_setup_outcome(
+        self,
+        target_id: Optional[int],
+        cause: str,
+        error: Optional[str] = None,
+    ) -> None:
+        """Tally a per-account, per-target setup outcome for later classification."""
+        if target_id is None:
+            return
+        outcomes = self._setup_outcomes.setdefault(target_id, {})
+        outcomes[cause] = outcomes.get(cause, 0) + 1
+        if error:
+            outcomes[f"last_{cause}_error"] = error[:200]
+
+    def _classify_target_failure(
+        self, target_id: Optional[int]
+    ) -> Tuple[str, str]:
+        """Resolve a final (status, error_message) for a target that no account
+        managed to mark ready. Picks the highest-priority observed cause."""
+        outcomes = self._setup_outcomes.get(target_id or -1, {})
+        if not outcomes:
+            return "error", "Unknown setup failure (no accounts attempted setup)"
+
+        for cause in self._SETUP_CAUSE_PRIORITY:
+            count = outcomes.get(cause, 0)
+            if count <= 0:
+                continue
+            last_error = outcomes.get(f"last_{cause}_error")
+            return self._format_target_failure(cause, count, last_error)
+
+        return "error", "Unknown setup failure"
+
+    @staticmethod
+    def _format_target_failure(
+        cause: str, count: int, last_error: Optional[str]
+    ) -> Tuple[str, str]:
+        suffix = f" (last error: {last_error})" if last_error else ""
+        if cause == "no_dg":
+            return (
+                "cannot_comment",
+                "Channel does not allow comments (no discussion group linked)",
+            )
+        if cause == "dg_join_failed":
+            return (
+                "error",
+                f"Discussion group join failed for {count} account(s){suffix}",
+            )
+        if cause == "channel_join_failed":
+            return (
+                "error",
+                f"All accounts failed to join channel{suffix}",
+            )
+        if cause == "api_error":
+            return (
+                "error",
+                f"Failed to fetch channel info from Telegram for {count} account(s){suffix}",
+            )
+        if cause == "private":
+            return ("error", "Private channel requires invite link")
+        if cause == "blacklisted":
+            return ("blacklisted", "Channel is blacklisted for all assigned accounts")
+        return ("error", f"Setup failed{suffix}")
+
+    def _compose_setup_failure_summary(
+        self, targets: List[TargetChannel]
+    ) -> str:
+        """Compose the task.last_error string when no targets became commentable.
+
+        Format depends on the number of targets:
+        - Single target → just the classified error for that target (no channel
+          prefix; the channel name is shown elsewhere in the UI).
+        - Multiple targets → "Setup failed for all channels — <ch1>: <msg>; ...".
+        """
+        if not targets:
+            return "No commentable channels found"
+
+        if len(targets) == 1:
+            return targets[0].error_message or "Setup failed (no detail recorded)"
+
+        parts = []
+        for t in targets:
+            msg = t.error_message or "Setup failed (no detail recorded)"
+            parts.append(f"{t.channel_username}: {msg}")
+        return "Setup failed for all channels — " + "; ".join(parts)
 
     # ── AI Service ──
 
@@ -635,6 +816,7 @@ class CommentsWorker:
             self._mark_target_unready_for_account(account_id, target.id)
 
             if self._is_blacklisted_cached(account_id, target.channel_id, target.channel_username):
+                self._record_setup_outcome(target.id, "blacklisted")
                 db.add(TaskLog(
                     task_id=self.task_id,
                     account_id=account_id,
@@ -682,6 +864,20 @@ class CommentsWorker:
                         logger.warning(
                             f"Account {account_id}: cannot join {target.channel_username} via invite — {join_error}"
                         )
+                        self._record_setup_outcome(
+                            target.id,
+                            "channel_join_failed",
+                            join_error or "Join via invite failed",
+                        )
+                        db.add(TaskLog(
+                            task_id=self.task_id,
+                            account_id=account_id,
+                            action_type="setup",
+                            target=target.channel_username,
+                            success=False,
+                            message=f"Join failed: {join_error or 'invite link rejected'}",
+                            error=f"invite_hash={use_invite_hash}",
+                        ))
                         continue
                     self._entities[(account_id, target.channel_username)] = entity
                     target.channel_id = entity.id
@@ -742,6 +938,19 @@ class CommentsWorker:
                             logger.warning(
                                 f"Account {account_id}: cannot join {target.channel_username} — {join_error}"
                             )
+                            self._record_setup_outcome(
+                                target.id,
+                                "channel_join_failed",
+                                join_error or "Join failed",
+                            )
+                            db.add(TaskLog(
+                                task_id=self.task_id,
+                                account_id=account_id,
+                                action_type="setup",
+                                target=target.channel_username,
+                                success=False,
+                                message=f"Join failed: {join_error or 'unknown reason'}",
+                            ))
                             continue
 
                         # Re-resolve after join to refresh the account-specific entity cache.
@@ -770,7 +979,9 @@ class CommentsWorker:
 
                 if linked_chat_id:
                     # Join discussion group (required for commenting)
-                    dg_joined, dg_error = await self._join_discussion_group(account_id, linked_chat_id)
+                    dg_joined, dg_error = await self._join_discussion_group(
+                        account_id, linked_chat_id, channel_entity_id=entity.id
+                    )
                     if dg_joined:
                         self._mark_target_ready_for_account(account_id, target.id)
                         target.can_comment = True
@@ -789,9 +1000,9 @@ class CommentsWorker:
                         logger.warning(
                             f"Account {account_id}: cannot join discussion group — {dg_error}"
                         )
-                        if not target.can_comment:
-                            target.status = "error"
-                            target.error_message = f"Discussion group join failed: {dg_error}"
+                        self._record_setup_outcome(
+                            target.id, "dg_join_failed", dg_error
+                        )
                         db.add(TaskLog(
                             task_id=self.task_id,
                             account_id=account_id,
@@ -801,18 +1012,29 @@ class CommentsWorker:
                             message=f"Discussion group join failed: {dg_error}",
                             error=f"discussion_group_id={linked_chat_id}",
                         ))
-                else:
-                    if not target.can_comment:
-                        target.status = "cannot_comment"
-                        target.error_message = link_error or "No discussion group linked"
+                elif link_error:
+                    # GetFullChannelRequest itself failed — proxy / auth / network issue,
+                    # NOT a definitive statement about whether the channel has a DG.
+                    self._record_setup_outcome(target.id, "api_error", link_error)
                     db.add(TaskLog(
                         task_id=self.task_id,
                         account_id=account_id,
                         action_type="setup",
                         target=target.channel_username,
                         success=False,
-                        message="No discussion group linked",
+                        message=f"Cannot fetch channel info: {link_error}",
                         error=link_error,
+                    ))
+                else:
+                    # API succeeded and Telegram reports no linked discussion group.
+                    self._record_setup_outcome(target.id, "no_dg")
+                    db.add(TaskLog(
+                        task_id=self.task_id,
+                        account_id=account_id,
+                        action_type="setup",
+                        target=target.channel_username,
+                        success=False,
+                        message="Channel has no linked discussion group",
                     ))
 
             except ChannelPrivateError:
@@ -824,9 +1046,7 @@ class CommentsWorker:
                     error="Private channel requires invite link",
                 )
                 logger.warning(f"Account {account_id}: {target.channel_username} — channel private")
-                if not target.can_comment:
-                    target.status = "error"
-                    target.error_message = "Private channel requires invite link"
+                self._record_setup_outcome(target.id, "private")
                 db.add(TaskLog(
                     task_id=self.task_id,
                     account_id=account_id,
@@ -838,6 +1058,9 @@ class CommentsWorker:
             except FloodWaitError as e:
                 logger.warning(f"Account {account_id}: FloodWait {e.seconds}s during setup — cooldown")
                 self._flood_wait_until[account_id] = time.monotonic() + e.seconds
+                self._record_setup_outcome(
+                    target.id, "other_error", f"FloodWait {e.seconds}s"
+                )
                 db.add(TaskLog(
                     task_id=self.task_id,
                     account_id=account_id,
@@ -860,9 +1083,9 @@ class CommentsWorker:
                 logger.warning(
                     f"Account {account_id}: {target.channel_username} setup failed — {e}"
                 )
-                if not target.can_comment:
-                    target.status = "error"
-                    target.error_message = str(e)[:200]
+                self._record_setup_outcome(
+                    target.id, "other_error", f"{type(e).__name__}: {str(e)[:160]}"
+                )
                 db.add(TaskLog(
                     task_id=self.task_id,
                     account_id=account_id,
@@ -1593,13 +1816,22 @@ class CommentsWorker:
 
                     await self._setup_channels_for_account(account.id, target_channels, db)
 
-                # Check we have commentable channels
+                # Finalise per-target status from collected setup outcomes so that
+                # the UI shows a specific cause per channel instead of overwriting
+                # status with whatever the last account happened to see.
                 for t in target_channels:
+                    if not t.can_comment:
+                        new_status, new_msg = self._classify_target_failure(t.id)
+                        t.status = new_status
+                        t.error_message = new_msg
                     logger.debug(
                         f"Task {self.task_id}: target {t.channel_username!r} "
                         f"status={t.status!r} can_comment={t.can_comment} "
-                        f"error={t.error_message!r}"
+                        f"error={t.error_message!r} "
+                        f"outcomes={self._setup_outcomes.get(t.id)}"
                     )
+                db.commit()
+
                 valid_targets = [t for t in target_channels if t.can_comment and t.status == "joined"]
                 logger.info(
                     f"Task {self.task_id}: setup complete — valid_targets="
@@ -1608,7 +1840,7 @@ class CommentsWorker:
                 )
                 if not valid_targets:
                     task.status = "failed"
-                    task.last_error = "No commentable channels found (no discussion groups linked)"
+                    task.last_error = self._compose_setup_failure_summary(target_channels)
                     db.commit()
                     return
 

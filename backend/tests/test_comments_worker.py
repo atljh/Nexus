@@ -491,10 +491,12 @@ async def test_join_channel_flood_wait_raises(worker):
 
 @pytest.mark.asyncio
 async def test_get_linked_chat_found(worker):
-    """Successfully get linked discussion group."""
+    """Successfully get linked discussion group (no access_hash → no InputChannel cached)."""
     mock_client = MagicMock()
     full_result = MagicMock()
     full_result.full_chat.linked_chat_id = 999
+    # full.chats with no entries matching id=999 → cannot build InputChannel
+    full_result.chats = []
     mock_client.client = AsyncMock(return_value=full_result)
 
     worker._clients[1] = mock_client
@@ -504,7 +506,38 @@ async def test_get_linked_chat_found(worker):
 
     assert linked == 999
     assert err is None
-    assert worker._linked_chat_cache[(1, 100)] == 999
+    cached_id, cached_input = worker._linked_chat_cache[(1, 100)]
+    assert cached_id == 999
+    assert cached_input is None
+
+
+@pytest.mark.asyncio
+async def test_get_linked_chat_caches_input_channel(worker):
+    """When full.chats contains the discussion group with access_hash,
+    InputChannel must be cached for later use by _join_discussion_group."""
+    from telethon.tl.types import InputChannel
+
+    mock_client = MagicMock()
+    full_result = MagicMock()
+    full_result.full_chat.linked_chat_id = 999
+    dg_chat = MagicMock()
+    dg_chat.id = 999
+    dg_chat.access_hash = 12345
+    full_result.chats = [dg_chat]
+    mock_client.client = AsyncMock(return_value=full_result)
+
+    worker._clients[1] = mock_client
+    entity = make_entity(100)
+
+    linked, err = await worker._get_linked_chat(1, entity)
+
+    assert linked == 999
+    assert err is None
+    cached_id, cached_input = worker._linked_chat_cache[(1, 100)]
+    assert cached_id == 999
+    assert isinstance(cached_input, InputChannel)
+    assert cached_input.channel_id == 999
+    assert cached_input.access_hash == 12345
 
 
 @pytest.mark.asyncio
@@ -513,6 +546,7 @@ async def test_get_linked_chat_none(worker):
     mock_client = MagicMock()
     full_result = MagicMock()
     full_result.full_chat.linked_chat_id = None
+    full_result.chats = []
     mock_client.client = AsyncMock(return_value=full_result)
 
     worker._clients[1] = mock_client
@@ -522,7 +556,7 @@ async def test_get_linked_chat_none(worker):
 
     assert linked is None
     assert err is None
-    assert worker._linked_chat_cache[(1, 100)] is None
+    assert worker._linked_chat_cache[(1, 100)] == (None, None)
 
 
 @pytest.mark.asyncio
@@ -532,7 +566,7 @@ async def test_get_linked_chat_cached(worker):
     mock_client.client = AsyncMock()
 
     worker._clients[1] = mock_client
-    worker._linked_chat_cache[(1, 100)] = 999
+    worker._linked_chat_cache[(1, 100)] = (999, None)
 
     entity = make_entity(100)
     linked, err = await worker._get_linked_chat(1, entity)
@@ -556,7 +590,7 @@ async def test_get_linked_chat_error_returns_none(worker):
     assert linked is None
     assert err is not None
     assert "network error" in err
-    assert worker._linked_chat_cache[(1, 100)] is None
+    assert worker._linked_chat_cache[(1, 100)] == (None, None)
 
 
 @pytest.mark.asyncio
@@ -1333,7 +1367,7 @@ async def test_setup_channels_with_discussion_group(worker):
 
 @pytest.mark.asyncio
 async def test_setup_channels_no_discussion_group(worker):
-    """Channel without discussion group → cannot comment."""
+    """Channel without discussion group → outcome 'no_dg' → classified as cannot_comment."""
     entity = make_entity(100)
     worker._clients[1] = MagicMock()
 
@@ -1347,7 +1381,80 @@ async def test_setup_channels_no_discussion_group(worker):
 
     assert ready == 0
     assert target.can_comment is False
-    assert target.status == "cannot_comment"
+    # Per-account setup no longer overwrites target.status; the outer worker loop
+    # calls _classify_target_failure once after all accounts finish.
+    status, message = worker._classify_target_failure(target.id)
+    assert status == "cannot_comment"
+    assert "no discussion group" in message.lower()
+    # Confirm the outcome was tallied
+    assert worker._setup_outcomes[target.id].get("no_dg") == 1
+
+
+@pytest.mark.asyncio
+async def test_setup_channels_api_error(worker):
+    """GetFullChannelRequest failure → outcome 'api_error' (NOT 'no_dg')."""
+    entity = make_entity(100)
+    worker._clients[1] = MagicMock()
+
+    with patch.object(worker, '_resolve_entity', AsyncMock(return_value=entity)), \
+         patch.object(worker, '_check_subscription', AsyncMock(return_value=(True, None))), \
+         patch.object(worker, '_get_linked_chat',
+                      AsyncMock(return_value=(None, "TimeoutError: connection lost"))):
+
+        target = make_target(can_comment=False, status="pending")
+        db = MagicMock()
+        ready = await worker._setup_channels_for_account(1, [target], db)
+
+    assert ready == 0
+    assert worker._setup_outcomes[target.id].get("api_error") == 1
+    assert worker._setup_outcomes[target.id].get("no_dg", 0) == 0
+    status, message = worker._classify_target_failure(target.id)
+    assert status == "error"
+    assert "fetch channel info" in message.lower()
+    assert "TimeoutError" in message
+
+
+@pytest.mark.asyncio
+async def test_classify_target_failure_dg_join_priority(worker):
+    """When multiple accounts hit different causes, dg_join_failed wins over no_dg."""
+    target_id = 42
+    worker._record_setup_outcome(target_id, "no_dg")
+    worker._record_setup_outcome(target_id, "no_dg")
+    worker._record_setup_outcome(target_id, "dg_join_failed", "ChannelPrivateError")
+
+    status, message = worker._classify_target_failure(target_id)
+
+    assert status == "error"
+    assert "Discussion group join failed" in message
+    assert "ChannelPrivateError" in message
+
+
+@pytest.mark.asyncio
+async def test_classify_target_failure_no_outcomes(worker):
+    """Targets with no recorded outcomes get a generic message rather than crashing."""
+    status, message = worker._classify_target_failure(999)
+    assert status == "error"
+    assert "no accounts attempted" in message.lower()
+
+
+def test_compose_setup_failure_summary_single_target(worker):
+    """Single-target summary returns just the per-target error_message."""
+    target = make_target(channel_username="@x", can_comment=False, status="cannot_comment")
+    target.error_message = "Channel does not allow comments (no discussion group linked)"
+    summary = worker._compose_setup_failure_summary([target])
+    assert summary == "Channel does not allow comments (no discussion group linked)"
+
+
+def test_compose_setup_failure_summary_multi_target(worker):
+    """Multi-target summary prefixes each error with channel name and joins with ';'."""
+    t1 = make_target(id=1, channel_username="@a", can_comment=False, status="cannot_comment")
+    t1.error_message = "Channel does not allow comments (no discussion group linked)"
+    t2 = make_target(id=2, channel_username="@b", can_comment=False, status="error")
+    t2.error_message = "Discussion group join failed for 3 account(s)"
+    summary = worker._compose_setup_failure_summary([t1, t2])
+    assert summary.startswith("Setup failed for all channels —")
+    assert "@a: Channel does not allow comments" in summary
+    assert "@b: Discussion group join failed" in summary
 
 
 @pytest.mark.asyncio

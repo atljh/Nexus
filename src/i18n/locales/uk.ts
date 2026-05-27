@@ -1156,7 +1156,19 @@ export default {
         discussionGroupId: 'ID групи обговорення: {id}',
         setupFailed: 'Помилка налаштування',
         channelBlacklistedFromPrevRun: 'Канал у чорному списку з попереднього запуску',
-        getFullChannelNoLinked: 'GetFullChannel не повернув ID групи обговорення'
+        getFullChannelNoLinked: 'GetFullChannel не повернув ID групи обговорення',
+        channelHasNoDiscussionGroup: 'У каналі не ввімкнено коментарі (немає прив’язаної групи обговорення)',
+        cannotFetchChannelInfo: 'Не вдалося отримати інфо про канал: {reason}',
+        dgJoinFailedForN: 'Не вдалося приєднатися до групи обговорення з {count} акаунтів (остання помилка: {reason})',
+        dgJoinFailedForNNoReason: 'Не вдалося приєднатися до групи обговорення з {count} акаунтів',
+        allAccountsFailedToJoinChannel: 'Усі акаунти не змогли приєднатися до каналу (остання помилка: {reason})',
+        allAccountsFailedToJoinChannelNoReason: 'Усі акаунти не змогли приєднатися до каналу',
+        failedToFetchChannelInfo: 'Не вдалося отримати інфо про канал з Telegram для {count} акаунтів (остання помилка: {reason})',
+        failedToFetchChannelInfoNoReason: 'Не вдалося отримати інфо про канал з Telegram для {count} акаунтів',
+        channelBlacklistedAll: 'Канал у чорному списку для всіх призначених акаунтів',
+        setupFailedForAllChannels: 'Налаштування провалилося для всіх каналів — {detail}',
+        setupFailedWithReason: 'Помилка налаштування ({reason})',
+        unknownSetupFailure: 'Невідома помилка налаштування'
       }
     },
     time: {

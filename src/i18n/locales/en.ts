@@ -1156,7 +1156,19 @@ export default {
         discussionGroupId: 'Discussion group ID: {id}',
         setupFailed: 'Setup failed',
         channelBlacklistedFromPrevRun: 'Channel blacklisted from a previous run',
-        getFullChannelNoLinked: 'GetFullChannel returned no linked discussion group'
+        getFullChannelNoLinked: 'GetFullChannel returned no linked discussion group',
+        channelHasNoDiscussionGroup: 'Channel does not allow comments (no discussion group linked)',
+        cannotFetchChannelInfo: 'Cannot fetch channel info: {reason}',
+        dgJoinFailedForN: 'Discussion group join failed for {count} account(s) (last error: {reason})',
+        dgJoinFailedForNNoReason: 'Discussion group join failed for {count} account(s)',
+        allAccountsFailedToJoinChannel: 'All accounts failed to join channel (last error: {reason})',
+        allAccountsFailedToJoinChannelNoReason: 'All accounts failed to join channel',
+        failedToFetchChannelInfo: 'Failed to fetch channel info from Telegram for {count} account(s) (last error: {reason})',
+        failedToFetchChannelInfoNoReason: 'Failed to fetch channel info from Telegram for {count} account(s)',
+        channelBlacklistedAll: 'Channel is blacklisted for all assigned accounts',
+        setupFailedForAllChannels: 'Setup failed for all channels — {detail}',
+        setupFailedWithReason: 'Setup failed ({reason})',
+        unknownSetupFailure: 'Unknown setup failure'
       }
     },
     time: {

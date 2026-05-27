@@ -218,6 +218,11 @@ function translateLogText(text?: string | null): string {
     'Setup failed': 'taskResults.logs.translate.setupFailed',
     'Channel blacklisted from a previous run': 'taskResults.logs.translate.channelBlacklistedFromPrevRun',
     'GetFullChannel returned no linked_chat_id': 'taskResults.logs.translate.getFullChannelNoLinked',
+    'Channel does not allow comments (no discussion group linked)': 'taskResults.logs.translate.channelHasNoDiscussionGroup',
+    'Channel has no linked discussion group': 'taskResults.logs.translate.channelHasNoDiscussionGroup',
+    'Channel is blacklisted for all assigned accounts': 'taskResults.logs.translate.channelBlacklistedAll',
+    'Unknown setup failure': 'taskResults.logs.translate.unknownSetupFailure',
+    'Unknown setup failure (no accounts attempted setup)': 'taskResults.logs.translate.unknownSetupFailure',
   }
 
   const mappedKey = exactMap[value]
@@ -278,6 +283,70 @@ function translateLogText(text?: string | null): string {
     return t('taskResults.logs.translate.discussionGroupId', { id: discussionGroupIdMatch[1] })
   }
 
+  const cannotFetchInfoMatch = value.match(/^Cannot fetch channel info:\s*(.+)$/i)
+  if (cannotFetchInfoMatch) {
+    return t('taskResults.logs.translate.cannotFetchChannelInfo', { reason: cannotFetchInfoMatch[1] })
+  }
+
+  const dgJoinFailedForNWithReason = value.match(
+    /^Discussion group join failed for (\d+) account\(s\) \(last error:\s*(.+)\)$/i
+  )
+  if (dgJoinFailedForNWithReason) {
+    return t('taskResults.logs.translate.dgJoinFailedForN', {
+      count: dgJoinFailedForNWithReason[1],
+      reason: dgJoinFailedForNWithReason[2],
+    })
+  }
+  const dgJoinFailedForNPlain = value.match(/^Discussion group join failed for (\d+) account\(s\)$/i)
+  if (dgJoinFailedForNPlain) {
+    return t('taskResults.logs.translate.dgJoinFailedForNNoReason', {
+      count: dgJoinFailedForNPlain[1],
+    })
+  }
+
+  const allFailedJoinWithReason = value.match(
+    /^All accounts failed to join channel \(last error:\s*(.+)\)$/i
+  )
+  if (allFailedJoinWithReason) {
+    return t('taskResults.logs.translate.allAccountsFailedToJoinChannel', {
+      reason: allFailedJoinWithReason[1],
+    })
+  }
+  if (value === 'All accounts failed to join channel') {
+    return t('taskResults.logs.translate.allAccountsFailedToJoinChannelNoReason')
+  }
+
+  const fetchInfoFailedWithReason = value.match(
+    /^Failed to fetch channel info from Telegram for (\d+) account\(s\) \(last error:\s*(.+)\)$/i
+  )
+  if (fetchInfoFailedWithReason) {
+    return t('taskResults.logs.translate.failedToFetchChannelInfo', {
+      count: fetchInfoFailedWithReason[1],
+      reason: fetchInfoFailedWithReason[2],
+    })
+  }
+  const fetchInfoFailedPlain = value.match(
+    /^Failed to fetch channel info from Telegram for (\d+) account\(s\)$/i
+  )
+  if (fetchInfoFailedPlain) {
+    return t('taskResults.logs.translate.failedToFetchChannelInfoNoReason', {
+      count: fetchInfoFailedPlain[1],
+    })
+  }
+
+  const setupFailedForAll = value.match(/^Setup failed for all channels\s*—\s*(.+)$/i)
+  if (setupFailedForAll) {
+    return t('taskResults.logs.translate.setupFailedForAllChannels', {
+      detail: setupFailedForAll[1],
+    })
+  }
+  const setupFailedWithReason = value.match(/^Setup failed \(last error:\s*(.+)\)$/i)
+  if (setupFailedWithReason) {
+    return t('taskResults.logs.translate.setupFailedWithReason', {
+      reason: setupFailedWithReason[1],
+    })
+  }
+
   return value
 }
 
@@ -313,7 +382,8 @@ function getChannelStatusSeverity(status: string): 'success' | 'info' | 'warn' |
     joined: 'success',
     pending: 'info',
     error: 'danger',
-    cannot_comment: 'warn'
+    cannot_comment: 'warn',
+    blacklisted: 'secondary'
   }
   return map[status] || 'secondary'
 }
@@ -836,7 +906,7 @@ watch(() => task.value?.status, async (newStatus, oldStatus) => {
                     </span>
                   </div>
                   <span v-if="channel.error_message" class="channel-error">
-                    {{ channel.error_message }}
+                    {{ translateLogText(channel.error_message) }}
                   </span>
                 </div>
               </div>
