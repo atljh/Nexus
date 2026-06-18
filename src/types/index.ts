@@ -234,7 +234,7 @@ export interface AssignProxiesRequest {
   assignments?: ProxyAssignment[]
   account_ids?: number[]
   proxy_ids?: number[]
-  mode?: 'sequential' | 'random'
+  mode?: 'sequential' | 'random' | 'balanced'
 }
 
 // Session+JSON Import Types
@@ -347,6 +347,8 @@ export const REACTION_EMOJIS = [
   { value: '🤔', label: '🤔 Think' },
   { value: '🤯', label: '🤯 Mind Blown' },
   { value: '😱', label: '😱 Shocked' },
+  { value: '😡', label: '😡 Angry' },
+  { value: '🤬', label: '🤬 Rage' },
 ] as const
 
 // Comment Template Types

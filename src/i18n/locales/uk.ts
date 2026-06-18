@@ -401,6 +401,11 @@ export default {
       genderRandom: 'Випадково',
       genderMale: 'Чоловіча',
       genderFemale: 'Жіноча',
+      nameLocale: 'Мова імен',
+      localeAuto: 'Авто (за гео)',
+      localeUa: 'Українські',
+      localeRu: 'Російські',
+      localeEn: 'Англійські',
     },
 
     auth: {
@@ -1036,13 +1041,20 @@ export default {
       failed: 'Помилка',
       unknown: 'Невідомо'
     },
+    actions: {
+      subscribeUnsubscribed: 'Підписати непідписаних'
+    },
     messages: {
       targetRequired: 'Додайте валідну ціль каналу або інвайт-посилання',
       created: 'Канал збережено',
       updated: 'Канал оновлено',
       deleted: 'Канал видалено',
       saveFailed: 'Не вдалося зберегти канал',
-      deleteFailed: 'Не вдалося видалити канал'
+      deleteFailed: 'Не вдалося видалити канал',
+      subscribeStarted: 'Запущено підписку {count} акаунтів у фоні',
+      subscribeFinished: 'Підписку завершено, лічильники оновлено',
+      subscribeAllDone: 'Усі валідні акаунти вже підписані на цей канал',
+      subscribeFailed: 'Не вдалося запустити підписку акаунтів'
     }
   },
 

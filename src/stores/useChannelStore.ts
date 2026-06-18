@@ -12,6 +12,13 @@ interface ChannelMembershipsResponse {
   memberships: ChannelMembership[]
 }
 
+interface SubscribeResult {
+  success: boolean
+  task_id: number | null
+  total: number
+  message?: string
+}
+
 const CACHE_TTL = 5000
 
 export const useChannelStore = defineStore('channel', () => {
@@ -151,6 +158,15 @@ export const useChannelStore = defineStore('channel', () => {
     memberships.value = []
   }
 
+  async function subscribeUnsubscribed(channelId: number): Promise<SubscribeResult | null> {
+    try {
+      return await window.api.post(`/api/channels/${channelId}/subscribe`, {}) as SubscribeResult
+    } catch (e) {
+      console.error('Failed to subscribe accounts to channel:', e)
+      return null
+    }
+  }
+
   return {
     channels,
     currentChannel,
@@ -164,6 +180,7 @@ export const useChannelStore = defineStore('channel', () => {
     createChannel,
     updateChannel,
     deleteChannel,
-    clearMemberships
+    clearMemberships,
+    subscribeUnsubscribed
   }
 })

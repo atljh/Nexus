@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from datetime import datetime, timezone
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -10,7 +11,7 @@ from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 from database.database import get_db
-from database.models import Account, ChannelMembership, SavedChannel
+from database.models import Account, ChannelMembership, SavedChannel, Task
 from utils.channel_registry import (
     normalize_invite_link,
     normalize_public_channel_target,
@@ -214,3 +215,89 @@ def delete_saved_channel(
     db.delete(channel)
     db.commit()
     return {"success": True}
+
+
+class SubscribeAccountsRequest(BaseModel):
+    account_ids: Optional[List[int]] = Field(
+        None, description="Restrict to these accounts; default = all valid accounts not yet members"
+    )
+    min_delay: float = Field(15.0, ge=1, le=3600, description="Min delay between joins (seconds)")
+    max_delay: float = Field(45.0, ge=1, le=3600, description="Max delay between joins (seconds)")
+    max_concurrent: int = Field(1, ge=1, le=5, description="Max concurrent connections")
+
+
+@router.post("/{channel_id}/subscribe")
+async def subscribe_unsubscribed_accounts(
+    channel_id: int,
+    payload: SubscribeAccountsRequest,
+    db: Session = Depends(get_db),
+):
+    """Create and start a background task that subscribes every valid account
+    that is not yet a member of this channel (and retries previously failed ones)."""
+    from workers.subscribe_worker import start_subscribe_task
+
+    channel = db.query(SavedChannel).filter(SavedChannel.id == channel_id).first()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    target = channel.normalized_target or channel.invite_link
+    if not target:
+        raise HTTPException(status_code=400, detail="Channel has no resolvable target")
+
+    # Accounts already subscribed to this channel — those are skipped.
+    member_ids = {
+        row[0]
+        for row in db.query(ChannelMembership.account_id).filter(
+            ChannelMembership.channel_id == channel_id,
+            ChannelMembership.status == "member",
+        ).all()
+    }
+
+    query = db.query(Account).filter(Account.status == "valid")
+    if payload.account_ids:
+        query = query.filter(Account.id.in_(payload.account_ids))
+    accounts = [acc for acc in query.all() if acc.id not in member_ids]
+
+    if not accounts:
+        return {
+            "success": True,
+            "task_id": None,
+            "total": 0,
+            "message": "All valid accounts are already subscribed",
+        }
+
+    min_delay = min(payload.min_delay, payload.max_delay)
+    max_delay = max(payload.min_delay, payload.max_delay)
+
+    task_config = {"channel": target, "channel_id": channel.id}
+    if channel.invite_link:
+        task_config["invite_link"] = channel.invite_link
+
+    task = Task(
+        task_type="subscribe",
+        status="running",
+        config=task_config,
+        total_actions=len(accounts),
+        min_delay=min_delay,
+        max_delay=max_delay,
+        max_concurrent=payload.max_concurrent,
+        started_at=datetime.now(timezone.utc),
+    )
+    task.accounts = accounts
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    submitted = await start_subscribe_task(task.id)
+    if not submitted:
+        task.status = "pending"
+        task.last_error = "Task is already running in queue"
+        db.commit()
+        raise HTTPException(status_code=409, detail="Failed to start subscribe task")
+
+    return {
+        "success": True,
+        "task_id": task.id,
+        "total": len(accounts),
+        "message": f"Subscribing {len(accounts)} account(s)",
+    }
