@@ -372,6 +372,7 @@ function taskTypeRoute(taskType: string): string {
   if (taskType === 'likes') return '/autolikes'
   if (taskType === 'comments') return '/autocomments'
   if (taskType === 'warming') return '/warming'
+  if (taskType === 'subscribe') return '/channels'
   return '/'
 }
 

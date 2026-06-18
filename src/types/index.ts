@@ -275,7 +275,7 @@ export interface Task {
   progress: number
 }
 
-export type TaskType = 'likes' | 'comments' | 'warming'
+export type TaskType = 'likes' | 'comments' | 'warming' | 'subscribe'
 export type TaskStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
 export type WarmingSpeedPreset = 'safe' | 'normal'
 
@@ -508,6 +508,7 @@ export interface BulkProfileUpdateRequest {
   username?: string
   auto_generate: boolean
   gender?: 'male' | 'female'
+  locale?: 'auto' | 'ua' | 'ru' | 'en'
   max_concurrent?: number
 }
 

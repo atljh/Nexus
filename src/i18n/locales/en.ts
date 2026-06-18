@@ -1063,7 +1063,8 @@ export default {
     taskType: {
       likes: 'Auto-Likes',
       comments: 'Auto-Comments',
-      warming: 'Warming'
+      warming: 'Warming',
+      subscribe: 'Channel subscription'
     },
     status: {
       pending: 'Pending',

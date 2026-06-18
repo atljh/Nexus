@@ -1063,7 +1063,8 @@ export default {
     taskType: {
       likes: 'Авто-лайки',
       comments: 'Авто-коментарі',
-      warming: 'Прогрів'
+      warming: 'Прогрів',
+      subscribe: 'Підписка на канал'
     },
     status: {
       pending: 'Очікує',

@@ -17,6 +17,7 @@ from telethon.errors import ChannelPrivateError, FloodWaitError
 
 from database.database import SessionLocal
 from database.models import Task, TaskLog
+from utils.channel_registry import upsert_channel_membership
 from workers.likes_worker import LikesWorker
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,28 @@ FLOOD_WAIT_RETRY_CAP_SECONDS = 60
 
 class SubscribeWorker(LikesWorker):
     """Worker that subscribes accounts to a single channel."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # The SavedChannel this task subscribes to; threaded into the membership
+        # upsert so counts always land on the exact channel the user clicked
+        # (and never spawn a duplicate SavedChannel).
+        self._saved_channel_id = None
+
+    def _track_channel_membership(self, db, **kwargs) -> None:
+        """Override the parent helper to pin membership to the clicked channel."""
+        try:
+            upsert_channel_membership(
+                db,
+                touch_last_used=kwargs.get("status") == "member",
+                prefer_id=self._saved_channel_id,
+                **kwargs,
+            )
+        except ValueError:
+            logger.debug(
+                "Account %s: skipped channel registry update (unresolved target)",
+                kwargs.get("account_id"),
+            )
 
     def _record_subscribe_log(
         self,
@@ -78,6 +101,7 @@ class SubscribeWorker(LikesWorker):
 
             # Parse channel target / invite link (same conventions as likes)
             config = task.config or {}
+            self._saved_channel_id = config.get("channel_id")
             channel = config.get("channel", "") or ""
             channel, _, invite_hash = self._parse_channel(channel)
 
@@ -100,6 +124,7 @@ class SubscribeWorker(LikesWorker):
             connected = await self._connect_accounts(accounts, db, max_concurrent)
             if connected == 0:
                 task.status = "failed"
+                task.failed_actions = len(accounts)
                 task.last_error = "All accounts failed to connect"
                 db.commit()
                 return

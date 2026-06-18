@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import Button from 'primevue/button'
@@ -25,6 +25,11 @@ const titleInput = ref('')
 const editingChannelId = ref<number | null>(null)
 const isSubmitting = ref(false)
 const subscribingIds = ref<number[]>([])
+let isUnmounted = false
+
+onUnmounted(() => {
+  isUnmounted = true
+})
 
 function isSubscribing(channelId: number): boolean {
   return subscribingIds.value.includes(channelId)
@@ -224,6 +229,7 @@ async function pollSubscribeProgress(channelId: number, taskId: number): Promise
   // Poll up to ~10 minutes, refreshing the card counts as accounts join.
   for (let i = 0; i < 150; i++) {
     await new Promise(resolve => setTimeout(resolve, 4000))
+    if (isUnmounted) return
     await channelStore.fetchChannel(channelId)
     if (selectedChannelId.value === channelId) {
       await channelStore.fetchMemberships(channelId)
