@@ -378,6 +378,7 @@ def upsert_channel_membership(
     title: Optional[str] = None,
     error: Optional[str] = None,
     touch_last_used: bool = False,
+    prefer_id: Optional[int] = None,
 ) -> tuple[SavedChannel, ChannelMembership]:
     safe_status = status if status in CHANNEL_MEMBERSHIP_STATUSES else "unknown"
     channel = upsert_saved_channel(
@@ -388,6 +389,7 @@ def upsert_channel_membership(
         title=title,
         last_error=error if safe_status == "failed" else None,
         touch_last_used=touch_last_used,
+        prefer_id=prefer_id,
     )
 
     membership = db.query(ChannelMembership).filter(

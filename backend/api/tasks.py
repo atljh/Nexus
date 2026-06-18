@@ -1156,6 +1156,7 @@ async def start_task(task_id: int, db: Session = Depends(get_db)):
     from workers.likes_worker import start_likes_task
     from workers.comments_worker import start_comments_task
     from workers.warming_worker import start_warming_task
+    from workers.subscribe_worker import start_subscribe_task
     from workers.task_queue import task_queue
 
     task = db.query(Task).options(subqueryload(Task.accounts)).filter(Task.id == task_id).first()
@@ -1221,6 +1222,8 @@ async def start_task(task_id: int, db: Session = Depends(get_db)):
             submitted = await start_comments_task(task_id)
         elif task.task_type == "warming":
             submitted = await start_warming_task(task_id)
+        elif task.task_type == "subscribe":
+            submitted = await start_subscribe_task(task_id)
         else:
             task.status = "pending"
             task.last_error = f"Unknown task type: {task.task_type}"

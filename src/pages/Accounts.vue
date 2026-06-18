@@ -109,6 +109,7 @@ const bulkProfileFirstName = ref('')
 const bulkProfileLastName = ref('')
 const bulkProfileBio = ref('')
 const bulkProfileGender = ref<'male' | 'female' | undefined>(undefined)
+const bulkProfileLocale = ref<'auto' | 'ua' | 'ru' | 'en'>('auto')
 const bulkProfileLoading = ref(false)
 const showBulkTagDialog = ref(false)
 const bulkTagId = ref<number | null>(null)
@@ -1293,7 +1294,7 @@ async function distributeProxiesEvenly() {
     const result = await accountStore.assignProxies({
       account_ids: accountIds,
       proxy_ids: proxyIds,
-      mode: 'sequential'
+      mode: 'balanced'
     })
     toast.add({
       severity: 'success',
@@ -1714,6 +1715,7 @@ async function handleBulkProfileUpdate() {
 
     if (bulkProfileMode.value === 'auto') {
       data.gender = bulkProfileGender.value || undefined
+      data.locale = bulkProfileLocale.value
     } else {
       if (bulkProfileFirstName.value.trim()) data.first_name = bulkProfileFirstName.value.trim()
       if (bulkProfileLastName.value.trim()) data.last_name = bulkProfileLastName.value.trim()
@@ -1738,6 +1740,7 @@ async function handleBulkProfileUpdate() {
     bulkProfileLastName.value = ''
     bulkProfileBio.value = ''
     bulkProfileGender.value = undefined
+    bulkProfileLocale.value = 'auto'
   }
 }
 
@@ -3123,6 +3126,35 @@ login:pass:1.2.3.4:8080"
                 @click="bulkProfileGender = 'female'"
               >
                 {{ t('accounts.profile.genderFemale') }}
+              </button>
+            </div>
+          </div>
+          <div class="form-field">
+            <label class="form-label">{{ t('accounts.profile.nameLocale') }}</label>
+            <div class="gender-options">
+              <button
+                :class="['gender-btn', { active: bulkProfileLocale === 'auto' }]"
+                @click="bulkProfileLocale = 'auto'"
+              >
+                {{ t('accounts.profile.localeAuto') }}
+              </button>
+              <button
+                :class="['gender-btn', { active: bulkProfileLocale === 'ua' }]"
+                @click="bulkProfileLocale = 'ua'"
+              >
+                {{ t('accounts.profile.localeUa') }}
+              </button>
+              <button
+                :class="['gender-btn', { active: bulkProfileLocale === 'ru' }]"
+                @click="bulkProfileLocale = 'ru'"
+              >
+                {{ t('accounts.profile.localeRu') }}
+              </button>
+              <button
+                :class="['gender-btn', { active: bulkProfileLocale === 'en' }]"
+                @click="bulkProfileLocale = 'en'"
+              >
+                {{ t('accounts.profile.localeEn') }}
               </button>
             </div>
           </div>

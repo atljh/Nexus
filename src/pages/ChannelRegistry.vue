@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import Button from 'primevue/button'
@@ -24,6 +24,16 @@ const inviteLinkInput = ref('')
 const titleInput = ref('')
 const editingChannelId = ref<number | null>(null)
 const isSubmitting = ref(false)
+const subscribingIds = ref<number[]>([])
+let isUnmounted = false
+
+onUnmounted(() => {
+  isUnmounted = true
+})
+
+function isSubscribing(channelId: number): boolean {
+  return subscribingIds.value.includes(channelId)
+}
 
 const membershipFilterOptions = computed(() => [
   { value: 'all', label: t('channels.filters.all') },
@@ -167,6 +177,79 @@ async function removeChannel(channelId: number): Promise<void> {
     detail: t('channels.messages.deleted'),
     life: 3000
   })
+}
+
+async function subscribeUnsubscribed(channel: SavedChannel): Promise<void> {
+  if (isSubscribing(channel.id)) return
+  subscribingIds.value = [...subscribingIds.value, channel.id]
+  try {
+    const result = await channelStore.subscribeUnsubscribed(channel.id)
+    if (!result || !result.success) {
+      toast.add({
+        severity: 'error',
+        summary: t('common.error'),
+        detail: t('channels.messages.subscribeFailed'),
+        life: 4000
+      })
+      return
+    }
+
+    if (!result.task_id || result.total === 0) {
+      toast.add({
+        severity: 'info',
+        summary: t('common.info'),
+        detail: t('channels.messages.subscribeAllDone'),
+        life: 4000
+      })
+      return
+    }
+
+    toast.add({
+      severity: 'success',
+      summary: t('common.success'),
+      detail: t('channels.messages.subscribeStarted', { count: result.total }),
+      life: 5000
+    })
+
+    await pollSubscribeProgress(channel.id, result.task_id)
+  } catch {
+    toast.add({
+      severity: 'error',
+      summary: t('common.error'),
+      detail: t('channels.messages.subscribeFailed'),
+      life: 4000
+    })
+  } finally {
+    subscribingIds.value = subscribingIds.value.filter(id => id !== channel.id)
+  }
+}
+
+async function pollSubscribeProgress(channelId: number, taskId: number): Promise<void> {
+  const terminal = ['completed', 'failed', 'cancelled']
+  // Poll up to ~10 minutes, refreshing the card counts as accounts join.
+  for (let i = 0; i < 150; i++) {
+    await new Promise(resolve => setTimeout(resolve, 4000))
+    if (isUnmounted) return
+    await channelStore.fetchChannel(channelId)
+    if (selectedChannelId.value === channelId) {
+      await channelStore.fetchMemberships(channelId)
+    }
+    try {
+      const task = await window.api.get(`/api/tasks/${taskId}`) as { status: string }
+      if (terminal.includes(task.status)) {
+        await channelStore.fetchChannel(channelId)
+        toast.add({
+          severity: task.status === 'completed' ? 'success' : 'warn',
+          summary: task.status === 'completed' ? t('common.success') : t('common.warning'),
+          detail: t('channels.messages.subscribeFinished'),
+          life: 5000
+        })
+        return
+      }
+    } catch {
+      // keep polling — task endpoint may briefly be unavailable
+    }
+  }
 }
 
 function membershipSeverity(status: ChannelMembershipStatus): 'success' | 'warn' | 'danger' | 'secondary' {
@@ -326,6 +409,15 @@ onMounted(async () => {
                 </div>
 
                 <div class="channel-actions">
+                  <Button
+                    :icon="isSubscribing(channel.id) ? 'pi pi-spin pi-spinner' : 'pi pi-user-plus'"
+                    :label="t('channels.actions.subscribeUnsubscribed')"
+                    text
+                    severity="success"
+                    size="small"
+                    :disabled="isSubscribing(channel.id)"
+                    @click.stop="subscribeUnsubscribed(channel)"
+                  />
                   <Button
                     icon="pi pi-pencil"
                     text

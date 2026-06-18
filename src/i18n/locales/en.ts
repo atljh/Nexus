@@ -401,6 +401,11 @@ export default {
       genderRandom: 'Random',
       genderMale: 'Male',
       genderFemale: 'Female',
+      nameLocale: 'Name language',
+      localeAuto: 'Auto (by geo)',
+      localeUa: 'Ukrainian',
+      localeRu: 'Russian',
+      localeEn: 'English',
     },
 
     auth: {
@@ -1036,13 +1041,20 @@ export default {
       failed: 'Failed',
       unknown: 'Unknown'
     },
+    actions: {
+      subscribeUnsubscribed: 'Subscribe unsubscribed'
+    },
     messages: {
       targetRequired: 'Add a valid channel target or invite link',
       created: 'Channel saved',
       updated: 'Channel updated',
       deleted: 'Channel deleted',
       saveFailed: 'Failed to save channel',
-      deleteFailed: 'Failed to delete channel'
+      deleteFailed: 'Failed to delete channel',
+      subscribeStarted: 'Subscribing {count} account(s) in the background',
+      subscribeFinished: 'Subscription finished, counts updated',
+      subscribeAllDone: 'All valid accounts are already subscribed to this channel',
+      subscribeFailed: 'Failed to start account subscription'
     }
   },
 
@@ -1051,7 +1063,8 @@ export default {
     taskType: {
       likes: 'Auto-Likes',
       comments: 'Auto-Comments',
-      warming: 'Warming'
+      warming: 'Warming',
+      subscribe: 'Channel subscription'
     },
     status: {
       pending: 'Pending',

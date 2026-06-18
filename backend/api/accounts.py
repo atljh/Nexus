@@ -103,7 +103,7 @@ class AssignProxiesRequest(BaseModel):
     # OR bulk assignment
     account_ids: Optional[List[int]] = None
     proxy_ids: Optional[List[int]] = None
-    mode: Optional[str] = "sequential"  # sequential | random
+    mode: Optional[str] = "sequential"  # sequential | random | balanced
 
 
 # Models for new import flow
@@ -1124,6 +1124,30 @@ async def assign_proxies(
             # Random assignment
             for acc in accounts:
                 acc.proxy_id = random.choice(proxy_ids)
+        elif data.mode == "balanced":
+            # Load-aware assignment: fill the least loaded proxies first so the
+            # final distribution is even across all accounts (not just the
+            # selected ones). Existing accounts already sitting on the target
+            # proxies count toward the load; accounts being reassigned do not.
+            from sqlalchemy import func
+
+            reassigned_ids = [acc.id for acc in accounts]
+            load_query = (
+                select(Account.proxy_id, func.count(Account.id))
+                .where(Account.proxy_id.in_(proxy_ids))
+                .where(~Account.id.in_(reassigned_ids))
+                .group_by(Account.proxy_id)
+            )
+            load_result = await session.execute(load_query)
+            loads = {pid: 0 for pid in proxy_ids}
+            for pid, count in load_result.all():
+                if pid in loads:
+                    loads[pid] = int(count or 0)
+
+            for acc in accounts:
+                target = min(proxy_ids, key=lambda pid: loads[pid])
+                acc.proxy_id = target
+                loads[target] += 1
         else:
             # Sequential assignment (with cycling)
             for i, acc in enumerate(accounts):
@@ -1688,6 +1712,7 @@ class BulkProfileUpdateRequest(BaseModel):
     username: Optional[str] = Field(None, max_length=32)
     auto_generate: bool = False
     gender: Optional[str] = None  # "male" | "female"
+    locale: Optional[str] = None  # "ru" | "ua" | "en" | None/"auto" -> detect from geo
     max_concurrent: int = 2
 
 
@@ -1853,8 +1878,16 @@ async def bulk_update_profile(
 
             # Determine profile data
             if data.auto_generate:
-                # Detect locale from account geo
-                locale = "ua" if account.geo and account.geo.lower() in ("ua", "uk") else "en"
+                # Use explicit locale if provided, otherwise detect from geo
+                locale = (data.locale or "").lower()
+                if not locale or locale == "auto":
+                    geo = (account.geo or "").lower()
+                    if geo in ("ua", "uk"):
+                        locale = "ua"
+                    elif geo in ("ru", "by", "kz"):
+                        locale = "ru"
+                    else:
+                        locale = "en"
                 profile = generate_random_profile(gender=data.gender, locale=locale)
                 fn = profile["first_name"]
                 ln = profile["last_name"]
